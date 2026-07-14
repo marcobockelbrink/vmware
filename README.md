@@ -30,7 +30,7 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 Nur Python 3.8+ nötig, keine Zusatzpakete — läuft damit direkt auf jedem Linux-Host.
 
 **Server-Modus** (empfohlen): Seite lädt sofort aus dem Datei-Cache
-(`kapa_cache.json`); beim allerersten Start ohne Cache werden die Daten
+(`data/kapa_cache.json`); beim allerersten Start ohne Cache werden die Daten
 automatisch abgerufen. Danach Aktualisierung alle 30 Minuten oder per Knopf:
 
 ```bash
@@ -69,7 +69,7 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Genehmigung/Ablehnung eine Mail mit den Reservierungsdaten und dem
   ausführenden Admin an `--smtp-to` sowie automatisch an den Anforderer.
 - **Serve-Modus**: Reservierungen liegen zentral auf dem Server in
-  `kapa_reservierungen.json` — alle Nutzer sehen denselben Stand.
+  `data/kapa_reservierungen.json` — alle Nutzer sehen denselben Stand.
 - **Statisches HTML**: Speicherung lokal im Browser (localStorage).
 - **Automatischer Ablauf**: Reservierungen werden `--res-ttl-days` Tage nach
   Anlage automatisch gelöscht (Standard: 31, `0` = nie löschen); die angezeigte
@@ -94,7 +94,7 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 - **Rollen zuweisen**: Tab „Verwaltung" (`/verwaltung`) — AD-Benutzernamen
   eintragen, Rolle wählen und (für Anforderer) die Abteilung angeben;
-  gespeichert in `kapa_rollen.json`. Benutzer ohne zugewiesene Rolle können
+  gespeichert in `data/kapa_rollen.json`. Benutzer ohne zugewiesene Rolle können
   sich nicht anmelden.
 - **Abteilungssicht**: Anforderer sehen nur Anfragen ihrer Abteilung.
   Fremde *genehmigte* Reservierungen bleiben anonymisiert als
@@ -121,14 +121,14 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 | `--serve --port 8080` | Webserver-Modus |
 | `--bind 0.0.0.0` | Bind-Adresse für `--serve` |
 | `--refresh-interval 1800` | Auto-Aktualisierung in Sekunden (`0` = aus) |
-| `--cache kapa_cache.json` | Datei-Cache der letzten Abfrage |
-| `--res-file kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
+| `--cache data/kapa_cache.json` | Datei-Cache der letzten Abfrage |
+| `--res-file data/kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
 | `--ad-url ldaps://dc01…` | AD-Anmeldung aktivieren |
 | `--ad-domain firma.local` | Domäne für Benutzernamen ohne `@` |
 | `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |
 | `--admin-user a@…,b@…` | Immer-Admins (Bootstrap) |
-| `--roles-file kapa_rollen.json` | Rollendatei |
+| `--roles-file data/kapa_rollen.json` | Rollendatei |
 | `--smtp-server mail.firma.local:25` | Mailserver für Reports |
 | `--smtp-from`, `--smtp-to` | Absender / Report-Empfänger (kommagetrennt) |
 | `--smtp-user`, `--smtp-password`, `--smtp-tls` | SMTP-Anmeldung / STARTTLS |

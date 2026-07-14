@@ -210,6 +210,25 @@ def ldap_bind(url, username, password, timeout=10, insecure=False):
     result_code = data[j + 2]
     return result_code == 0
 
+# ----------------------------------------------------------- Datendateien ----
+
+def ensure_dir(path):
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+
+def migrate_data_files(*paths):
+    """Alt-Dateien aus dem Arbeitsverzeichnis in den Datenordner verschieben
+    (frühere Versionen legten kapa_*.json direkt neben dem Skript ab)."""
+    for p in paths:
+        ensure_dir(p)
+        old = os.path.basename(p)
+        if (not os.path.exists(p) and os.path.exists(old)
+                and os.path.abspath(old) != os.path.abspath(p)):
+            os.replace(old, p)
+            print(f"Datendatei verschoben: {old} -> {p}", file=sys.stderr)
+
 # ----------------------------------------------------------- Mail-Reports ----
 
 def send_mail(args, subject, body, extra_to=()):
@@ -1206,6 +1225,7 @@ def serve(args, password):
     state = {"clusters": [], "updated": None, "refreshing": False,
              "progress": "", "error": None, "last": None}
     interval = max(0, args.refresh_interval)
+    migrate_data_files(args.cache, args.res_file, args.roles_file)
 
     # ---- AD-Anmeldung, Sessions und Rollen ----
     auth_enabled = bool(args.ad_url)
@@ -1237,6 +1257,7 @@ def serve(args, password):
         return {}
 
     def save_roles():
+        ensure_dir(args.roles_file)
         with open(args.roles_file, "w", encoding="utf-8") as f:
             json.dump(roles, f, ensure_ascii=False, indent=2, sort_keys=True)
 
@@ -1303,6 +1324,7 @@ def serve(args, password):
         return []
 
     def save_res():
+        ensure_dir(args.res_file)
         with open(args.res_file, "w", encoding="utf-8") as f:
             json.dump(reservations, f, ensure_ascii=False, indent=2)
 
@@ -1357,6 +1379,7 @@ def serve(args, password):
                                    failover_hosts=args.failover_hosts)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+            ensure_dir(args.cache)
             with open(args.cache, "w", encoding="utf-8") as f:
                 json.dump({"updated": state["updated"], "clusters": clusters},
                           f, ensure_ascii=False)
@@ -1681,13 +1704,14 @@ def main():
                     help="Als lokaler Webserver laufen (Live-Abruf per Knopf, Disk-Cache)")
     ap.add_argument("--port", type=int, default=8080, help="Port für --serve (Standard: 8080)")
     ap.add_argument("--bind", default="0.0.0.0", help="Bind-Adresse für --serve")
-    ap.add_argument("--cache", default="kapa_cache.json",
-                    help="Cache-Datei der letzten Abfrage (Standard: kapa_cache.json)")
+    ap.add_argument("--cache", default="data/kapa_cache.json",
+                    help="Cache-Datei der letzten Abfrage (Standard: data/kapa_cache.json)")
     ap.add_argument("--refresh-interval", type=int, default=1800,
                     help="Automatische Aktualisierung im Serve-Modus in Sekunden "
                          "(0 = aus, Standard: 1800 = 30 min)")
-    ap.add_argument("--res-file", default="kapa_reservierungen.json",
-                    help="Reservierungsdatei im Serve-Modus (Standard: kapa_reservierungen.json)")
+    ap.add_argument("--res-file", default="data/kapa_reservierungen.json",
+                    help="Reservierungsdatei im Serve-Modus "
+                         "(Standard: data/kapa_reservierungen.json)")
     ap.add_argument("--res-ttl-days", type=int, default=31,
                     help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
                          "(0 = nie, Standard: 31)")
@@ -1701,8 +1725,8 @@ def main():
     ap.add_argument("--admin-user", default="",
                     help="Immer-Admin(s), kommagetrennt, z. B. admin@firma.local "
                          "(Bootstrap für die Rollenverwaltung)")
-    ap.add_argument("--roles-file", default="kapa_rollen.json",
-                    help="Rollendatei (Standard: kapa_rollen.json)")
+    ap.add_argument("--roles-file", default="data/kapa_rollen.json",
+                    help="Rollendatei (Standard: data/kapa_rollen.json)")
     ap.add_argument("--smtp-server", default="",
                     help="Mailserver für Reports, z. B. mail.firma.local:25 "
                          "(ohne Angabe: keine Mails)")
