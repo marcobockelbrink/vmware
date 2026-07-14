@@ -91,6 +91,22 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Anlage automatisch gelöscht (Standard: 31, `0` = nie löschen); die angezeigte
   Gültigkeit endet einen Tag davor (30 Tage).
 
+## API für externe Anwendungen
+
+Unter `/api/v1/` gibt es eine stabile, **lesende** REST-API für externe
+Anwendungen (Grafana, CMDB, Reporting …). Admins erzeugen dafür im Tab
+„Verwaltung" benannte Bearer-Tokens (werden nur einmal angezeigt, nur der
+Hash wird gespeichert, einzeln widerrufbar, Nutzung im Audit-Log):
+
+```bash
+curl -H "Authorization: Bearer kapa_..." \
+  "https://host/capa/api/v1/reservations?status=genehmigt&format=csv"
+```
+
+Endpunkte: `/api/v1/reservations` (Filter: `cluster`, `status`, `abteilung`;
+`format=csv`), `/api/v1/data` (Cluster-Kapazitäten), `/api/v1/status`.
+Details und Beispiele: [`config/API.md`](config/API.md).
+
 ## Rollenkonzept und AD-Anmeldung
 
 Mit `--ad-url` verlangt der Serve-Modus eine Anmeldung mit dem
@@ -180,6 +196,7 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--backup-keep-days 30` | Rotation: ältere Archive auf dem Ziel löschen |
 | `--password-file datei` | Aria-Passwort aus Datei (systemd LoadCredential) |
 | `--log-file data/kapa_log.jsonl` | Audit-Log-Datei |
+| `--tokens-file data/kapa_tokens.json` | API-Token-Datei |
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
 

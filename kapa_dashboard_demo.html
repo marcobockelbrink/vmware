@@ -67,6 +67,7 @@
               background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
   .hc-close:hover { color:var(--text); }
   .foot { margin-top:28px; text-align:center; color:var(--muted); font-size:11px; }
+  .sechead { font-size:13px; color:var(--muted); margin-bottom:8px; }
   .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
@@ -96,7 +97,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 22:50</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 22:58</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -164,11 +165,29 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
   <tbody id="atbody"></tbody>
 </table>
 </div>
-<div class="tablewrap" id="admView" style="display:none">
+<div id="admView" style="display:none">
+<div class="sechead">Benutzer und Rollen</div>
+<div class="tablewrap">
 <table class="kt" id="mtable">
   <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung</th><th>Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
+</div>
+<div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
+<div class="tablewrap">
+<table class="kt" id="ttable">
+  <thead><tr><th>Anwendung</th><th>Token-Anfang</th><th>erstellt</th><th>von</th>
+    <th>zuletzt benutzt</th><th>Aktion</th></tr></thead>
+  <tbody id="ttbody"></tbody>
+</table>
+</div>
+<div class="tablewrap" id="newToken" style="display:none;margin-top:10px;padding:14px">
+  <div style="font-size:12px;color:var(--warn);margin-bottom:6px">
+    Neues API-Token – wird nur EINMAL angezeigt, jetzt kopieren:</div>
+  <code id="newTokenVal" style="font-size:13px;user-select:all;word-break:break-all"></code>
+  <button class="btn" style="margin-left:10px"
+          onclick="document.getElementById('newToken').style.display='none'">Ausblenden</button>
+</div>
 </div>
 <div class="tablewrap" id="logView" style="display:none">
 <table class="kt" id="ltable">
@@ -504,9 +523,58 @@ function setView(v) {
       : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") loadRoles();
+  if (v === "adm") { loadRoles(); loadTokens(); }
   if (v === "log") loadLog();
   render();
+}
+
+// ---- API-Tokens (Verwaltung) ----
+let TOKENS = {};
+async function apiTokens(method, path, body) {
+  const r = await fetch("api/tokens" + (path || ""), {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadTokens() {
+  apiTokens("GET").then(d => { TOKENS = d || {}; if (VIEW === "adm") render(); })
+                  .catch(() => {});
+}
+function addToken() {
+  const n = document.getElementById("tknName").value.trim();
+  if (!n) return;
+  apiTokens("POST", "", { name: n }).then(d => {
+    TOKENS = d.tokens || {};
+    document.getElementById("newTokenVal").textContent = d.token;
+    document.getElementById("newToken").style.display = "";
+    render();
+  }).catch(() => alert("Token konnte nicht erstellt werden."));
+}
+function delToken(id) {
+  const t = TOKENS[id];
+  if (!confirm("API-Token „" + ((t && t.name) || id) + "“ widerrufen? " +
+               "Die Anwendung verliert sofort den Zugriff.")) return;
+  apiTokens("DELETE", "/" + encodeURIComponent(id))
+    .then(d => { TOKENS = d; render(); })
+    .catch(() => alert("Widerruf fehlgeschlagen."));
+}
+function renderTokenTable() {
+  const rows = Object.keys(TOKENS)
+    .sort((a, b) => (TOKENS[a].created || "").localeCompare(TOKENS[b].created || ""))
+    .map(id => { const t = TOKENS[id];
+      return `<tr><td>${esc(t.name)}</td>
+       <td style="font-family:monospace">${esc(t.prefix || "")}</td>
+       <td>${fmtDate(t.created)}</td><td>${esc(t.created_by || "–")}</td>
+       <td>${t.last_used ? esc(String(t.last_used).replace("T", " ")) : "nie"}</td>
+       <td><button class="del" onclick="delToken('${esc(id)}')">✕ Widerrufen</button></td></tr>`; })
+    .join("");
+  document.getElementById("ttbody").innerHTML =
+    `<tr><td colspan="5"><input class="filterbox" style="width:100%" id="tknName"
+       placeholder="Name der Anwendung, z. B. Grafana oder CMDB-Sync"
+       onkeydown="if(event.key==='Enter')addToken()"></td>
+     <td><button class="btn approve" onclick="addToken()">+ Token erzeugen</button></td></tr>` +
+    (rows || `<tr><td colspan="6" style="color:var(--muted)">Keine API-Tokens vorhanden.</td></tr>`);
 }
 
 // ---- Audit-Log (nur Admins) ----
@@ -667,7 +735,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);

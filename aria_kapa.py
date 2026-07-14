@@ -22,6 +22,7 @@ VERSION = "0.6"
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -281,7 +282,8 @@ def sftp_backup(args):
     import tempfile
     if not args.backup_target:
         raise RuntimeError("kein --backup-target konfiguriert")
-    files = [p for p in (args.cache, args.res_file, args.roles_file, args.log_file)
+    files = [p for p in (args.cache, args.res_file, args.roles_file,
+                         args.log_file, args.tokens_file)
              if p and os.path.exists(p)]
     if not files:
         raise RuntimeError("keine Datendateien vorhanden")
@@ -640,6 +642,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
   .hc-close:hover { color:var(--text); }
   .foot { margin-top:28px; text-align:center; color:var(--muted); font-size:11px; }
+  .sechead { font-size:13px; color:var(--muted); margin-bottom:8px; }
   .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
@@ -737,11 +740,29 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <tbody id="atbody"></tbody>
 </table>
 </div>
-<div class="tablewrap" id="admView" style="display:none">
+<div id="admView" style="display:none">
+<div class="sechead">Benutzer und Rollen</div>
+<div class="tablewrap">
 <table class="kt" id="mtable">
   <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung</th><th>Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
+</div>
+<div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
+<div class="tablewrap">
+<table class="kt" id="ttable">
+  <thead><tr><th>Anwendung</th><th>Token-Anfang</th><th>erstellt</th><th>von</th>
+    <th>zuletzt benutzt</th><th>Aktion</th></tr></thead>
+  <tbody id="ttbody"></tbody>
+</table>
+</div>
+<div class="tablewrap" id="newToken" style="display:none;margin-top:10px;padding:14px">
+  <div style="font-size:12px;color:var(--warn);margin-bottom:6px">
+    Neues API-Token – wird nur EINMAL angezeigt, jetzt kopieren:</div>
+  <code id="newTokenVal" style="font-size:13px;user-select:all;word-break:break-all"></code>
+  <button class="btn" style="margin-left:10px"
+          onclick="document.getElementById('newToken').style.display='none'">Ausblenden</button>
+</div>
 </div>
 <div class="tablewrap" id="logView" style="display:none">
 <table class="kt" id="ltable">
@@ -1077,9 +1098,58 @@ function setView(v) {
       : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") loadRoles();
+  if (v === "adm") { loadRoles(); loadTokens(); }
   if (v === "log") loadLog();
   render();
+}
+
+// ---- API-Tokens (Verwaltung) ----
+let TOKENS = {};
+async function apiTokens(method, path, body) {
+  const r = await fetch("api/tokens" + (path || ""), {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadTokens() {
+  apiTokens("GET").then(d => { TOKENS = d || {}; if (VIEW === "adm") render(); })
+                  .catch(() => {});
+}
+function addToken() {
+  const n = document.getElementById("tknName").value.trim();
+  if (!n) return;
+  apiTokens("POST", "", { name: n }).then(d => {
+    TOKENS = d.tokens || {};
+    document.getElementById("newTokenVal").textContent = d.token;
+    document.getElementById("newToken").style.display = "";
+    render();
+  }).catch(() => alert("Token konnte nicht erstellt werden."));
+}
+function delToken(id) {
+  const t = TOKENS[id];
+  if (!confirm("API-Token „" + ((t && t.name) || id) + "“ widerrufen? " +
+               "Die Anwendung verliert sofort den Zugriff.")) return;
+  apiTokens("DELETE", "/" + encodeURIComponent(id))
+    .then(d => { TOKENS = d; render(); })
+    .catch(() => alert("Widerruf fehlgeschlagen."));
+}
+function renderTokenTable() {
+  const rows = Object.keys(TOKENS)
+    .sort((a, b) => (TOKENS[a].created || "").localeCompare(TOKENS[b].created || ""))
+    .map(id => { const t = TOKENS[id];
+      return `<tr><td>${esc(t.name)}</td>
+       <td style="font-family:monospace">${esc(t.prefix || "")}</td>
+       <td>${fmtDate(t.created)}</td><td>${esc(t.created_by || "–")}</td>
+       <td>${t.last_used ? esc(String(t.last_used).replace("T", " ")) : "nie"}</td>
+       <td><button class="del" onclick="delToken('${esc(id)}')">✕ Widerrufen</button></td></tr>`; })
+    .join("");
+  document.getElementById("ttbody").innerHTML =
+    `<tr><td colspan="5"><input class="filterbox" style="width:100%" id="tknName"
+       placeholder="Name der Anwendung, z. B. Grafana oder CMDB-Sync"
+       onkeydown="if(event.key==='Enter')addToken()"></td>
+     <td><button class="btn approve" onclick="addToken()">+ Token erzeugen</button></td></tr>` +
+    (rows || `<tr><td colspan="6" style="color:var(--muted)">Keine API-Tokens vorhanden.</td></tr>`);
 }
 
 // ---- Audit-Log (nur Admins) ----
@@ -1240,7 +1310,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
@@ -1530,6 +1600,67 @@ def serve(args, password):
 
     reservations = load_res()
 
+    # ---- API-Tokens für externe Anwendungen (nur lesend) ----
+    tokens_lock = threading.Lock()
+
+    def load_tokens():
+        if os.path.exists(args.tokens_file):
+            try:
+                with open(args.tokens_file, encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict):
+                    return {k: v for k, v in d.items()
+                            if isinstance(v, dict) and v.get("hash")}
+            except Exception as e:
+                print(f"Token-Datei unlesbar, starte leer: {e}", file=sys.stderr)
+        return {}
+
+    def save_tokens():
+        ensure_dir(args.tokens_file)
+        with open(args.tokens_file, "w", encoding="utf-8") as f:
+            json.dump(tokens, f, ensure_ascii=False, indent=2)
+
+    tokens = load_tokens()
+
+    def token_list():
+        """Tokenliste ohne Hashes (für die Verwaltung)."""
+        return {tid: {k: v for k, v in t.items() if k != "hash"}
+                for tid, t in tokens.items()}
+
+    def res_status(r):
+        if r.get("rejected"):
+            return "abgelehnt"
+        return "genehmigt" if r.get("approved") else "beantragt"
+
+    def valid_until(r):
+        if not r.get("created"):
+            return ""
+        try:
+            d = (datetime.fromisoformat(str(r["created"]))
+                 + timedelta(days=args.res_ttl_days - 1
+                             if args.res_ttl_days > 0 else 30))
+            return d.date().isoformat()
+        except ValueError:
+            return ""
+
+    def res_csv(rows):
+        import csv
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";")
+        w.writerow(["name", "change", "cluster", "vcpu", "ram_gb", "von",
+                    "abteilung", "gilt_ab", "gueltig_bis", "status",
+                    "entschieden_von", "kommentar"])
+        for r in rows:
+            w.writerow([r.get("name", ""), r.get("change", ""),
+                        r.get("cluster", ""), r.get("vcpu", 0),
+                        r.get("ram_gb", 0), r.get("von", ""),
+                        r.get("abteilung", ""), r.get("created", ""),
+                        valid_until(r), res_status(r),
+                        r.get("approved_by") or r.get("rejected_by") or "",
+                        r.get("comment", "")])
+        return buf.getvalue()
+
     # ---- Audit-Log (JSONL, nur für Admins einsehbar) ----
     log_lock = threading.Lock()
 
@@ -1711,9 +1842,30 @@ def serve(args, password):
                 return None
             return s
 
+        def _bearer(self):
+            """API-Token aus dem Authorization-Header prüfen (nur lesend)."""
+            h = self.headers.get("Authorization") or ""
+            if not h.startswith("Bearer "):
+                return None
+            th = hashlib.sha256(h[7:].strip().encode()).hexdigest()
+            now = datetime.now()
+            with tokens_lock:
+                for tid, t in tokens.items():
+                    if t.get("hash") == th:
+                        stale = str(t.get("last_used") or "")[:10] != now.date().isoformat()
+                        t["last_used"] = now.isoformat(timespec="seconds")
+                        if stale:
+                            save_tokens()
+                        return dict(t, id=tid)
+            audit(None, "API-Zugriff abgewiesen", "ungültiges Bearer-Token")
+            return None
+
         def do_GET(self):
-            if self.path in ("/", "/index.html", "/reservierungen",
-                             "/genehmigungen", "/verwaltung", "/log"):
+            parsed = urllib.parse.urlsplit(self.path)
+            route = parsed.path
+            query = urllib.parse.parse_qs(parsed.query)
+            if route in ("/", "/index.html", "/reservierungen",
+                         "/genehmigungen", "/verwaltung", "/log"):
                 s = self._session()
                 if auth_enabled and not s:
                     self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION),
@@ -1730,11 +1882,11 @@ def serve(args, password):
                                        failover_hosts=args.failover_hosts,
                                        userinfo=userinfo),
                            "text/html; charset=utf-8")
-            elif self.path == "/api/data":
+            elif route == "/api/data":
                 if not self._require():
                     return
                 self._json({"updated": state["updated"], "clusters": state["clusters"]})
-            elif self.path == "/api/status":
+            elif route == "/api/status":
                 if not self._require():
                     return
                 nxt = None
@@ -1750,12 +1902,51 @@ def serve(args, password):
                 with res_lock:
                     reservations[:] = prune_res(reservations)
                     self._json(visible_res(s))
-            elif self.path == "/api/roles":
+            elif route in ("/api/v1/reservations", "/api/v1/data", "/api/v1/status"):
+                # Stabile v1-API für externe Anwendungen: Bearer-Token oder Session
+                tok = self._bearer()
+                s = None
+                if not tok:
+                    s = self._session()
+                    if not s:
+                        self._json({"error": "Bearer-Token oder Anmeldung "
+                                             "erforderlich"}, 401)
+                        return
+                if route == "/api/v1/status":
+                    nxt = None
+                    if interval > 0 and state["last"]:
+                        nxt = max(0, int(state["last"] + interval - time.time()))
+                    self._json({"version": VERSION, "updated": state["updated"],
+                                "refreshing": state["refreshing"], "next": nxt})
+                elif route == "/api/v1/data":
+                    self._json({"updated": state["updated"],
+                                "clusters": state["clusters"]})
+                else:
+                    with res_lock:
+                        reservations[:] = prune_res(reservations)
+                        data = (visible_res(s) if s and not tok
+                                else list(reservations))
+                    for key in ("cluster", "abteilung"):
+                        if key in query:
+                            data = [r for r in data if r.get(key) == query[key][0]]
+                    if "status" in query:
+                        data = [r for r in data
+                                if res_status(r) == query["status"][0]]
+                    if query.get("format", [""])[0] == "csv":
+                        self._send(res_csv(data), "text/csv; charset=utf-8")
+                    else:
+                        self._json(data)
+            elif route == "/api/tokens":
+                if not self._require("admin"):
+                    return
+                with tokens_lock:
+                    self._json(token_list())
+            elif route == "/api/roles":
                 if not self._require("admin"):
                     return
                 with roles_lock:
                     self._json(dict(roles))
-            elif self.path == "/api/log":
+            elif route == "/api/log":
                 if not self._require("admin"):
                     return
                 self._json(read_log())
@@ -1910,6 +2101,27 @@ def serve(args, password):
                 except Exception as e:
                     audit(self._session()["user"], "Backup fehlgeschlagen", str(e))
                     self._json({"error": str(e)}, 502)
+            elif self.path == "/api/tokens":
+                s = self._require("admin")
+                if not s:
+                    return
+                name = str((self._body() or {}).get("name") or "").strip()
+                if not name:
+                    self._json({"error": "Name der Anwendung erforderlich"}, 400)
+                    return
+                raw = "kapa_" + secrets.token_urlsafe(24)
+                tid = uuid.uuid4().hex[:8]
+                with tokens_lock:
+                    tokens[tid] = {"name": name,
+                                   "hash": hashlib.sha256(raw.encode()).hexdigest(),
+                                   "prefix": raw[:11] + "…", "scope": "read",
+                                   "created": datetime.now().date().isoformat(),
+                                   "created_by": s["user"] or "",
+                                   "last_used": ""}
+                    save_tokens()
+                audit(s["user"], "API-Token erstellt",
+                      f"{name} ({raw[:11]}…, nur lesend)")
+                self._json({"token": raw, "tokens": token_list()})
             elif self.path == "/api/roles":
                 if not self._require("admin"):
                     return
@@ -1974,6 +2186,17 @@ def serve(args, password):
                     self._json(visible_res(s))
                 if target:
                     audit(s["user"], "Reservierung gelöscht", res_detail(target))
+            elif self.path.startswith("/api/tokens/"):
+                s = self._require("admin")
+                if not s:
+                    return
+                tid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+                with tokens_lock:
+                    removed = tokens.pop(tid, None)
+                    save_tokens()
+                    self._json(token_list())
+                if removed:
+                    audit(s["user"], "API-Token widerrufen", removed.get("name", tid))
             elif self.path.startswith("/api/roles/"):
                 s = self._require("admin")
                 if not s:
@@ -2116,6 +2339,8 @@ def main():
                          "(Standard: 30, 0 = nie aufräumen)")
     ap.add_argument("--log-file", default="data/kapa_log.jsonl",
                     help="Audit-Log-Datei (Standard: data/kapa_log.jsonl)")
+    ap.add_argument("--tokens-file", default="data/kapa_tokens.json",
+                    help="API-Token-Datei (Standard: data/kapa_tokens.json)")
     # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
     pre, _ = ap.parse_known_args()
     if pre.config:
@@ -2127,6 +2352,7 @@ def main():
     args.res_file = data_path(args.res_file)
     args.roles_file = data_path(args.roles_file)
     args.log_file = data_path(args.log_file)
+    args.tokens_file = data_path(args.tokens_file)
     if args.json:
         args.json = data_path(args.json)
 
