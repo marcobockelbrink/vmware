@@ -26,7 +26,7 @@ import ssl
 import sys
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ---------------------------------------------------------------- Suite API --
 
@@ -288,7 +288,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
          font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:24px; }
   h1 { font-size:22px; margin-bottom:4px; }
   .sub { color:var(--muted); margin-bottom:20px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:16px; }
+  .tablewrap { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow-x:auto; }
+  .kt { width:100%; border-collapse:collapse; font-size:13px; margin:0; }
+  .kt th, .kt td { padding:9px 14px; border-bottom:1px solid var(--line); }
+  .kt thead th { color:var(--muted); font-size:12px; background:#0b1220; }
+  .kt tbody tr:hover td { background:#26334a; }
+  .kt tbody tr:last-child td { border-bottom:none; }
+  .kt .free { font-weight:600; }
+  .trtotal td { background:linear-gradient(135deg,#1e293b,#16233b); font-weight:600; }
+  .barcol { width:130px; min-width:110px; }
+  .bar.mini { height:8px; }
+  .hovercard { position:fixed; z-index:20; width:480px; max-width:92vw; display:none;
+               max-height:82vh; overflow:auto; border-radius:12px;
+               box-shadow:0 14px 44px rgba(0,0,0,.55); }
+  .hovercard .card { border-color:#3b5479; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
   .card h2 { font-size:17px; margin-bottom:2px; color:var(--accent); }
   .meta { color:var(--muted); font-size:12px; margin-bottom:12px; }
@@ -309,7 +322,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   td.num, th.num { text-align:right; }
   .off { color:var(--muted); font-style:italic; }
   .total { background:linear-gradient(135deg,#1e293b,#16233b); border-color:#3b5479; }
-  .toolbar { display:flex; gap:10px; margin-bottom:20px; }
+  .toolbar { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
+  .filterbox { background:#0b1220; border:1px solid var(--line); color:var(--text);
+               border-radius:8px; padding:6px 12px; font-size:12px; width:220px; }
+  .filterbox:focus { outline:none; border-color:var(--accent); }
+  .tabs { display:inline-flex; background:#0b1220; border:1px solid var(--line);
+          border-radius:10px; padding:3px; gap:3px; margin-bottom:16px; }
+  .tab { padding:6px 14px; font-size:13px; color:var(--muted); cursor:pointer; border-radius:8px; }
+  .tab.active { background:var(--card); color:var(--text); }
   .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
@@ -338,12 +358,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · Stand: <span id="stand">__DATE__</span><br>
-Reservierungen werden lokal im Browser gespeichert und bleiben auch nach Neu-Generierung des Dashboards erhalten.</div>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt Reservierungen · Stand: <span id="stand">__DATE__</span><br>
+Zeile mit der Maus überfahren zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="toolbar">
+  <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
   <button class="btn primary" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
-  <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Daten aus Aria abrufen</button>
-  <span id="refreshStatus" style="align-self:center;font-size:12px;color:var(--muted)"></span>
+  <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
+  <span id="refreshStatus" style="font-size:12px;color:var(--muted)"></span>
+  <span id="timer" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
   <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
   <label class="btn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
 </div>
@@ -368,16 +390,53 @@ Reservierungen werden lokal im Browser gespeichert und bleiben auch nach Neu-Gen
     </div>
   </div>
 </div>
-<div class="grid" id="grid"></div>
+<div class="tabs">
+  <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
+  <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
+</div>
+<div class="tablewrap" id="kapaView">
+<table class="kt" id="ktable">
+  <thead><tr><th>Cluster</th><th class="num">Hosts</th><th class="num">VMs</th>
+    <th class="num">vCPU frei</th><th class="barcol">vCPU-Auslastung</th>
+    <th class="num">RAM frei (GB)</th><th class="barcol">RAM-Auslastung</th>
+    <th class="num">Res.</th></tr></thead>
+  <tbody id="ktbody"></tbody>
+</table>
+</div>
+<div class="tablewrap" id="resView" style="display:none">
+<table class="kt" id="rtable">
+  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
+    <th class="num">RAM (GB)</th><th>geplant ab</th><th>angelegt</th><th></th></tr></thead>
+  <tbody id="rtbody"></tbody>
+</table>
+</div>
+<div class="hovercard" id="hovercard"></div>
 <script>
 let CLUSTERS = __DATA__;
 const FACTOR = __FACTOR__;
 const SERVE = __SERVE__;
+const TTL = __TTL__;
 const LS_KEY = "aria_kapa_reservierungen";
 
-// ---- Reservierungen (localStorage) ----
-let RES = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch(e) { return []; } })();
-function saveRes() { try { localStorage.setItem(LS_KEY, JSON.stringify(RES)); } catch(e) {} render(); }
+// ---- Reservierungen (Serve-Modus: zentral auf dem Server, sonst localStorage) ----
+let RES = [];
+if (!SERVE) {
+  try { RES = JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch (e) {}
+  if (TTL > 0) {
+    const cutoff = Date.now() - TTL * 864e5;
+    RES = RES.filter(r => !r.created || new Date(r.created).getTime() > cutoff);
+  }
+}
+function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(RES)); } catch (e) {} }
+async function apiRes(method, path, body) {
+  const r = await fetch("/api/reservations" + (path || ""), {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function setRes(list) { if (Array.isArray(list)) { RES = list; render(); } }
+function resFail() { alert("Reservierungen konnten nicht auf dem Server gespeichert werden."); }
 function resFor(cl) { return RES.filter(r => r.cluster === cl); }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
 function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
@@ -398,10 +457,14 @@ function createRes(c, name, vcpu, ram, date, errEl) {
   if ((vcpu > f.cpu || ram > f.ram) &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
                "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem anlegen?")) return false;
-  RES.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
-             cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram, date: date,
-             created: new Date().toISOString().slice(0,10) });
-  saveRes();
+  const item = { cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram, date: date };
+  if (SERVE) {
+    apiRes("POST", "", item).then(setRes).catch(resFail);
+  } else {
+    item.id = Date.now() + "-" + Math.random().toString(36).slice(2,7);
+    item.created = new Date().toISOString().slice(0,10);
+    RES.push(item); saveLocal(); render();
+  }
   return true;
 }
 
@@ -411,7 +474,10 @@ function addRes(idx) {
   createRes(c, g("n").value.trim(), parseInt(g("c").value) || 0,
             parseFloat(g("r").value) || 0, g("d").value, g("e"));
 }
-function delRes(id) { RES = RES.filter(r => r.id !== id); saveRes(); }
+function delRes(id) {
+  if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
+  else { RES = RES.filter(r => r.id !== id); saveLocal(); render(); }
+}
 
 // ---- Dialog "Neue Kapazitätsanfrage" ----
 function openModal(prefIdx) {
@@ -440,7 +506,7 @@ function submitModal() {
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); hideCard(); } });
 
 function exportRes() {
   const blob = new Blob([JSON.stringify(RES, null, 2)], {type:"application/json"});
@@ -453,8 +519,9 @@ function importRes(ev) {
   const f = ev.target.files[0]; if (!f) return;
   f.text().then(t => {
     const d = JSON.parse(t);
-    if (Array.isArray(d)) { RES = d; saveRes(); }
-    else alert("Ungültige Datei.");
+    if (!Array.isArray(d)) { alert("Ungültige Datei."); return; }
+    if (SERVE) apiRes("PUT", "", d).then(setRes).catch(resFail);
+    else { RES = d; saveLocal(); render(); }
   }).catch(() => alert("Datei konnte nicht gelesen werden."));
   ev.target.value = "";
 }
@@ -480,7 +547,7 @@ function metric(label, used, resv, cap, unit) {
 }
 
 function card(c, idx, isTotal) {
-  const rv = isTotal ? RES : resFor(c.name);
+  const rv = isTotal ? RES.filter(r => !TOTAL || TOTAL._names.has(r.cluster)) : resFor(c.name);
   const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
   const vmRows = (c.vms || []).sort((a,b)=>b.vcpu-a.vcpu).map(v =>
     `<tr class="${v.on?'':'off'}"><td>${esc(v.name)}${v.on?'':' (aus)'}</td>
@@ -528,51 +595,169 @@ function card(c, idx, isTotal) {
   </div>`;
 }
 
-function render() {
-  const total = {
-    name: "Gesamt (alle Cluster)",
-    hostCount: CLUSTERS.reduce((s,c)=>s+c.hostCount,0),
-    cores: CLUSTERS.reduce((s,c)=>s+c.cores,0),
-    vcpuCap: CLUSTERS.reduce((s,c)=>s+c.vcpuCap,0),
-    vcpuUsed: CLUSTERS.reduce((s,c)=>s+c.vcpuUsed,0),
-    ramCap: Math.round(CLUSTERS.reduce((s,c)=>s+c.ramCap,0)*10)/10,
-    ramUsed: Math.round(CLUSTERS.reduce((s,c)=>s+c.ramUsed,0)*10)/10,
-    vmCount: CLUSTERS.reduce((s,c)=>s+c.vmCount,0),
-    vmOff: CLUSTERS.reduce((s,c)=>s+c.vmOff,0),
-  };
-  total.vcpuFree = total.vcpuCap - total.vcpuUsed;
-  total.ramFree = Math.round((total.ramCap - total.ramUsed)*10)/10;
-  document.getElementById("grid").innerHTML =
-    card(total, -1, true) + CLUSTERS.map((c, i) => card(c, i, false)).join("");
+// ---- Tabellenansicht mit Hover-Details ----
+let TOTAL = null;
+
+function filteredIdx() {
+  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+  return CLUSTERS.map((c, i) => i)
+                 .filter(i => !q || CLUSTERS[i].name.toLowerCase().includes(q));
 }
-render();
+
+function miniBar(used, resv, cap) {
+  const pu = pct(used, cap), pr = pct(used + resv, cap) - pu;
+  return `<div class="bar mini"><i style="width:${pu}%;background:${color(pu + pr)}"></i><i class="r" style="width:${pr}%"></i></div>`;
+}
+
+function row(c, idx, isTotal) {
+  const rv = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : resFor(c.name);
+  const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
+  const fCpu = c.vcpuFree - rvCpu;
+  const fRam = Math.round((c.ramFree - rvRam) * 10) / 10;
+  const cCpu = color(pct(c.vcpuUsed + rvCpu, c.vcpuCap));
+  const cRam = color(pct(c.ramUsed + rvRam, c.ramCap));
+  return `<tr class="${isTotal ? 'trtotal' : ''}" onmouseenter="showCard(${idx},this)">
+    <td>${esc(c.name)}</td>
+    <td class="num">${fmt(c.hostCount)}</td>
+    <td class="num">${fmt(c.vmCount)}</td>
+    <td class="num free" style="color:${cCpu}">${fmt(fCpu)}</td>
+    <td class="barcol">${miniBar(c.vcpuUsed, rvCpu, c.vcpuCap)}</td>
+    <td class="num free" style="color:${cRam}">${fmt(fRam)}</td>
+    <td class="barcol">${miniBar(c.ramUsed, rvRam, c.ramCap)}</td>
+    <td class="num">${rv.length || "–"}</td></tr>`;
+}
+
+// ---- Ansichten: Kapazität / Reservierungen ----
+let VIEW = (location.pathname === "/reservierungen" ||
+            location.hash === "#reservierungen") ? "res" : "kapa";
+
+function setView(v) {
+  VIEW = v;
+  document.getElementById("tabKapa").classList.toggle("active", v === "kapa");
+  document.getElementById("tabRes").classList.toggle("active", v === "res");
+  document.getElementById("kapaView").style.display = v === "kapa" ? "" : "none";
+  document.getElementById("resView").style.display = v === "res" ? "" : "none";
+  document.getElementById("filter").placeholder =
+    v === "res" ? "Reservierungen filtern …" : "Cluster filtern …";
+  try { history.replaceState(null, "", v === "res" ? "#reservierungen" : location.pathname); } catch (e) {}
+  hideCard();
+  render();
+}
+
+function renderResTable() {
+  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+  const list = RES.filter(r => !q ||
+      (r.name || "").toLowerCase().includes(q) ||
+      (r.cluster || "").toLowerCase().includes(q))
+    .slice().sort((a, b) => (a.cluster || "").localeCompare(b.cluster || "") ||
+                            (a.date || "").localeCompare(b.date || ""));
+  const rows = list.map(r =>
+    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td>${esc(r.date || "–")}</td><td>${esc(r.created || "–")}</td>
+     <td><button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button></td></tr>`).join("");
+  document.getElementById("rtbody").innerHTML =
+    `<tr class="trtotal"><td>Summe (${list.length} Reservierung${list.length === 1 ? "" : "en"})</td><td></td>
+     <td class="num">${fmt(sumCpu(list))}</td><td class="num">${fmt(sumRam(list))}</td>
+     <td></td><td></td><td></td></tr>` +
+    (rows || `<tr><td colspan="7" style="color:var(--muted)">Keine Reservierungen${q ? " für diesen Filter" : ""}.</td></tr>`);
+}
+
+function render() {
+  if (VIEW === "res") { renderResTable(); return; }
+  const idxs = filteredIdx();
+  const vis = idxs.map(i => CLUSTERS[i]);
+  TOTAL = {
+    name: idxs.length === CLUSTERS.length ? "Gesamt (alle Cluster)" : "Gesamt (Filter)",
+    hostCount: vis.reduce((s,c)=>s+c.hostCount,0),
+    cores: vis.reduce((s,c)=>s+c.cores,0),
+    vcpuCap: vis.reduce((s,c)=>s+c.vcpuCap,0),
+    vcpuUsed: vis.reduce((s,c)=>s+c.vcpuUsed,0),
+    ramCap: Math.round(vis.reduce((s,c)=>s+c.ramCap,0)*10)/10,
+    ramUsed: Math.round(vis.reduce((s,c)=>s+c.ramUsed,0)*10)/10,
+    vmCount: vis.reduce((s,c)=>s+c.vmCount,0),
+    vmOff: vis.reduce((s,c)=>s+c.vmOff,0),
+    _names: new Set(vis.map(c => c.name)),
+  };
+  TOTAL.vcpuFree = TOTAL.vcpuCap - TOTAL.vcpuUsed;
+  TOTAL.ramFree = Math.round((TOTAL.ramCap - TOTAL.ramUsed)*10)/10;
+  document.getElementById("ktbody").innerHTML =
+    row(TOTAL, -1, true) +
+    (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
+                 : '<tr><td colspan="8" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
+  if (hoverIdx !== null && hc.style.display === "block")
+    hc.innerHTML = card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
+}
+
+// ---- Hover-Popover ----
+let hoverIdx = null, hideTimer = null;
+const hc = document.getElementById("hovercard");
+
+function showCard(idx, rowEl) {
+  clearTimeout(hideTimer);
+  hoverIdx = idx;
+  hc.innerHTML = card(idx === -1 ? TOTAL : CLUSTERS[idx], idx, idx === -1);
+  hc.style.display = "block";
+  const r = rowEl.getBoundingClientRect();
+  let top = r.bottom + 6;
+  if (top + hc.offsetHeight > innerHeight - 10)
+    top = Math.max(10, innerHeight - hc.offsetHeight - 10);
+  hc.style.top = top + "px";
+  hc.style.left = Math.min(Math.max(10, r.left + 60), Math.max(10, innerWidth - hc.offsetWidth - 10)) + "px";
+}
+function hideCard() { hc.style.display = "none"; hoverIdx = null; }
+function scheduleHide() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => { if (!hc.contains(document.activeElement)) hideCard(); }, 350);
+}
+hc.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+hc.addEventListener("mouseleave", scheduleHide);
+document.getElementById("ktable").addEventListener("mouseleave", scheduleHide);
+
+setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
 
-// ---- Live-Abruf aus Aria (nur im Serve-Modus) ----
+// ---- Live-Abruf & Auto-Update (nur im Serve-Modus) ----
+let nextRefresh = null;   // Zeitpunkt (ms) der nächsten automatischen Aktualisierung
+
 async function refreshData() {
-  const btn = document.getElementById("refreshBtn");
+  try { await fetch("/api/refresh", { method: "POST" }); pollStatus(); }
+  catch (e) { document.getElementById("refreshStatus").textContent = "Server nicht erreichbar."; }
+}
+
+async function pollStatus() {
+  let s;
+  try { s = await (await fetch("/api/status")).json(); } catch (e) { return; }
   const st = document.getElementById("refreshStatus");
-  btn.disabled = true;
-  try { await fetch("/api/refresh", { method: "POST" }); }
-  catch (e) { st.textContent = "Server nicht erreichbar."; btn.disabled = false; return; }
-  const poll = setInterval(async () => {
-    let s;
-    try { s = await (await fetch("/api/status")).json(); } catch (e) { return; }
-    if (s.refreshing) {
-      st.textContent = "Lade Daten aus Aria … " + (s.progress || "");
-      return;
-    }
-    clearInterval(poll);
-    btn.disabled = false;
-    if (s.error) { st.textContent = "Fehler: " + s.error; return; }
+  document.getElementById("refreshBtn").disabled = !!s.refreshing;
+  nextRefresh = (s.next != null) ? Date.now() + s.next * 1000 : null;
+  if (s.refreshing) st.textContent = "Lade Daten aus Aria … " + (s.progress || "");
+  else if (s.error) st.textContent = "Fehler beim letzten Abruf: " + s.error;
+  else st.textContent = "";
+  if (!s.refreshing && s.updated &&
+      s.updated !== document.getElementById("stand").textContent) {
     try {
       const d = await (await fetch("/api/data")).json();
       CLUSTERS = d.clusters || [];
       document.getElementById("stand").textContent = d.updated || "";
-      st.textContent = "Aktualisiert.";
       render();
-    } catch (e) { st.textContent = "Daten konnten nicht geladen werden."; }
-  }, 2000);
+    } catch (e) {}
+  }
+}
+
+function tickTimer() {
+  const el = document.getElementById("timer");
+  if (nextRefresh === null) { el.textContent = ""; return; }
+  const s = Math.max(0, Math.round((nextRefresh - Date.now()) / 1000));
+  el.textContent = "Auto-Update in " + Math.floor(s / 60) + ":" +
+                   String(s % 60).padStart(2, "0") + " min";
+}
+
+if (SERVE) {
+  apiRes("GET").then(setRes).catch(() => {});
+  pollStatus();
+  setInterval(pollStatus, 3000);
+  setInterval(tickTimer, 1000);
 }
 </script>
 </body>
@@ -580,26 +765,34 @@ async function refreshData() {
 """
 
 
-def render_html(clusters, cpu_factor, serve_mode=False, updated=None):
+def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31):
+    resnote = ("Reservierungen werden zentral auf dem Server gespeichert" if serve_mode
+               else "Reservierungen werden lokal im Browser gespeichert")
+    resnote += (f" und nach {res_ttl} Tagen automatisch entfernt." if res_ttl > 0 else ".")
     return (HTML_TEMPLATE
             .replace("__DATA__", json.dumps(clusters, ensure_ascii=False))
             .replace("__FACTOR__", str(cpu_factor))
             .replace("__SERVE__", "true" if serve_mode else "false")
+            .replace("__TTL__", str(res_ttl))
+            .replace("__RESNOTE__", resnote)
             .replace("__DATE__", updated or datetime.now().strftime("%d.%m.%Y %H:%M")))
 
 
-def render_dashboard(clusters, cpu_factor, path):
+def render_dashboard(clusters, cpu_factor, path, res_ttl=31):
     with open(path, "w", encoding="utf-8") as f:
-        f.write(render_html(clusters, cpu_factor))
+        f.write(render_html(clusters, cpu_factor, res_ttl=res_ttl))
 
 # ------------------------------------------------------------- Serve-Modus ---
 
 def serve(args, password):
     import threading
+    import time
+    import uuid
     from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
     state = {"clusters": [], "updated": None, "refreshing": False,
-             "progress": "", "error": None}
+             "progress": "", "error": None, "last": None}
+    interval = max(0, args.refresh_interval)
 
     # Zwischen-Cache der letzten Abfrage von Platte laden
     if os.path.exists(args.cache):
@@ -608,16 +801,45 @@ def serve(args, password):
                 c = json.load(f)
             state["clusters"] = c.get("clusters", [])
             state["updated"] = c.get("updated")
+            state["last"] = os.path.getmtime(args.cache)
             print(f"Cache geladen: {args.cache} (Stand {state['updated']}, "
                   f"{len(state['clusters'])} Cluster)", file=sys.stderr)
         except Exception as e:
             print(f"Cache unlesbar, starte leer: {e}", file=sys.stderr)
 
+    # ---- Reservierungen: serverseitige Datei, Ablauf nach --res-ttl-days ----
+    res_lock = threading.Lock()
+
+    def prune_res(lst):
+        if args.res_ttl_days <= 0:
+            return lst
+        cutoff = (datetime.now() - timedelta(days=args.res_ttl_days)).date().isoformat()
+        return [r for r in lst if str(r.get("created") or "9999") >= cutoff]
+
+    def load_res():
+        if os.path.exists(args.res_file):
+            try:
+                with open(args.res_file, encoding="utf-8") as f:
+                    lst = json.load(f)
+                if isinstance(lst, list):
+                    print(f"Reservierungen geladen: {args.res_file} ({len(lst)})",
+                          file=sys.stderr)
+                    return prune_res(lst)
+            except Exception as e:
+                print(f"Reservierungsdatei unlesbar, starte leer: {e}", file=sys.stderr)
+        return []
+
+    def save_res():
+        with open(args.res_file, "w", encoding="utf-8") as f:
+            json.dump(reservations, f, ensure_ascii=False, indent=2)
+
+    reservations = load_res()
+
     def do_refresh():
         state.update(refreshing=True, error=None, progress="Verbinde mit Aria Operations ...")
         try:
             if args.sample:
-                import time; time.sleep(2)  # Demo: Ladezeit simulieren
+                time.sleep(2)  # Demo: Ladezeit simulieren
                 clusters = build_summary(sample_data(), args.cpu_factor)
             else:
                 api = AriaOps(args.url, args.user, password, args.auth_source,
@@ -632,7 +854,21 @@ def serve(args, password):
         except Exception as e:
             state["error"] = str(e)
         finally:
+            state["last"] = time.time()
             state["refreshing"] = False
+
+    def scheduler():
+        # Erster Start ohne Cache: sofort Daten holen
+        if not state["clusters"] and not state["refreshing"]:
+            do_refresh()
+        while interval > 0:
+            wait = (state["last"] or 0) + interval - time.time()
+            if wait <= 0:
+                if not state["refreshing"]:
+                    do_refresh()
+                time.sleep(1)
+            else:
+                time.sleep(min(wait, 10))
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, body, ctype, code=200):
@@ -648,18 +884,34 @@ def serve(args, password):
             self._send(json.dumps(obj, ensure_ascii=False),
                        "application/json; charset=utf-8", code)
 
+        def _body(self):
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                return json.loads(self.rfile.read(n).decode() or "null")
+            except Exception:
+                return None
+
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            if self.path in ("/", "/index.html", "/reservierungen"):
                 self._send(render_html(state["clusters"], args.cpu_factor,
                                        serve_mode=True,
                                        updated=state["updated"] or
-                                       "noch keine Daten – bitte „Daten aus Aria abrufen“ klicken"),
+                                       "noch keine Daten – erster Abruf läuft ...",
+                                       res_ttl=args.res_ttl_days),
                            "text/html; charset=utf-8")
             elif self.path == "/api/data":
                 self._json({"updated": state["updated"], "clusters": state["clusters"]})
             elif self.path == "/api/status":
-                self._json({k: state[k] for k in
-                            ("refreshing", "progress", "error", "updated")})
+                nxt = None
+                if interval > 0 and state["last"]:
+                    nxt = max(0, int(state["last"] + interval - time.time()))
+                self._json({"refreshing": state["refreshing"],
+                            "progress": state["progress"], "error": state["error"],
+                            "updated": state["updated"], "next": nxt})
+            elif self.path == "/api/reservations":
+                with res_lock:
+                    reservations[:] = prune_res(reservations)
+                    self._json(list(reservations))
             else:
                 self.send_error(404)
 
@@ -668,16 +920,73 @@ def serve(args, password):
                 if not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"started": True}, 202)
+            elif self.path == "/api/reservations":
+                item = self._body()
+                if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+                    self._json({"error": "Ungültige Reservierung"}, 400)
+                    return
+                try:
+                    entry = {"id": uuid.uuid4().hex[:12],
+                             "cluster": str(item.get("cluster") or ""),
+                             "name": str(item.get("name")).strip(),
+                             "vcpu": int(item.get("vcpu") or 0),
+                             "ram_gb": float(item.get("ram_gb") or 0),
+                             "date": str(item.get("date") or ""),
+                             "created": datetime.now().date().isoformat()}
+                except (TypeError, ValueError):
+                    self._json({"error": "Ungültige Zahlenwerte"}, 400)
+                    return
+                with res_lock:
+                    reservations[:] = prune_res(reservations)
+                    reservations.append(entry)
+                    save_res()
+                    self._json(list(reservations))
+            else:
+                self.send_error(404)
+
+        def do_PUT(self):
+            if self.path == "/api/reservations":
+                data = self._body()
+                if not isinstance(data, list):
+                    self._json({"error": "Liste erwartet"}, 400)
+                    return
+                cleaned = []
+                for r in data:
+                    if not isinstance(r, dict):
+                        continue
+                    r = dict(r)
+                    r.setdefault("id", uuid.uuid4().hex[:12])
+                    r.setdefault("created", datetime.now().date().isoformat())
+                    cleaned.append(r)
+                with res_lock:
+                    reservations[:] = prune_res(cleaned)
+                    save_res()
+                    self._json(list(reservations))
+            else:
+                self.send_error(404)
+
+        def do_DELETE(self):
+            if self.path.startswith("/api/reservations/"):
+                rid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+                with res_lock:
+                    reservations[:] = [r for r in reservations if r.get("id") != rid]
+                    save_res()
+                    self._json(list(reservations))
             else:
                 self.send_error(404)
 
         def log_message(self, *a):
             pass
 
+    threading.Thread(target=scheduler, daemon=True).start()
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)
-    print(f"Dashboard läuft: http://localhost:{args.port}  (Strg+C zum Beenden)",
+    print(f"Dashboard läuft: http://localhost:{args.port}  (Strg+C zum Beenden)"
+          + (f" · Auto-Refresh alle {interval // 60} min" if interval else ""),
           file=sys.stderr)
-    srv.serve_forever()
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\nBeendet.", file=sys.stderr)
 
 # ------------------------------------------------------------------- main ----
 
@@ -698,6 +1007,14 @@ def main():
     ap.add_argument("--bind", default="0.0.0.0", help="Bind-Adresse für --serve")
     ap.add_argument("--cache", default="kapa_cache.json",
                     help="Cache-Datei der letzten Abfrage (Standard: kapa_cache.json)")
+    ap.add_argument("--refresh-interval", type=int, default=1800,
+                    help="Automatische Aktualisierung im Serve-Modus in Sekunden "
+                         "(0 = aus, Standard: 1800 = 30 min)")
+    ap.add_argument("--res-file", default="kapa_reservierungen.json",
+                    help="Reservierungsdatei im Serve-Modus (Standard: kapa_reservierungen.json)")
+    ap.add_argument("--res-ttl-days", type=int, default=31,
+                    help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
+                         "(0 = nie, Standard: 31)")
     args = ap.parse_args()
 
     if args.serve:
@@ -723,7 +1040,7 @@ def main():
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(clusters, f, ensure_ascii=False, indent=2)
 
-    render_dashboard(clusters, args.cpu_factor, args.output)
+    render_dashboard(clusters, args.cpu_factor, args.output, args.res_ttl_days)
 
     print(f"\n{'Cluster':<22}{'Hosts':>6}{'Cores':>7}{'vCPU-Kap':>10}{'vCPU-belegt':>12}"
           f"{'vCPU-frei':>10}{'RAM-Kap GB':>12}{'RAM-belegt':>12}{'RAM-frei':>10}")
