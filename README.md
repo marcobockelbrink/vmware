@@ -67,6 +67,36 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Anlage automatisch gelöscht (Standard: 31, `0` = nie löschen); die angezeigte
   Gültigkeit endet einen Tag davor (30 Tage).
 
+## Rollenkonzept und AD-Anmeldung
+
+Mit `--ad-url` verlangt der Serve-Modus eine Anmeldung mit dem
+Active-Directory-Konto (LDAP Simple Bind, nur Standardbibliothek):
+
+```bash
+python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
+  --ad-url ldaps://dc01.firma.local --ad-domain firma.local \
+  --admin-user vorname.nachname@firma.local
+```
+
+| Rolle | Rechte |
+|---|---|
+| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch nicht genehmigte Anträge löschen |
+| **Administrator** | Anträge genehmigen/ablehnen, alle Reservierungen verwalten, Import, Rollen pflegen (Tab „Verwaltung") |
+| **Technische Prüfung** | Alle Daten und Seiten einsehen — keinerlei Änderungen möglich |
+
+- **Rollen zuweisen**: Tab „Verwaltung" (`/verwaltung`) — AD-Benutzernamen
+  eintragen und Rolle wählen; gespeichert in `kapa_rollen.json`.
+  Benutzer ohne zugewiesene Rolle können sich nicht anmelden.
+- **Bootstrap**: `--admin-user` (kommagetrennt) definiert Immer-Admins,
+  damit der erste Admin die Verwaltung öffnen kann.
+- Benutzernamen ohne `@` werden automatisch um `--ad-domain` ergänzt
+  (`max` → `max@firma.local`).
+- Alle Rechte werden **serverseitig** geprüft; die Oberfläche blendet
+  nicht erlaubte Aktionen zusätzlich aus.
+- `ldaps://` verwenden — bei `ldap://` gehen Passwörter unverschlüsselt
+  über das Netz (`--ad-insecure` für Self-Signed-Zertifikate).
+- Ohne `--ad-url` läuft alles wie bisher ohne Anmeldung (Vollzugriff).
+
 ## Optionen
 
 | Option | Beschreibung |
@@ -81,6 +111,11 @@ Detailkarte eines Clusters; Export/Import als JSON.
 | `--cache kapa_cache.json` | Datei-Cache der letzten Abfrage |
 | `--res-file kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
+| `--ad-url ldaps://dc01…` | AD-Anmeldung aktivieren |
+| `--ad-domain firma.local` | Domäne für Benutzernamen ohne `@` |
+| `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |
+| `--admin-user a@…,b@…` | Immer-Admins (Bootstrap) |
+| `--roles-file kapa_rollen.json` | Rollendatei |
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
 
@@ -89,7 +124,8 @@ vom Repository ausgeschlossen.
 
 ## Hinweis zum Betrieb
 
-Der eingebaute Webserver hat keine Authentifizierung. Für den Betrieb über
-`localhost` hinaus empfiehlt sich `--bind 127.0.0.1` hinter einem Reverse-Proxy
-(z. B. nginx mit Basic-Auth/TLS) oder der Einsatz nur im vertrauenswürdigen
-Verwaltungsnetz.
+Ohne `--ad-url` hat der eingebaute Webserver keine Authentifizierung — dann
+nur im vertrauenswürdigen Verwaltungsnetz betreiben. Der Server spricht
+selbst kein HTTPS; für den Betrieb über `localhost` hinaus empfiehlt sich
+`--bind 127.0.0.1` hinter einem Reverse-Proxy mit TLS (z. B. nginx), damit
+Anmeldedaten und Session-Cookies verschlüsselt übertragen werden.

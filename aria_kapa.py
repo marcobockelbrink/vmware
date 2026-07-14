@@ -149,6 +149,67 @@ class AriaOps:
             result[rid] = props
         return result
 
+# -------------------------------------------------- Active Directory (LDAP) --
+
+def ldap_bind(url, username, password, timeout=10, insecure=False):
+    """Minimaler LDAP Simple Bind (RFC 4511) nur mit der Standardbibliothek.
+
+    Gibt True zurück, wenn sich der Benutzer (UPN, z. B. user@firma.local)
+    mit dem Passwort am AD anmelden kann. ldaps:// wird empfohlen; bei
+    ldap:// geht das Passwort unverschlüsselt über das Netz."""
+    import socket
+    if not password:
+        return False  # leeres Passwort wäre ein anonymer Bind (immer "Erfolg")
+    u = urllib.parse.urlparse(url if "//" in url else "ldap://" + url)
+    host = u.hostname
+    port = u.port or (636 if u.scheme == "ldaps" else 389)
+
+    def ber_len(n):
+        if n < 0x80:
+            return bytes([n])
+        b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+        return bytes([0x80 | len(b)]) + b
+
+    def tlv(tag, payload):
+        return bytes([tag]) + ber_len(len(payload)) + payload
+
+    # LDAPMessage { messageID=1, BindRequest { version=3, name, simple-Passwort } }
+    bind_req = tlv(0x60, tlv(0x02, b"\x03")
+                   + tlv(0x04, username.encode())
+                   + tlv(0x80, password.encode()))
+    msg = tlv(0x30, tlv(0x02, b"\x01") + bind_req)
+
+    sock = socket.create_connection((host, port), timeout=timeout)
+    try:
+        if u.scheme == "ldaps":
+            ctx = ssl.create_default_context()
+            if insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+        sock.sendall(msg)
+        data = b""
+        while len(data) < 12:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        sock.close()
+
+    # BindResponse suchen (Tag 0x61), erstes Element darin ist der resultCode
+    i = data.find(b"\x61")
+    if i < 0 or i + 2 >= len(data):
+        raise RuntimeError("Unerwartete LDAP-Antwort")
+    j = i + 1
+    if data[j] & 0x80:          # lange Längenform überspringen
+        j += (data[j] & 0x7F)
+    j += 1
+    if data[j] != 0x0A:         # ENUMERATED resultCode
+        raise RuntimeError("Unerwartete LDAP-Antwort")
+    result_code = data[j + 2]
+    return result_code == 0
+
 # ------------------------------------------------------------- Datenabfrage --
 
 def name_of(res):
@@ -281,6 +342,58 @@ def sample_data():
 
 # ------------------------------------------------------------------ Dashboard --
 
+LOGIN_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anmeldung – VMware Kapazitätsplanung</title>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font:14px/1.5 "Segoe UI",system-ui,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .box { background:#1e293b; border:1px solid #334155; border-radius:12px;
+         padding:28px; width:340px; }
+  h1 { font-size:17px; margin:0 0 4px; color:#38bdf8; }
+  p { color:#94a3b8; font-size:12px; margin:0 0 16px; }
+  label { display:block; font-size:12px; color:#94a3b8; margin:12px 0 4px; }
+  input { width:100%; box-sizing:border-box; background:#0b1220; border:1px solid #334155;
+          color:#e2e8f0; border-radius:6px; padding:8px 10px; font-size:13px; }
+  input:focus { outline:none; border-color:#38bdf8; }
+  button { width:100%; margin-top:18px; background:#38bdf8; color:#0b1220; border:none;
+           border-radius:8px; padding:9px; font-size:13px; font-weight:600; cursor:pointer; }
+  .err { color:#ef4444; font-size:12px; margin-top:10px; min-height:16px; }
+</style>
+</head>
+<body>
+<form class="box" onsubmit="login(event)">
+  <h1>VMware Kapazitätsplanung</h1>
+  <p>Anmeldung mit Active-Directory-Konto</p>
+  <label>Benutzername</label>
+  <input id="u" autocomplete="username" placeholder="vorname.nachname" autofocus>
+  <label>Passwort</label>
+  <input id="p" type="password" autocomplete="current-password">
+  <button>Anmelden</button>
+  <div class="err" id="e"></div>
+</form>
+<script>
+async function login(ev) {
+  ev.preventDefault();
+  const e = document.getElementById("e");
+  e.textContent = "";
+  try {
+    const r = await fetch("/api/login", { method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ username: document.getElementById("u").value.trim(),
+                             password: document.getElementById("p").value }) });
+    if (r.ok) { location.reload(); return; }
+    e.textContent = (await r.json()).error || "Anmeldung fehlgeschlagen.";
+  } catch (x) { e.textContent = "Server nicht erreichbar."; }
+}
+</script>
+</body>
+</html>
+"""
+
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -380,12 +493,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
-  <button class="btn primary" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
+  <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
   <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
   <span id="refreshStatus" style="font-size:12px;color:var(--muted)"></span>
   <span id="timer" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
   <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
-  <label class="btn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
+  <label class="btn" id="importBtn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
+  <span id="userbox" style="font-size:12px;color:var(--muted)"></span>
+  <button class="btn" id="logoutBtn" style="display:none" onclick="logout()">Abmelden</button>
 </div>
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -411,6 +526,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
+  <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
 </div>
 <div class="tablewrap" id="kapaView">
 <table class="kt" id="ktable">
@@ -424,15 +540,21 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
+</table>
+</div>
+<div class="tablewrap" id="admView" style="display:none">
+<table class="kt" id="mtable">
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Aktion</th></tr></thead>
+  <tbody id="mtbody"></tbody>
 </table>
 </div>
 <div class="hovercard" id="hovercard"></div>
@@ -441,7 +563,22 @@ let CLUSTERS = __DATA__;
 const FACTOR = __FACTOR__;
 const SERVE = __SERVE__;
 const TTL = __TTL__;
+const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
 const LS_KEY = "aria_kapa_reservierungen";
+
+// ---- Rollen ----
+const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
+const IS_ADMIN = ROLE === "admin";
+const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
+const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
+                     auditor: "Technische Prüfung (nur lesen)" };
+function canDel(r) {
+  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user && !r.approved);
+}
+async function logout() {
+  try { await fetch("/api/logout", { method: "POST" }); } catch (e) {}
+  location.reload();
+}
 
 // ---- Reservierungen (Serve-Modus: zentral auf dem Server, sonst localStorage) ----
 let RES = [];
@@ -619,7 +756,7 @@ function card(c, idx, isTotal) {
     `<tr><td>${esc(r.name)}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
-     <td><button class="del" title="Reservierung löschen" onclick="delRes('${r.id}')">✕</button></td></tr>`).join("");
+     <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   const resTable = clRes.length ?
     `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
@@ -638,7 +775,7 @@ function card(c, idx, isTotal) {
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
       ${resTable}
-      ${isTotal ? "" : `
+      ${isTotal || !CAN_REQUEST ? "" : `
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
@@ -691,27 +828,76 @@ function row(c, idx, isTotal) {
     <td class="num">${rv.length || "–"}${pend ? ` <span class="st pend">+${pend}</span>` : ""}</td></tr>`;
 }
 
-// ---- Ansichten: Kapazität / Reservierungen / Genehmigungen ----
+// ---- Ansichten: Kapazität / Reservierungen / Genehmigungen / Verwaltung ----
 let VIEW = (location.pathname === "/reservierungen" || location.hash === "#reservierungen") ? "res"
          : (location.pathname === "/genehmigungen" || location.hash === "#genehmigungen") ? "app"
+         : (location.pathname === "/verwaltung" || location.hash === "#verwaltung") ? "adm"
          : "kapa";
+if (VIEW === "adm" && !IS_ADMIN) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  document.getElementById("tabKapa").classList.toggle("active", v === "kapa");
-  document.getElementById("tabRes").classList.toggle("active", v === "res");
-  document.getElementById("tabApp").classList.toggle("active", v === "app");
-  document.getElementById("kapaView").style.display = v === "kapa" ? "" : "none";
-  document.getElementById("resView").style.display = v === "res" ? "" : "none";
-  document.getElementById("appView").style.display = v === "app" ? "" : "none";
+  const tabs = { kapa: "tabKapa", res: "tabRes", app: "tabApp", adm: "tabAdm" };
+  const views = { kapa: "kapaView", res: "resView", app: "appView", adm: "admView" };
+  for (const k in tabs) {
+    document.getElementById(tabs[k]).classList.toggle("active", v === k);
+    document.getElementById(views[k]).style.display = v === k ? "" : "none";
+  }
   document.getElementById("filter").placeholder =
-    v === "kapa" ? "Cluster filtern …" : "Reservierungen filtern …";
+    v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …" : "Reservierungen filtern …";
   try {
     history.replaceState(null, "",
-      v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen" : location.pathname);
+      v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
+      : v === "adm" ? "#verwaltung" : location.pathname);
   } catch (e) {}
   hideCard();
+  if (v === "adm") loadRoles();
   render();
+}
+
+// ---- Verwaltung: AD-Benutzer → Rollen ----
+let ROLES = {};   // {benutzer: rolle}
+async function apiRoles(method, path, body) {
+  const r = await fetch("/api/roles" + (path || ""), {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadRoles() {
+  apiRoles("GET").then(d => { ROLES = d || {}; if (VIEW === "adm") render(); })
+                 .catch(() => {});
+}
+function addRole() {
+  const u = document.getElementById("admUser").value.trim().toLowerCase();
+  const rl = document.getElementById("admRole").value;
+  if (!u) return;
+  apiRoles("POST", "", { user: u, role: rl })
+    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = ""; })
+    .catch(() => alert("Speichern fehlgeschlagen."));
+}
+function delRole(u) {
+  if (!confirm("Rollenzuweisung für „" + u + "“ entfernen?")) return;
+  apiRoles("DELETE", "/" + encodeURIComponent(u))
+    .then(d => { ROLES = d; render(); })
+    .catch(() => alert("Löschen fehlgeschlagen."));
+}
+function renderAdmTable() {
+  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+  const users = Object.keys(ROLES).sort().filter(u => !q || u.includes(q));
+  const rows = users.map(u =>
+    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u]] || ROLES[u])}</td>
+     <td><button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕</button></td></tr>`).join("");
+  document.getElementById("mtbody").innerHTML =
+    `<tr><td><input class="filterbox" style="width:100%" id="admUser"
+         placeholder="benutzer@firma.local oder vorname.nachname"></td>
+     <td><select id="admRole" class="filterbox" style="width:100%">
+       <option value="anforderer">Anforderer</option>
+       <option value="admin">Administrator</option>
+       <option value="auditor">Technische Prüfung (nur lesen)</option>
+     </select></td>
+     <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
+    (rows || `<tr><td colspan="3" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
 }
 
 function filterRes(list) {
@@ -729,26 +915,31 @@ function renderResTable() {
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td>${esc(r.von || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
-     <td><button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button></td></tr>`).join("");
+     <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td></td><td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="8" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+     <td></td><td></td><td></td><td></td><td></td></tr>` +
+    (rows || `<tr><td colspan="9" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
   const list = filterRes(RES.filter(r => !r.approved));
+  const action = r => IS_ADMIN
+    ? `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
+       <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
+               onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`
+    : '<span class="st pend">wartet auf Genehmigung</span>';
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td>${esc(r.von || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
-     <td><button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
-         <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
-                 onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button></td></tr>`).join("");
+     <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="7" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="8" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
@@ -756,6 +947,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
   TOTAL = {
@@ -808,6 +1000,17 @@ document.addEventListener("click", e => {
   if (hc.style.display === "block" && !hc.contains(e.target) && !e.target.closest(".cl"))
     hideCard();
 });
+
+// ---- Rollenabhängige Sichtbarkeit ----
+if (ME) {
+  document.getElementById("userbox").textContent =
+    ME.user + " · " + (ROLE_NAMES[ROLE] || ROLE);
+  document.getElementById("logoutBtn").style.display = "";
+}
+if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
+if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
+if (ROLE === "auditor") document.getElementById("refreshBtn").style.display = "none";
+if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
@@ -879,7 +1082,7 @@ if (SERVE) {
 
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
-                failover_hosts=1):
+                failover_hosts=1, userinfo=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -899,6 +1102,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__FACTOR__", str(cpu_factor))
             .replace("__SERVE__", "true" if serve_mode else "false")
             .replace("__TTL__", str(res_ttl))
+            .replace("__USERINFO__", json.dumps(userinfo, ensure_ascii=False))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__DATE__", updated or datetime.now().strftime("%d.%m.%Y %H:%M")))
@@ -912,6 +1116,7 @@ def render_dashboard(clusters, cpu_factor, path, res_ttl=31, failover_hosts=1):
 # ------------------------------------------------------------- Serve-Modus ---
 
 def serve(args, password):
+    import secrets
     import threading
     import time
     import uuid
@@ -920,6 +1125,50 @@ def serve(args, password):
     state = {"clusters": [], "updated": None, "refreshing": False,
              "progress": "", "error": None, "last": None}
     interval = max(0, args.refresh_interval)
+
+    # ---- AD-Anmeldung, Sessions und Rollen ----
+    auth_enabled = bool(args.ad_url)
+    admin_seed = {u.strip().lower() for u in (args.admin_user or "").split(",") if u.strip()}
+    sessions = {}                    # token -> {"user", "role", "exp"}
+    session_ttl = 12 * 3600
+    roles_lock = threading.Lock()
+    VALID_ROLES = ("admin", "anforderer", "auditor")
+
+    def load_roles():
+        if os.path.exists(args.roles_file):
+            try:
+                with open(args.roles_file, encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict):
+                    return {str(k).lower(): v for k, v in d.items() if v in VALID_ROLES}
+            except Exception as e:
+                print(f"Rollendatei unlesbar, starte leer: {e}", file=sys.stderr)
+        return {}
+
+    def save_roles():
+        with open(args.roles_file, "w", encoding="utf-8") as f:
+            json.dump(roles, f, ensure_ascii=False, indent=2, sort_keys=True)
+
+    roles = load_roles()
+
+    def normalize_user(name):
+        name = str(name or "").strip().lower()
+        if name and "@" not in name and "\\" not in name and args.ad_domain:
+            name = name + "@" + args.ad_domain
+        return name
+
+    def role_of(user):
+        if user in admin_seed:
+            return "admin"
+        return roles.get(user)
+
+    if auth_enabled:
+        if not args.ad_url.startswith("ldaps://"):
+            print("WARNUNG: --ad-url ohne ldaps:// – Passwörter gehen unverschlüsselt "
+                  "über das Netz.", file=sys.stderr)
+        if not admin_seed and not roles:
+            print("WARNUNG: Keine Admins definiert (--admin-user) und Rollendatei leer – "
+                  "niemand kann sich anmelden.", file=sys.stderr)
 
     # Zwischen-Cache der letzten Abfrage von Platte laden
     if os.path.exists(args.cache):
@@ -999,18 +1248,20 @@ def serve(args, password):
                 time.sleep(min(wait, 10))
 
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, body, ctype, code=200):
+        def _send(self, body, ctype, code=200, headers=None):
             data = body.encode() if isinstance(body, str) else body
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
 
-        def _json(self, obj, code=200):
+        def _json(self, obj, code=200, headers=None):
             self._send(json.dumps(obj, ensure_ascii=False),
-                       "application/json; charset=utf-8", code)
+                       "application/json; charset=utf-8", code, headers)
 
         def _body(self):
             try:
@@ -1019,18 +1270,57 @@ def serve(args, password):
             except Exception:
                 return None
 
+        # ---- Sitzungen / Berechtigungen ----
+        def _cookie_token(self):
+            for part in (self.headers.get("Cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "kapa_session":
+                    return v
+            return None
+
+        def _session(self):
+            if not auth_enabled:
+                return {"user": None, "role": "admin"}   # ohne AD wie bisher
+            s = sessions.get(self._cookie_token())
+            if s and s["exp"] > time.time():
+                s["exp"] = time.time() + session_ttl
+                return s
+            return None
+
+        def _require(self, *allowed):
+            s = self._session()
+            if not s:
+                self._json({"error": "Nicht angemeldet"}, 401)
+                return None
+            if allowed and s["role"] not in allowed:
+                self._json({"error": "Keine Berechtigung für diese Aktion"}, 403)
+                return None
+            return s
+
         def do_GET(self):
-            if self.path in ("/", "/index.html", "/reservierungen", "/genehmigungen"):
+            if self.path in ("/", "/index.html", "/reservierungen",
+                             "/genehmigungen", "/verwaltung"):
+                s = self._session()
+                if auth_enabled and not s:
+                    self._send(LOGIN_TEMPLATE, "text/html; charset=utf-8")
+                    return
+                userinfo = ({"user": s["user"], "role": s["role"]}
+                            if auth_enabled else None)
                 self._send(render_html(state["clusters"], args.cpu_factor,
                                        serve_mode=True,
                                        updated=state["updated"] or
                                        "noch keine Daten – erster Abruf läuft ...",
                                        res_ttl=args.res_ttl_days,
-                                       failover_hosts=args.failover_hosts),
+                                       failover_hosts=args.failover_hosts,
+                                       userinfo=userinfo),
                            "text/html; charset=utf-8")
             elif self.path == "/api/data":
+                if not self._require():
+                    return
                 self._json({"updated": state["updated"], "clusters": state["clusters"]})
             elif self.path == "/api/status":
+                if not self._require():
+                    return
                 nxt = None
                 if interval > 0 and state["last"]:
                     nxt = max(0, int(state["last"] + interval - time.time()))
@@ -1038,18 +1328,60 @@ def serve(args, password):
                             "progress": state["progress"], "error": state["error"],
                             "updated": state["updated"], "next": nxt})
             elif self.path == "/api/reservations":
+                if not self._require():
+                    return
                 with res_lock:
                     reservations[:] = prune_res(reservations)
                     self._json(list(reservations))
+            elif self.path == "/api/roles":
+                if not self._require("admin"):
+                    return
+                with roles_lock:
+                    self._json(dict(roles))
             else:
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path == "/api/refresh":
+            if self.path == "/api/login":
+                if not auth_enabled:
+                    self.send_error(404)
+                    return
+                body = self._body() or {}
+                user = normalize_user(body.get("username"))
+                pw = str(body.get("password") or "")
+                role = role_of(user)
+                if not user or not role:
+                    self._json({"error": "Diesem Benutzer ist keine Rolle zugewiesen – "
+                                         "bitte an die Administratoren wenden."}, 403)
+                    return
+                try:
+                    ok = ldap_bind(args.ad_url, user, pw, insecure=args.ad_insecure)
+                except Exception as e:
+                    self._json({"error": f"Active Directory nicht erreichbar: {e}"}, 502)
+                    return
+                if not ok:
+                    self._json({"error": "Benutzername oder Passwort falsch."}, 401)
+                    return
+                token = secrets.token_urlsafe(32)
+                sessions[token] = {"user": user, "role": role,
+                                   "exp": time.time() + session_ttl}
+                self._json({"user": user, "role": role},
+                           headers={"Set-Cookie": f"kapa_session={token}; "
+                                    "HttpOnly; SameSite=Lax; Path=/"})
+            elif self.path == "/api/logout":
+                sessions.pop(self._cookie_token(), None)
+                self._json({"ok": True},
+                           headers={"Set-Cookie": "kapa_session=; Max-Age=0; Path=/"})
+            elif self.path == "/api/refresh":
+                if not self._require("admin", "anforderer"):
+                    return
                 if not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"started": True}, 202)
             elif self.path == "/api/reservations":
+                s = self._require("admin", "anforderer")
+                if not s:
+                    return
                 item = self._body()
                 if not isinstance(item, dict) or not str(item.get("name") or "").strip():
                     self._json({"error": "Ungültige Reservierung"}, 400)
@@ -1060,6 +1392,7 @@ def serve(args, password):
                              "name": str(item.get("name")).strip(),
                              "vcpu": int(item.get("vcpu") or 0),
                              "ram_gb": float(item.get("ram_gb") or 0),
+                             "von": s["user"] or "",
                              "created": datetime.now().date().isoformat(),
                              "approved": False}
                 except (TypeError, ValueError):
@@ -1072,6 +1405,9 @@ def serve(args, password):
                     self._json(list(reservations))
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/approve")):
+                s = self._require("admin")
+                if not s:
+                    return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/approve")])
                 with res_lock:
@@ -1079,13 +1415,29 @@ def serve(args, password):
                         if r.get("id") == rid:
                             r["approved"] = True
                             r["approved_on"] = datetime.now().date().isoformat()
+                            r["approved_by"] = s["user"] or ""
                     save_res()
                     self._json(list(reservations))
+            elif self.path == "/api/roles":
+                if not self._require("admin"):
+                    return
+                body = self._body() or {}
+                user = normalize_user(body.get("user"))
+                role = body.get("role")
+                if not user or role not in VALID_ROLES:
+                    self._json({"error": "Benutzer und gültige Rolle erforderlich"}, 400)
+                    return
+                with roles_lock:
+                    roles[user] = role
+                    save_roles()
+                    self._json(dict(roles))
             else:
                 self.send_error(404)
 
         def do_PUT(self):
             if self.path == "/api/reservations":
+                if not self._require("admin"):
+                    return
                 data = self._body()
                 if not isinstance(data, list):
                     self._json({"error": "Liste erwartet"}, 400)
@@ -1108,11 +1460,28 @@ def serve(args, password):
 
         def do_DELETE(self):
             if self.path.startswith("/api/reservations/"):
+                s = self._require("admin", "anforderer")
+                if not s:
+                    return
                 rid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
                 with res_lock:
+                    target = next((r for r in reservations if r.get("id") == rid), None)
+                    if (target and s["role"] == "anforderer"
+                            and (target.get("von") != s["user"] or target.get("approved"))):
+                        self._json({"error": "Anforderer dürfen nur eigene, noch nicht "
+                                             "genehmigte Anträge löschen."}, 403)
+                        return
                     reservations[:] = [r for r in reservations if r.get("id") != rid]
                     save_res()
                     self._json(list(reservations))
+            elif self.path.startswith("/api/roles/"):
+                if not self._require("admin"):
+                    return
+                user = urllib.parse.unquote(self.path.rsplit("/", 1)[1]).lower()
+                with roles_lock:
+                    roles.pop(user, None)
+                    save_roles()
+                    self._json(dict(roles))
             else:
                 self.send_error(404)
 
@@ -1122,7 +1491,8 @@ def serve(args, password):
     threading.Thread(target=scheduler, daemon=True).start()
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)
     print(f"Dashboard läuft: http://localhost:{args.port}  (Strg+C zum Beenden)"
-          + (f" · Auto-Refresh alle {interval // 60} min" if interval else ""),
+          + (f" · Auto-Refresh alle {interval // 60} min" if interval else "")
+          + (f" · AD-Anmeldung: {args.ad_url}" if auth_enabled else " · ohne Anmeldung"),
           file=sys.stderr)
     try:
         srv.serve_forever()
@@ -1159,6 +1529,18 @@ def main():
     ap.add_argument("--res-ttl-days", type=int, default=31,
                     help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
                          "(0 = nie, Standard: 31)")
+    ap.add_argument("--ad-url", default="",
+                    help="Active Directory für die Anmeldung, z. B. "
+                         "ldaps://dc01.firma.local (ohne Angabe: kein Login nötig)")
+    ap.add_argument("--ad-domain", default="",
+                    help="AD-Domäne für Benutzernamen ohne @, z. B. firma.local")
+    ap.add_argument("--ad-insecure", action="store_true",
+                    help="LDAPS-Zertifikat nicht prüfen (Self-Signed)")
+    ap.add_argument("--admin-user", default="",
+                    help="Immer-Admin(s), kommagetrennt, z. B. admin@firma.local "
+                         "(Bootstrap für die Rollenverwaltung)")
+    ap.add_argument("--roles-file", default="kapa_rollen.json",
+                    help="Rollendatei (Standard: kapa_rollen.json)")
     args = ap.parse_args()
 
     if args.serve:

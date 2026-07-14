@@ -1,6 +1,7 @@
 # Laufzeitdaten / Cache (lokaler Datencontainer, gehört nicht ins Repo)
 kapa_cache.json
 kapa_reservierungen.json
+kapa_rollen.json
 kapa_dashboard.html
 *.json
 !package.json

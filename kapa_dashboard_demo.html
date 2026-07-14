@@ -93,16 +93,18 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:21</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:32</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
-  <button class="btn primary" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
+  <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
   <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
   <span id="refreshStatus" style="font-size:12px;color:var(--muted)"></span>
   <span id="timer" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
   <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
-  <label class="btn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
+  <label class="btn" id="importBtn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
+  <span id="userbox" style="font-size:12px;color:var(--muted)"></span>
+  <button class="btn" id="logoutBtn" style="display:none" onclick="logout()">Abmelden</button>
 </div>
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -128,6 +130,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
   <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
+  <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
 </div>
 <div class="tablewrap" id="kapaView">
 <table class="kt" id="ktable">
@@ -141,15 +144,21 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
+</table>
+</div>
+<div class="tablewrap" id="admView" style="display:none">
+<table class="kt" id="mtable">
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Aktion</th></tr></thead>
+  <tbody id="mtbody"></tbody>
 </table>
 </div>
 <div class="hovercard" id="hovercard"></div>
@@ -158,7 +167,22 @@ let CLUSTERS = [{"name": "Cluster-01", "hostCount": 3, "cores": 64, "spareCores"
 const FACTOR = 6;
 const SERVE = false;
 const TTL = 31;
+const ME = null;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
 const LS_KEY = "aria_kapa_reservierungen";
+
+// ---- Rollen ----
+const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
+const IS_ADMIN = ROLE === "admin";
+const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
+const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
+                     auditor: "Technische Prüfung (nur lesen)" };
+function canDel(r) {
+  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user && !r.approved);
+}
+async function logout() {
+  try { await fetch("/api/logout", { method: "POST" }); } catch (e) {}
+  location.reload();
+}
 
 // ---- Reservierungen (Serve-Modus: zentral auf dem Server, sonst localStorage) ----
 let RES = [];
@@ -336,7 +360,7 @@ function card(c, idx, isTotal) {
     `<tr><td>${esc(r.name)}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
-     <td><button class="del" title="Reservierung löschen" onclick="delRes('${r.id}')">✕</button></td></tr>`).join("");
+     <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   const resTable = clRes.length ?
     `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
@@ -355,7 +379,7 @@ function card(c, idx, isTotal) {
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
       ${resTable}
-      ${isTotal ? "" : `
+      ${isTotal || !CAN_REQUEST ? "" : `
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
@@ -408,27 +432,76 @@ function row(c, idx, isTotal) {
     <td class="num">${rv.length || "–"}${pend ? ` <span class="st pend">+${pend}</span>` : ""}</td></tr>`;
 }
 
-// ---- Ansichten: Kapazität / Reservierungen / Genehmigungen ----
+// ---- Ansichten: Kapazität / Reservierungen / Genehmigungen / Verwaltung ----
 let VIEW = (location.pathname === "/reservierungen" || location.hash === "#reservierungen") ? "res"
          : (location.pathname === "/genehmigungen" || location.hash === "#genehmigungen") ? "app"
+         : (location.pathname === "/verwaltung" || location.hash === "#verwaltung") ? "adm"
          : "kapa";
+if (VIEW === "adm" && !IS_ADMIN) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  document.getElementById("tabKapa").classList.toggle("active", v === "kapa");
-  document.getElementById("tabRes").classList.toggle("active", v === "res");
-  document.getElementById("tabApp").classList.toggle("active", v === "app");
-  document.getElementById("kapaView").style.display = v === "kapa" ? "" : "none";
-  document.getElementById("resView").style.display = v === "res" ? "" : "none";
-  document.getElementById("appView").style.display = v === "app" ? "" : "none";
+  const tabs = { kapa: "tabKapa", res: "tabRes", app: "tabApp", adm: "tabAdm" };
+  const views = { kapa: "kapaView", res: "resView", app: "appView", adm: "admView" };
+  for (const k in tabs) {
+    document.getElementById(tabs[k]).classList.toggle("active", v === k);
+    document.getElementById(views[k]).style.display = v === k ? "" : "none";
+  }
   document.getElementById("filter").placeholder =
-    v === "kapa" ? "Cluster filtern …" : "Reservierungen filtern …";
+    v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …" : "Reservierungen filtern …";
   try {
     history.replaceState(null, "",
-      v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen" : location.pathname);
+      v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
+      : v === "adm" ? "#verwaltung" : location.pathname);
   } catch (e) {}
   hideCard();
+  if (v === "adm") loadRoles();
   render();
+}
+
+// ---- Verwaltung: AD-Benutzer → Rollen ----
+let ROLES = {};   // {benutzer: rolle}
+async function apiRoles(method, path, body) {
+  const r = await fetch("/api/roles" + (path || ""), {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadRoles() {
+  apiRoles("GET").then(d => { ROLES = d || {}; if (VIEW === "adm") render(); })
+                 .catch(() => {});
+}
+function addRole() {
+  const u = document.getElementById("admUser").value.trim().toLowerCase();
+  const rl = document.getElementById("admRole").value;
+  if (!u) return;
+  apiRoles("POST", "", { user: u, role: rl })
+    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = ""; })
+    .catch(() => alert("Speichern fehlgeschlagen."));
+}
+function delRole(u) {
+  if (!confirm("Rollenzuweisung für „" + u + "“ entfernen?")) return;
+  apiRoles("DELETE", "/" + encodeURIComponent(u))
+    .then(d => { ROLES = d; render(); })
+    .catch(() => alert("Löschen fehlgeschlagen."));
+}
+function renderAdmTable() {
+  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+  const users = Object.keys(ROLES).sort().filter(u => !q || u.includes(q));
+  const rows = users.map(u =>
+    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u]] || ROLES[u])}</td>
+     <td><button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕</button></td></tr>`).join("");
+  document.getElementById("mtbody").innerHTML =
+    `<tr><td><input class="filterbox" style="width:100%" id="admUser"
+         placeholder="benutzer@firma.local oder vorname.nachname"></td>
+     <td><select id="admRole" class="filterbox" style="width:100%">
+       <option value="anforderer">Anforderer</option>
+       <option value="admin">Administrator</option>
+       <option value="auditor">Technische Prüfung (nur lesen)</option>
+     </select></td>
+     <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
+    (rows || `<tr><td colspan="3" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
 }
 
 function filterRes(list) {
@@ -446,26 +519,31 @@ function renderResTable() {
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td>${esc(r.von || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
-     <td><button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button></td></tr>`).join("");
+     <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td></td><td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="8" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+     <td></td><td></td><td></td><td></td><td></td></tr>` +
+    (rows || `<tr><td colspan="9" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
   const list = filterRes(RES.filter(r => !r.approved));
+  const action = r => IS_ADMIN
+    ? `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
+       <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
+               onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`
+    : '<span class="st pend">wartet auf Genehmigung</span>';
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td>${esc(r.von || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
-     <td><button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
-         <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
-                 onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button></td></tr>`).join("");
+     <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="7" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="8" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
@@ -473,6 +551,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
   TOTAL = {
@@ -525,6 +604,17 @@ document.addEventListener("click", e => {
   if (hc.style.display === "block" && !hc.contains(e.target) && !e.target.closest(".cl"))
     hideCard();
 });
+
+// ---- Rollenabhängige Sichtbarkeit ----
+if (ME) {
+  document.getElementById("userbox").textContent =
+    ME.user + " · " + (ROLE_NAMES[ROLE] || ROLE);
+  document.getElementById("logoutBtn").style.display = "";
+}
+if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
+if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
+if (ROLE === "auditor") document.getElementById("refreshBtn").style.display = "none";
+if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
