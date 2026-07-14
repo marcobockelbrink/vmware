@@ -539,6 +539,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                    border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
   .resform input:focus { outline:none; border-color:var(--res); }
   .del { background:none; border:none; color:var(--crit); cursor:pointer; font-size:13px; }
+  .edit { background:none; border:none; color:var(--accent); cursor:pointer; font-size:13px; }
   .err { color:var(--crit); font-size:12px; margin-top:4px; display:none; }
   .btn.primary { background:var(--res); color:#0b1220; border-color:var(--res); font-weight:600; }
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none;
@@ -975,17 +976,42 @@ function addRole() {
 function delRole(u) {
   if (!confirm("Rollenzuweisung für „" + u + "“ entfernen?")) return;
   apiRoles("DELETE", "/" + encodeURIComponent(u))
-    .then(d => { ROLES = d; render(); })
+    .then(d => { ROLES = d; if (EDIT_USER === u) EDIT_USER = null; render(); })
     .catch(() => alert("Löschen fehlgeschlagen."));
+}
+let EDIT_USER = null;   // Benutzer, dessen Zeile gerade bearbeitet wird
+function editRole(u) { EDIT_USER = u; render(); document.getElementById("editDept").focus(); }
+function cancelEditRole() { EDIT_USER = null; render(); }
+function saveEditRole(u) {
+  const rl = document.getElementById("editRole").value;
+  const ab = document.getElementById("editDept").value.trim();
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
+    .then(d => { ROLES = d; EDIT_USER = null; render(); })
+    .catch(() => alert("Speichern fehlgeschlagen."));
 }
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
     !q || u.includes(q) || (ROLES[u].abteilung || "").toLowerCase().includes(q));
-  const rows = users.map(u =>
-    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u].role] || ROLES[u].role)}</td>
+  const rows = users.map(u => {
+    if (u === EDIT_USER) {
+      const cur = ROLES[u] || {};
+      return `<tr><td>${esc(u)}</td>
+        <td><select id="editRole" class="filterbox" style="width:100%">
+          ${["anforderer", "admin", "auditor"].map(x =>
+            `<option value="${x}" ${cur.role === x ? "selected" : ""}>${esc(ROLE_NAMES[x])}</option>`).join("")}
+        </select></td>
+        <td><input id="editDept" class="filterbox" style="width:100%"
+             value="${esc(cur.abteilung || "")}" placeholder="Abteilung"
+             onkeydown="if(event.key==='Enter')saveEditRole('${esc(u)}')"></td>
+        <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
+            <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
+    }
+    return `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u].role] || ROLES[u].role)}</td>
      <td>${esc(ROLES[u].abteilung || "–")}</td>
-     <td><button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕</button></td></tr>`).join("");
+     <td><button class="edit" title="Rolle/Abteilung bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
+         <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
+  }).join("");
   document.getElementById("mtbody").innerHTML =
     `<tr><td><input class="filterbox" style="width:100%" id="admUser"
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
