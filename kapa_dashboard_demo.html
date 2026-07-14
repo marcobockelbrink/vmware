@@ -60,6 +60,7 @@
   .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
   .st.ok { background:rgba(34,197,94,.15); color:var(--ok); }
   .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
+  .st.rej { background:rgba(239,68,68,.15); color:var(--crit); }
   .btn.approve { border-color:var(--ok); color:var(--ok); }
   .btn.approve:hover { background:rgba(34,197,94,.15); }
   .hc-close { position:absolute; top:10px; right:12px; z-index:1;
@@ -93,7 +94,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:32</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:56</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -144,20 +145,23 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+    <th class="num">RAM (GB)</th>
+    <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
+    <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
+    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="admView" style="display:none">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Aktion</th></tr></thead>
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung</th><th>Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -177,7 +181,8 @@ const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
                      auditor: "Technische Prüfung (nur lesen)" };
 function canDel(r) {
-  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user && !r.approved);
+  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user
+                      && !r.approved && !r.rejected);
 }
 async function logout() {
   try { await fetch("/api/logout", { method: "POST" }); } catch (e) {}
@@ -218,9 +223,13 @@ function validUntil(r) {
   return d.toISOString().slice(0, 10);
 }
 function stBadge(r) {
-  return r.approved ? '<span class="st ok">genehmigt</span>'
-                    : '<span class="st pend">beantragt</span>';
+  if (r.rejected)
+    return `<span class="st rej" title="abgelehnt von ${esc(r.rejected_by || "?")} am ${fmtDate(r.rejected_on)}">abgelehnt</span>`;
+  if (r.approved)
+    return `<span class="st ok" title="genehmigt von ${esc(r.approved_by || "?")} am ${fmtDate(r.approved_on)}">genehmigt</span>`;
+  return '<span class="st pend">beantragt</span>';
 }
+function isPend(r) { return !r.approved && !r.rejected; }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
 function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
 
@@ -254,7 +263,15 @@ function createRes(c, name, vcpu, ram, errEl) {
 
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
-  if (confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen und löschen?")) delRes(id);
+  if (!confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen? " +
+               "Die Ablehnung bleibt " + (TTL > 0 ? TTL : 31) +
+               " Tage in der Historie sichtbar.")) return;
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject").then(setRes).catch(resFail);
+  else if (r) {
+    r.rejected = true;
+    r.rejected_on = new Date().toISOString().slice(0, 10);
+    saveLocal(); render();
+  }
 }
 
 function approveRes(id) {
@@ -368,7 +385,7 @@ function card(c, idx, isTotal) {
     ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
   return `<div class="card ${isTotal?'total':''}">
     <h2>${esc(c.name)}</h2>
-    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.length-rv.length?` / ${clRes.length-rv.length} beantragt`:''}${spare}</div>
+    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
     ${metric("vCPU (Cores × " + FACTOR + ")", c.vcpuUsed, rvCpu, c.vcpuCap, "vCPU")}
     ${metric("RAM", c.ramUsed, rvRam, c.ramCap, "GB")}
     <div class="kpis">
@@ -415,7 +432,7 @@ function miniBar(used, resv, cap) {
 function row(c, idx, isTotal) {
   const clRes = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : allFor(c.name);
   const rv = clRes.filter(r => r.approved);
-  const pend = clRes.length - rv.length;
+  const pend = clRes.filter(isPend).length;
   const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
   const fCpu = c.vcpuFree - rvCpu;
   const fRam = Math.round((c.ramFree - rvRam) * 10) / 10;
@@ -475,9 +492,11 @@ function loadRoles() {
 function addRole() {
   const u = document.getElementById("admUser").value.trim().toLowerCase();
   const rl = document.getElementById("admRole").value;
+  const ab = document.getElementById("admDept").value.trim();
   if (!u) return;
-  apiRoles("POST", "", { user: u, role: rl })
-    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = ""; })
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
+    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = "";
+                 document.getElementById("admDept").value = ""; })
     .catch(() => alert("Speichern fehlgeschlagen."));
 }
 function delRole(u) {
@@ -488,9 +507,11 @@ function delRole(u) {
 }
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
-  const users = Object.keys(ROLES).sort().filter(u => !q || u.includes(q));
+  const users = Object.keys(ROLES).sort().filter(u =>
+    !q || u.includes(q) || (ROLES[u].abteilung || "").toLowerCase().includes(q));
   const rows = users.map(u =>
-    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u]] || ROLES[u])}</td>
+    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u].role] || ROLES[u].role)}</td>
+     <td>${esc(ROLES[u].abteilung || "–")}</td>
      <td><button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕</button></td></tr>`).join("");
   document.getElementById("mtbody").innerHTML =
     `<tr><td><input class="filterbox" style="width:100%" id="admUser"
@@ -500,8 +521,10 @@ function renderAdmTable() {
        <option value="admin">Administrator</option>
        <option value="auditor">Technische Prüfung (nur lesen)</option>
      </select></td>
+     <td><input class="filterbox" style="width:100%" id="admDept"
+         placeholder="Abteilung (für Anforderer)"></td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="3" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
 }
 
 function filterRes(list) {
@@ -519,35 +542,46 @@ function renderResTable() {
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
-     <td>${esc(r.von || "–")}</td>
+     <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td></td><td></td><td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="9" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+     <td></td><td></td><td></td><td></td><td></td><td></td></tr>` +
+    (rows || `<tr><td colspan="10" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
-  const list = filterRes(RES.filter(r => !r.approved));
+  const list = filterRes(RES.filter(isPend));
   const action = r => IS_ADMIN
     ? `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
        <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
                onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`
     : '<span class="st pend">wartet auf Genehmigung</span>';
+  const freeCells = r => {
+    const c = CLUSTERS.find(x => x.name === r.cluster);
+    if (!c) return '<td class="num" colspan="2" style="color:var(--muted)">Cluster unbekannt</td>';
+    const f = freeAfter(c);   // frei nach genehmigten Reservierungen
+    const cpuOk = (r.vcpu || 0) <= f.cpu, ramOk = (r.ram_gb || 0) <= f.ram;
+    const cell = (v, ok, unit) =>
+      `<td class="num free" style="color:${ok ? "var(--ok)" : "var(--crit)"}"
+           title="${ok ? "Antrag passt" : "Antrag überschreitet die freie Kapazität"}">${fmt(v)}${ok ? "" : " ⚠"}</td>`;
+    return cell(f.cpu, cpuOk) + cell(f.ram, ramOk);
+  };
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
-     <td>${esc(r.von || "–")}</td>
+     ${freeCells(r)}
+     <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="8" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="11" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
-  const pend = RES.filter(r => !r.approved).length;
+  const pend = RES.filter(isPend).length;
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
@@ -608,7 +642,7 @@ document.addEventListener("click", e => {
 // ---- Rollenabhängige Sichtbarkeit ----
 if (ME) {
   document.getElementById("userbox").textContent =
-    ME.user + " · " + (ROLE_NAMES[ROLE] || ROLE);
+    ME.user + (ME.abteilung ? " · " + ME.abteilung : "") + " · " + (ROLE_NAMES[ROLE] || ROLE);
   document.getElementById("logoutBtn").style.display = "";
 }
 if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";

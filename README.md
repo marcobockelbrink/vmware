@@ -59,7 +59,15 @@ Detailkarte eines Clusters; Export/Import als JSON.
 - **Gültigkeit**: Reservierungen gelten automatisch ab dem Anlagetag für
   30 Tage; das „gültig bis"-Datum wird in jeder Reservierung angezeigt.
 - **Genehmigung**: Neue Anträge haben den Status „beantragt" und zählen erst
-  nach Genehmigung (Tab „Genehmigungen") gegen die freie Kapazität.
+  nach Genehmigung (Tab „Genehmigungen") gegen die freie Kapazität. Die
+  Genehmigungsübersicht zeigt je Antrag die freie Kapazität des Ziel-Clusters
+  (⚠ wenn der Antrag nicht mehr hineinpasst).
+- **Ablehnungen** bleiben 31 Tage (ab Ablehnung) als Historie sichtbar
+  (Status „abgelehnt"), inkl. wer abgelehnt hat; genehmigte Einträge zeigen
+  den genehmigenden Admin (Tooltip auf dem Status).
+- **Mail-Reports**: Mit `--smtp-server` verschickt das Dashboard bei jeder
+  Genehmigung/Ablehnung eine Mail mit den Reservierungsdaten und dem
+  ausführenden Admin an `--smtp-to` sowie automatisch an den Anforderer.
 - **Serve-Modus**: Reservierungen liegen zentral auf dem Server in
   `kapa_reservierungen.json` — alle Nutzer sehen denselben Stand.
 - **Statisches HTML**: Speicherung lokal im Browser (localStorage).
@@ -80,13 +88,18 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 | Rolle | Rechte |
 |---|---|
-| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch nicht genehmigte Anträge löschen |
-| **Administrator** | Anträge genehmigen/ablehnen, alle Reservierungen verwalten, Import, Rollen pflegen (Tab „Verwaltung") |
+| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung** |
+| **Administrator** | Anträge genehmigen/ablehnen, alle Reservierungen verwalten, Import, Rollen und Abteilungen pflegen (Tab „Verwaltung"); sieht alles |
 | **Technische Prüfung** | Alle Daten und Seiten einsehen — keinerlei Änderungen möglich |
 
 - **Rollen zuweisen**: Tab „Verwaltung" (`/verwaltung`) — AD-Benutzernamen
-  eintragen und Rolle wählen; gespeichert in `kapa_rollen.json`.
-  Benutzer ohne zugewiesene Rolle können sich nicht anmelden.
+  eintragen, Rolle wählen und (für Anforderer) die Abteilung angeben;
+  gespeichert in `kapa_rollen.json`. Benutzer ohne zugewiesene Rolle können
+  sich nicht anmelden.
+- **Abteilungssicht**: Anforderer sehen nur Anfragen ihrer Abteilung.
+  Fremde *genehmigte* Reservierungen bleiben anonymisiert als
+  „(andere Abteilung)" sichtbar, damit die freie Kapazität stimmt;
+  fremde offene/abgelehnte Anträge sind komplett ausgeblendet.
 - **Bootstrap**: `--admin-user` (kommagetrennt) definiert Immer-Admins,
   damit der erste Admin die Verwaltung öffnen kann.
 - Benutzernamen ohne `@` werden automatisch um `--ad-domain` ergänzt
@@ -116,6 +129,9 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 | `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |
 | `--admin-user a@…,b@…` | Immer-Admins (Bootstrap) |
 | `--roles-file kapa_rollen.json` | Rollendatei |
+| `--smtp-server mail.firma.local:25` | Mailserver für Reports |
+| `--smtp-from`, `--smtp-to` | Absender / Report-Empfänger (kommagetrennt) |
+| `--smtp-user`, `--smtp-password`, `--smtp-tls` | SMTP-Anmeldung / STARTTLS |
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
 

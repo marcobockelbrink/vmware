@@ -210,6 +210,53 @@ def ldap_bind(url, username, password, timeout=10, insecure=False):
     result_code = data[j + 2]
     return result_code == 0
 
+# ----------------------------------------------------------- Mail-Reports ----
+
+def send_mail(args, subject, body, extra_to=()):
+    """Report-Mail über den konfigurierten SMTP-Server (--smtp-server)."""
+    import smtplib
+    from email.message import EmailMessage
+    if not args.smtp_server:
+        return
+    to = [t.strip() for t in (args.smtp_to or "").split(",") if t.strip()]
+    to += [t for t in extra_to if t and "@" in t and t not in to]
+    if not to:
+        return
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = args.smtp_from or "kapa-dashboard@localhost"
+    msg["To"] = ", ".join(to)
+    msg.set_content(body)
+    host, _, port = args.smtp_server.partition(":")
+    with smtplib.SMTP(host, int(port or 25), timeout=15) as smtp:
+        if args.smtp_tls:
+            smtp.starttls()
+        if args.smtp_user:
+            smtp.login(args.smtp_user, args.smtp_password or "")
+        smtp.send_message(msg)
+
+
+def reservation_mail_body(r, action, admin, res_ttl):
+    valid = ""
+    if r.get("created"):
+        try:
+            d = datetime.fromisoformat(r["created"]) + \
+                timedelta(days=(res_ttl - 1 if res_ttl > 0 else 30))
+            valid = d.strftime("%d.%m.%Y")
+        except ValueError:
+            pass
+    return (f"Kapazitätsreservierung {action}\n"
+            f"\n"
+            f"Anfrage:     {r.get('name', '?')}\n"
+            f"Cluster:     {r.get('cluster', '?')}\n"
+            f"vCPU:        {r.get('vcpu', 0)}\n"
+            f"RAM:         {r.get('ram_gb', 0)} GB\n"
+            f"Abteilung:   {r.get('abteilung') or '–'}\n"
+            f"Beantragt:   von {r.get('von') or '–'} am {r.get('created') or '–'}\n"
+            f"Gültig bis:  {valid or '–'}\n"
+            f"\n"
+            f"{action} von {admin} am {datetime.now().strftime('%d.%m.%Y %H:%M')}\n")
+
 # ------------------------------------------------------------- Datenabfrage --
 
 def name_of(res):
@@ -456,6 +503,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
   .st.ok { background:rgba(34,197,94,.15); color:var(--ok); }
   .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
+  .st.rej { background:rgba(239,68,68,.15); color:var(--crit); }
   .btn.approve { border-color:var(--ok); color:var(--ok); }
   .btn.approve:hover { background:rgba(34,197,94,.15); }
   .hc-close { position:absolute; top:10px; right:12px; z-index:1;
@@ -540,20 +588,23 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+    <th class="num">RAM (GB)</th>
+    <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
+    <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
+    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="admView" style="display:none">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Aktion</th></tr></thead>
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung</th><th>Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -573,7 +624,8 @@ const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
                      auditor: "Technische Prüfung (nur lesen)" };
 function canDel(r) {
-  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user && !r.approved);
+  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user
+                      && !r.approved && !r.rejected);
 }
 async function logout() {
   try { await fetch("/api/logout", { method: "POST" }); } catch (e) {}
@@ -614,9 +666,13 @@ function validUntil(r) {
   return d.toISOString().slice(0, 10);
 }
 function stBadge(r) {
-  return r.approved ? '<span class="st ok">genehmigt</span>'
-                    : '<span class="st pend">beantragt</span>';
+  if (r.rejected)
+    return `<span class="st rej" title="abgelehnt von ${esc(r.rejected_by || "?")} am ${fmtDate(r.rejected_on)}">abgelehnt</span>`;
+  if (r.approved)
+    return `<span class="st ok" title="genehmigt von ${esc(r.approved_by || "?")} am ${fmtDate(r.approved_on)}">genehmigt</span>`;
+  return '<span class="st pend">beantragt</span>';
 }
+function isPend(r) { return !r.approved && !r.rejected; }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
 function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
 
@@ -650,7 +706,15 @@ function createRes(c, name, vcpu, ram, errEl) {
 
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
-  if (confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen und löschen?")) delRes(id);
+  if (!confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen? " +
+               "Die Ablehnung bleibt " + (TTL > 0 ? TTL : 31) +
+               " Tage in der Historie sichtbar.")) return;
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject").then(setRes).catch(resFail);
+  else if (r) {
+    r.rejected = true;
+    r.rejected_on = new Date().toISOString().slice(0, 10);
+    saveLocal(); render();
+  }
 }
 
 function approveRes(id) {
@@ -764,7 +828,7 @@ function card(c, idx, isTotal) {
     ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
   return `<div class="card ${isTotal?'total':''}">
     <h2>${esc(c.name)}</h2>
-    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.length-rv.length?` / ${clRes.length-rv.length} beantragt`:''}${spare}</div>
+    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
     ${metric("vCPU (Cores × " + FACTOR + ")", c.vcpuUsed, rvCpu, c.vcpuCap, "vCPU")}
     ${metric("RAM", c.ramUsed, rvRam, c.ramCap, "GB")}
     <div class="kpis">
@@ -811,7 +875,7 @@ function miniBar(used, resv, cap) {
 function row(c, idx, isTotal) {
   const clRes = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : allFor(c.name);
   const rv = clRes.filter(r => r.approved);
-  const pend = clRes.length - rv.length;
+  const pend = clRes.filter(isPend).length;
   const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
   const fCpu = c.vcpuFree - rvCpu;
   const fRam = Math.round((c.ramFree - rvRam) * 10) / 10;
@@ -871,9 +935,11 @@ function loadRoles() {
 function addRole() {
   const u = document.getElementById("admUser").value.trim().toLowerCase();
   const rl = document.getElementById("admRole").value;
+  const ab = document.getElementById("admDept").value.trim();
   if (!u) return;
-  apiRoles("POST", "", { user: u, role: rl })
-    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = ""; })
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
+    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = "";
+                 document.getElementById("admDept").value = ""; })
     .catch(() => alert("Speichern fehlgeschlagen."));
 }
 function delRole(u) {
@@ -884,9 +950,11 @@ function delRole(u) {
 }
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
-  const users = Object.keys(ROLES).sort().filter(u => !q || u.includes(q));
+  const users = Object.keys(ROLES).sort().filter(u =>
+    !q || u.includes(q) || (ROLES[u].abteilung || "").toLowerCase().includes(q));
   const rows = users.map(u =>
-    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u]] || ROLES[u])}</td>
+    `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u].role] || ROLES[u].role)}</td>
+     <td>${esc(ROLES[u].abteilung || "–")}</td>
      <td><button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕</button></td></tr>`).join("");
   document.getElementById("mtbody").innerHTML =
     `<tr><td><input class="filterbox" style="width:100%" id="admUser"
@@ -896,8 +964,10 @@ function renderAdmTable() {
        <option value="admin">Administrator</option>
        <option value="auditor">Technische Prüfung (nur lesen)</option>
      </select></td>
+     <td><input class="filterbox" style="width:100%" id="admDept"
+         placeholder="Abteilung (für Anforderer)"></td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="3" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
 }
 
 function filterRes(list) {
@@ -915,35 +985,46 @@ function renderResTable() {
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
-     <td>${esc(r.von || "–")}</td>
+     <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td></td><td></td><td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="9" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+     <td></td><td></td><td></td><td></td><td></td><td></td></tr>` +
+    (rows || `<tr><td colspan="10" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
-  const list = filterRes(RES.filter(r => !r.approved));
+  const list = filterRes(RES.filter(isPend));
   const action = r => IS_ADMIN
     ? `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
        <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
                onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`
     : '<span class="st pend">wartet auf Genehmigung</span>';
+  const freeCells = r => {
+    const c = CLUSTERS.find(x => x.name === r.cluster);
+    if (!c) return '<td class="num" colspan="2" style="color:var(--muted)">Cluster unbekannt</td>';
+    const f = freeAfter(c);   // frei nach genehmigten Reservierungen
+    const cpuOk = (r.vcpu || 0) <= f.cpu, ramOk = (r.ram_gb || 0) <= f.ram;
+    const cell = (v, ok, unit) =>
+      `<td class="num free" style="color:${ok ? "var(--ok)" : "var(--crit)"}"
+           title="${ok ? "Antrag passt" : "Antrag überschreitet die freie Kapazität"}">${fmt(v)}${ok ? "" : " ⚠"}</td>`;
+    return cell(f.cpu, cpuOk) + cell(f.ram, ramOk);
+  };
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
-     <td>${esc(r.von || "–")}</td>
+     ${freeCells(r)}
+     <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="8" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="11" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
-  const pend = RES.filter(r => !r.approved).length;
+  const pend = RES.filter(isPend).length;
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
@@ -1004,7 +1085,7 @@ document.addEventListener("click", e => {
 // ---- Rollenabhängige Sichtbarkeit ----
 if (ME) {
   document.getElementById("userbox").textContent =
-    ME.user + " · " + (ROLE_NAMES[ROLE] || ROLE);
+    ME.user + (ME.abteilung ? " · " + ME.abteilung : "") + " · " + (ROLE_NAMES[ROLE] || ROLE);
   document.getElementById("logoutBtn").style.display = "";
 }
 if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
@@ -1135,12 +1216,22 @@ def serve(args, password):
     VALID_ROLES = ("admin", "anforderer", "auditor")
 
     def load_roles():
+        """Rollendatei: {benutzer: {role, abteilung}}; alte Form {benutzer: rolle}
+        wird beim Laden migriert."""
         if os.path.exists(args.roles_file):
             try:
                 with open(args.roles_file, encoding="utf-8") as f:
                     d = json.load(f)
                 if isinstance(d, dict):
-                    return {str(k).lower(): v for k, v in d.items() if v in VALID_ROLES}
+                    out = {}
+                    for k, v in d.items():
+                        if isinstance(v, str) and v in VALID_ROLES:
+                            out[str(k).lower()] = {"role": v, "abteilung": ""}
+                        elif isinstance(v, dict) and v.get("role") in VALID_ROLES:
+                            out[str(k).lower()] = {
+                                "role": v["role"],
+                                "abteilung": str(v.get("abteilung") or "")}
+                    return out
             except Exception as e:
                 print(f"Rollendatei unlesbar, starte leer: {e}", file=sys.stderr)
         return {}
@@ -1157,9 +1248,9 @@ def serve(args, password):
             name = name + "@" + args.ad_domain
         return name
 
-    def role_of(user):
+    def role_entry(user):
         if user in admin_seed:
-            return "admin"
+            return {"role": "admin", "abteilung": ""}
         return roles.get(user)
 
     if auth_enabled:
@@ -1190,7 +1281,13 @@ def serve(args, password):
         if args.res_ttl_days <= 0:
             return lst
         cutoff = (datetime.now() - timedelta(days=args.res_ttl_days)).date().isoformat()
-        return [r for r in lst if str(r.get("created") or "9999") >= cutoff]
+
+        def ref_date(r):
+            # Abgelehnte bleiben ab Ablehnungsdatum in der Historie
+            if r.get("rejected"):
+                return str(r.get("rejected_on") or r.get("created") or "9999")
+            return str(r.get("created") or "9999")
+        return [r for r in lst if ref_date(r) >= cutoff]
 
     def load_res():
         if os.path.exists(args.res_file):
@@ -1210,6 +1307,41 @@ def serve(args, password):
             json.dump(reservations, f, ensure_ascii=False, indent=2)
 
     reservations = load_res()
+
+    def notify_mail(r, action, admin):
+        """Report-Mail zu Genehmigung/Ablehnung im Hintergrund verschicken."""
+        if not args.smtp_server:
+            return
+
+        def worker():
+            try:
+                send_mail(args,
+                          f"Kapazitätsreservierung {action}: {r.get('name', '?')} "
+                          f"({r.get('cluster', '?')})",
+                          reservation_mail_body(r, action, admin, args.res_ttl_days),
+                          extra_to=(r.get("von") or "",))
+            except Exception as e:
+                print(f"Mail-Versand fehlgeschlagen: {e}", file=sys.stderr)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def visible_res(s):
+        """Sichtbare Reservierungen je Rolle: Admin/Prüfung alles; Anforderer nur
+        die eigene Abteilung – fremde genehmigte bleiben anonymisiert enthalten,
+        damit die freie Kapazität stimmt."""
+        if s["role"] in ("admin", "auditor"):
+            return list(reservations)
+        dept = s.get("abteilung") or ""
+        out = []
+        for r in reservations:
+            mine = (dept and r.get("abteilung") == dept) or r.get("von") == s["user"]
+            if mine:
+                out.append(r)
+            elif r.get("approved"):
+                out.append({"id": r.get("id"), "cluster": r.get("cluster"),
+                            "name": "(andere Abteilung)", "vcpu": r.get("vcpu"),
+                            "ram_gb": r.get("ram_gb"), "created": r.get("created"),
+                            "approved": True, "foreign": True})
+        return out
 
     def do_refresh():
         state.update(refreshing=True, error=None, progress="Verbinde mit Aria Operations ...")
@@ -1280,7 +1412,7 @@ def serve(args, password):
 
         def _session(self):
             if not auth_enabled:
-                return {"user": None, "role": "admin"}   # ohne AD wie bisher
+                return {"user": None, "role": "admin", "abteilung": ""}  # ohne AD wie bisher
             s = sessions.get(self._cookie_token())
             if s and s["exp"] > time.time():
                 s["exp"] = time.time() + session_ttl
@@ -1304,7 +1436,8 @@ def serve(args, password):
                 if auth_enabled and not s:
                     self._send(LOGIN_TEMPLATE, "text/html; charset=utf-8")
                     return
-                userinfo = ({"user": s["user"], "role": s["role"]}
+                userinfo = ({"user": s["user"], "role": s["role"],
+                             "abteilung": s.get("abteilung") or ""}
                             if auth_enabled else None)
                 self._send(render_html(state["clusters"], args.cpu_factor,
                                        serve_mode=True,
@@ -1328,11 +1461,12 @@ def serve(args, password):
                             "progress": state["progress"], "error": state["error"],
                             "updated": state["updated"], "next": nxt})
             elif self.path == "/api/reservations":
-                if not self._require():
+                s = self._require()
+                if not s:
                     return
                 with res_lock:
                     reservations[:] = prune_res(reservations)
-                    self._json(list(reservations))
+                    self._json(visible_res(s))
             elif self.path == "/api/roles":
                 if not self._require("admin"):
                     return
@@ -1349,8 +1483,8 @@ def serve(args, password):
                 body = self._body() or {}
                 user = normalize_user(body.get("username"))
                 pw = str(body.get("password") or "")
-                role = role_of(user)
-                if not user or not role:
+                entry = role_entry(user)
+                if not user or not entry:
                     self._json({"error": "Diesem Benutzer ist keine Rolle zugewiesen – "
                                          "bitte an die Administratoren wenden."}, 403)
                     return
@@ -1363,9 +1497,11 @@ def serve(args, password):
                     self._json({"error": "Benutzername oder Passwort falsch."}, 401)
                     return
                 token = secrets.token_urlsafe(32)
-                sessions[token] = {"user": user, "role": role,
+                sessions[token] = {"user": user, "role": entry["role"],
+                                   "abteilung": entry.get("abteilung") or "",
                                    "exp": time.time() + session_ttl}
-                self._json({"user": user, "role": role},
+                self._json({"user": user, "role": entry["role"],
+                            "abteilung": entry.get("abteilung") or ""},
                            headers={"Set-Cookie": f"kapa_session={token}; "
                                     "HttpOnly; SameSite=Lax; Path=/"})
             elif self.path == "/api/logout":
@@ -1393,6 +1529,7 @@ def serve(args, password):
                              "vcpu": int(item.get("vcpu") or 0),
                              "ram_gb": float(item.get("ram_gb") or 0),
                              "von": s["user"] or "",
+                             "abteilung": s.get("abteilung") or "",
                              "created": datetime.now().date().isoformat(),
                              "approved": False}
                 except (TypeError, ValueError):
@@ -1402,7 +1539,7 @@ def serve(args, password):
                     reservations[:] = prune_res(reservations)
                     reservations.append(entry)
                     save_res()
-                    self._json(list(reservations))
+                    self._json(visible_res(s))
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/approve")):
                 s = self._require("admin")
@@ -1410,25 +1547,49 @@ def serve(args, password):
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/approve")])
+                notify = None
                 with res_lock:
                     for r in reservations:
-                        if r.get("id") == rid:
+                        if r.get("id") == rid and not r.get("rejected"):
                             r["approved"] = True
                             r["approved_on"] = datetime.now().date().isoformat()
                             r["approved_by"] = s["user"] or ""
+                            notify = dict(r)
                     save_res()
                     self._json(list(reservations))
+                if notify:
+                    notify_mail(notify, "genehmigt", s["user"] or "unbekannt")
+            elif (self.path.startswith("/api/reservations/")
+                    and self.path.endswith("/reject")):
+                s = self._require("admin")
+                if not s:
+                    return
+                rid = urllib.parse.unquote(
+                    self.path[len("/api/reservations/"):-len("/reject")])
+                notify = None
+                with res_lock:
+                    for r in reservations:
+                        if r.get("id") == rid and not r.get("approved"):
+                            r["rejected"] = True
+                            r["rejected_on"] = datetime.now().date().isoformat()
+                            r["rejected_by"] = s["user"] or ""
+                            notify = dict(r)
+                    save_res()
+                    self._json(list(reservations))
+                if notify:
+                    notify_mail(notify, "abgelehnt", s["user"] or "unbekannt")
             elif self.path == "/api/roles":
                 if not self._require("admin"):
                     return
                 body = self._body() or {}
                 user = normalize_user(body.get("user"))
                 role = body.get("role")
+                dept = str(body.get("abteilung") or "").strip()
                 if not user or role not in VALID_ROLES:
                     self._json({"error": "Benutzer und gültige Rolle erforderlich"}, 400)
                     return
                 with roles_lock:
-                    roles[user] = role
+                    roles[user] = {"role": role, "abteilung": dept}
                     save_roles()
                     self._json(dict(roles))
             else:
@@ -1467,13 +1628,14 @@ def serve(args, password):
                 with res_lock:
                     target = next((r for r in reservations if r.get("id") == rid), None)
                     if (target and s["role"] == "anforderer"
-                            and (target.get("von") != s["user"] or target.get("approved"))):
-                        self._json({"error": "Anforderer dürfen nur eigene, noch nicht "
-                                             "genehmigte Anträge löschen."}, 403)
+                            and (target.get("von") != s["user"] or target.get("approved")
+                                 or target.get("rejected"))):
+                        self._json({"error": "Anforderer dürfen nur eigene, noch offene "
+                                             "Anträge zurückziehen."}, 403)
                         return
                     reservations[:] = [r for r in reservations if r.get("id") != rid]
                     save_res()
-                    self._json(list(reservations))
+                    self._json(visible_res(s))
             elif self.path.startswith("/api/roles/"):
                 if not self._require("admin"):
                     return
@@ -1541,6 +1703,17 @@ def main():
                          "(Bootstrap für die Rollenverwaltung)")
     ap.add_argument("--roles-file", default="kapa_rollen.json",
                     help="Rollendatei (Standard: kapa_rollen.json)")
+    ap.add_argument("--smtp-server", default="",
+                    help="Mailserver für Reports, z. B. mail.firma.local:25 "
+                         "(ohne Angabe: keine Mails)")
+    ap.add_argument("--smtp-from", default="",
+                    help="Absenderadresse (Standard: kapa-dashboard@localhost)")
+    ap.add_argument("--smtp-to", default="",
+                    help="Report-Empfänger, kommagetrennt; der Anforderer erhält "
+                         "die Mail zusätzlich automatisch")
+    ap.add_argument("--smtp-user", default="", help="SMTP-Anmeldung (optional)")
+    ap.add_argument("--smtp-password", default="", help="SMTP-Passwort (optional)")
+    ap.add_argument("--smtp-tls", action="store_true", help="STARTTLS verwenden")
     args = ap.parse_args()
 
     if args.serve:
