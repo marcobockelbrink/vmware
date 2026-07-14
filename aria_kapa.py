@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "0.5"
+VERSION = "0.6"
 
 import argparse
 import getpass
@@ -242,18 +242,46 @@ def migrate_data_files(*paths):
 
 # ---------------------------------------------------------- SFTP-Backup -----
 
+def _ssh_cmd(args, prog):
+    """Basis-Kommando + Umgebung für scp/sftp mit Key- oder Passwort-Auth."""
+    base = [prog, "-q", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=15", "-o", f"Port={args.backup_port}"]
+    env = os.environ.copy()
+    if args.backup_key:
+        base += ["-i", args.backup_key, "-o", "BatchMode=yes"]
+    elif args.backup_password:
+        env["SSHPASS"] = args.backup_password
+        base = ["sshpass", "-e"] + base
+    else:
+        base += ["-o", "BatchMode=yes"]   # ssh-agent / Standard-Keys
+    return base, env
+
+
+def _ssh_run(cmd, env, timeout=180):
+    import subprocess
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)
+    except FileNotFoundError as e:
+        raise RuntimeError("sshpass nicht installiert – für Passwort-Backups "
+                           "'sshpass' installieren oder besser --backup-key verwenden"
+                           if "sshpass" in str(e) else str(e)) from None
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.decode(errors="replace").strip()
+                           or f"{cmd[0]} beendet mit Exit-Code {r.returncode}")
+    return r.stdout.decode(errors="replace")
+
+
 def sftp_backup(args):
     """Datendateien als tar.gz per scp auf das Backupziel kopieren.
 
     Authentifizierung per SSH-Key (--backup-key, empfohlen) oder Passwort
     (--backup-password bzw. BACKUP_PASSWORD; erfordert installiertes sshpass).
     Gibt den Namen des übertragenen Archivs zurück."""
-    import subprocess
     import tarfile
     import tempfile
     if not args.backup_target:
         raise RuntimeError("kein --backup-target konfiguriert")
-    files = [p for p in (args.cache, args.res_file, args.roles_file)
+    files = [p for p in (args.cache, args.res_file, args.roles_file, args.log_file)
              if p and os.path.exists(p)]
     if not files:
         raise RuntimeError("keine Datendateien vorhanden")
@@ -262,32 +290,52 @@ def sftp_backup(args):
     with tarfile.open(tmp, "w:gz") as tar:
         for f in files:
             tar.add(f, arcname=os.path.basename(f))
-    scp = ["scp", "-q", "-P", str(args.backup_port),
-           "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15"]
-    env = os.environ.copy()
-    if args.backup_key:
-        cmd = scp + ["-i", args.backup_key, "-o", "BatchMode=yes"]
-    elif args.backup_password:
-        env["SSHPASS"] = args.backup_password
-        cmd = ["sshpass", "-e"] + scp
-    else:
-        cmd = scp + ["-o", "BatchMode=yes"]   # ssh-agent / Standard-Keys
-    cmd = cmd + [tmp, args.backup_target.rstrip("/") + "/" + name]
+    cmd, env = _ssh_cmd(args, "scp")
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=180, env=env)
-        if r.returncode != 0:
-            raise RuntimeError(r.stderr.decode(errors="replace").strip()
-                               or f"scp beendet mit Exit-Code {r.returncode}")
-    except FileNotFoundError as e:
-        raise RuntimeError("sshpass nicht installiert – für Passwort-Backups "
-                           "'sshpass' installieren oder besser --backup-key verwenden"
-                           if "sshpass" in str(e) else str(e)) from None
+        _ssh_run(cmd + [tmp, args.backup_target.rstrip("/") + "/" + name], env)
     finally:
         try:
             os.remove(tmp)
         except OSError:
             pass
     return name
+
+
+def backup_rotate(args):
+    """Backups älter als --backup-keep-days auf dem Ziel löschen (per sftp,
+    funktioniert auch auf sftp-only-Servern). Gibt die Anzahl gelöschter
+    Archive zurück."""
+    import tempfile
+    if args.backup_keep_days <= 0:
+        return 0
+    host, _, rdir = args.backup_target.partition(":")
+    rdir = (rdir or ".").rstrip("/") or "/"
+
+    def sftp_batch(commands):
+        cmd, env = _ssh_cmd(args, "sftp")
+        with tempfile.NamedTemporaryFile("w", suffix=".batch",
+                                         delete=False) as b:
+            b.write("\n".join(commands) + "\n")
+            batch = b.name
+        try:
+            return _ssh_run(cmd + ["-b", batch, host], env)
+        finally:
+            try:
+                os.remove(batch)
+            except OSError:
+                pass
+
+    listing = sftp_batch([f"ls -1 {rdir}"])
+    cutoff = ((datetime.now() - timedelta(days=args.backup_keep_days))
+              .strftime("%Y%m%d_%H%M%S"))
+    olds = sorted({m.group(0)
+                   for m in re.finditer(r"kapa_backup_(\d{8}_\d{6})\.tar\.gz",
+                                        listing)
+                   if m.group(1) < cutoff})
+    if olds:
+        # führendes '-' = Fehler einzelner rm-Befehle ignorieren
+        sftp_batch([f"-rm {rdir}/{name}" for name in olds])
+    return len(olds)
 
 # ----------------------------------------------------------- Mail-Reports ----
 
@@ -1598,6 +1646,14 @@ def serve(args, password):
                 print(f"Backup übertragen: {name} -> {args.backup_target}",
                       file=sys.stderr)
                 audit(None, "Automatisches Backup", name)
+                try:
+                    n = backup_rotate(args)
+                    if n:
+                        audit(None, "Backup-Rotation",
+                              f"{n} Archiv(e) älter als "
+                              f"{args.backup_keep_days} Tage gelöscht")
+                except Exception as e:
+                    audit(None, "Backup-Rotation fehlgeschlagen", str(e))
             except Exception as e:
                 print(f"Backup fehlgeschlagen: {e}", file=sys.stderr)
                 audit(None, "Automatisches Backup fehlgeschlagen", str(e))
@@ -1841,7 +1897,16 @@ def serve(args, password):
                     with res_lock:
                         name = sftp_backup(args)
                     audit(self._session()["user"], "Backup ausgelöst", name)
-                    self._json({"ok": True, "backup": name})
+                    rotated = 0
+                    try:
+                        rotated = backup_rotate(args)
+                        if rotated:
+                            audit(self._session()["user"], "Backup-Rotation",
+                                  f"{rotated} Archiv(e) gelöscht")
+                    except Exception as e:
+                        audit(self._session()["user"],
+                              "Backup-Rotation fehlgeschlagen", str(e))
+                    self._json({"ok": True, "backup": name, "rotated": rotated})
                 except Exception as e:
                     audit(self._session()["user"], "Backup fehlgeschlagen", str(e))
                     self._json({"error": str(e)}, 502)
@@ -1979,8 +2044,12 @@ def main():
     ap.add_argument("--url", help="Basis-URL, z.B. https://aria-ops.firma.de")
     ap.add_argument("--user", help="Benutzername")
     ap.add_argument("--password",
-                    help="Passwort (alternativ Umgebungsvariable ARIA_PASSWORD, "
-                         "sonst interaktive Abfrage)")
+                    help="Passwort (alternativ --password-file oder Umgebungsvariable "
+                         "ARIA_PASSWORD, sonst interaktive Abfrage)")
+    ap.add_argument("--password-file",
+                    help="Datei mit dem Aria-Passwort (z. B. systemd LoadCredential)")
+    ap.add_argument("--smtp-password-file", help="Datei mit dem SMTP-Passwort")
+    ap.add_argument("--backup-password-file", help="Datei mit dem Backup-SSH-Passwort")
     ap.add_argument("--auth-source", default="local", help="Auth-Quelle (Standard: local)")
     ap.add_argument("--cpu-factor", type=int, default=6, help="CPU-Überprovisionierungsfaktor (Standard: 6)")
     ap.add_argument("--failover-hosts", type=int, default=1,
@@ -2039,9 +2108,12 @@ def main():
                     help="SSH-Private-Key für das Backup (empfohlen)")
     ap.add_argument("--backup-password", default="",
                     help="SSH-Passwort (alternativ BACKUP_PASSWORD; erfordert sshpass)")
-    ap.add_argument("--backup-interval", type=int, default=86400,
-                    help="Backup-Intervall in Sekunden (Standard: 86400 = täglich, "
-                         "0 = nur einmal beim Start)")
+    ap.add_argument("--backup-interval", type=int, default=43200,
+                    help="Backup-Intervall in Sekunden (Standard: 43200 = zweimal "
+                         "täglich, 0 = nur einmal beim Start)")
+    ap.add_argument("--backup-keep-days", type=int, default=30,
+                    help="Backups auf dem Ziel nach N Tagen löschen "
+                         "(Standard: 30, 0 = nie aufräumen)")
     ap.add_argument("--log-file", default="data/kapa_log.jsonl",
                     help="Audit-Log-Datei (Standard: data/kapa_log.jsonl)")
     # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
@@ -2058,10 +2130,23 @@ def main():
     if args.json:
         args.json = data_path(args.json)
 
-    # Zugangsdaten auch aus der Umgebung (für systemd/EnvironmentFile)
-    args.password = args.password or os.environ.get("ARIA_PASSWORD")
-    args.smtp_password = args.smtp_password or os.environ.get("SMTP_PASSWORD", "")
-    args.backup_password = args.backup_password or os.environ.get("BACKUP_PASSWORD", "")
+    # Zugangsdaten: Parameter > Passwort-Datei > Umgebungsvariable
+    def secret(value, path, env_key):
+        if value:
+            return value
+        if path:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return f.read().strip()
+            except OSError as e:
+                ap.error(f"Passwort-Datei {path}: {e}")
+        return os.environ.get(env_key, "")
+
+    args.password = secret(args.password, args.password_file, "ARIA_PASSWORD") or None
+    args.smtp_password = secret(args.smtp_password, args.smtp_password_file,
+                                "SMTP_PASSWORD")
+    args.backup_password = secret(args.backup_password, args.backup_password_file,
+                                  "BACKUP_PASSWORD")
 
     if args.serve:
         pw = None

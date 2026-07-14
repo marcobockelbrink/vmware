@@ -1,0 +1,84 @@
+# Restore-Anleitung — VMware Kapazitätsplanung
+
+Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
+
+| Datei | Inhalt | Kritisch? |
+|---|---|---|
+| `kapa_reservierungen.json` | Alle Kapazitätsanfragen inkl. Status, Kommentaren, Change-Nummern | **Ja** |
+| `kapa_rollen.json` | Rollen- und Abteilungszuweisungen | **Ja** |
+| `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |
+| `kapa_cache.json` | Letzter Aria-Datenabruf | Nein (wird neu abgerufen) |
+
+Backups werden zweimal täglich erstellt (`--backup-interval 43200`) und auf
+dem Ziel 30 Tage aufbewahrt (`--backup-keep-days 30`). Namensschema:
+`kapa_backup_JJJJMMTT_HHMMSS.tar.gz`.
+
+## Wiederherstellung (Standardinstallation unter /opt/kapa)
+
+**1. Passendes Backup auf dem Backupserver finden:**
+
+```bash
+sftp backup@backupsrv.firma.local
+sftp> ls -1 /backup/kapa
+sftp> get /backup/kapa/kapa_backup_20260714_190000.tar.gz /tmp/
+sftp> exit
+```
+
+**2. Dienst anhalten:**
+
+```bash
+sudo systemctl stop kapa-dashboard
+```
+
+**3. Aktuellen (defekten) Stand zur Sicherheit beiseitelegen:**
+
+```bash
+sudo mv /opt/kapa/data /opt/kapa/data.defekt.$(date +%Y%m%d)
+sudo mkdir -p /opt/kapa/data
+```
+
+**4. Backup einspielen:**
+
+```bash
+sudo tar -xzf /tmp/kapa_backup_20260714_190000.tar.gz -C /opt/kapa/data
+sudo chown -R kapa:kapa /opt/kapa/data
+sudo chmod 600 /opt/kapa/data/*.json*
+```
+
+**5. Dienst starten und prüfen:**
+
+```bash
+sudo systemctl start kapa-dashboard
+journalctl -u kapa-dashboard -n 20
+```
+
+Im Log sollte stehen: `Cache geladen: ...`, `Reservierungen geladen: ... (N)`.
+Danach im Dashboard kontrollieren: Reservierungen vorhanden, Verwaltung zeigt
+die Rollen, Tab „Log" enthält die Historie. Der Kapazitäts-Cache wird beim
+ersten Auto-Refresh (spätestens nach 30 Minuten) ohnehin neu aus Aria geladen.
+
+**6. Aufräumen**, wenn alles passt:
+
+```bash
+sudo rm -rf /opt/kapa/data.defekt.* /tmp/kapa_backup_*.tar.gz
+```
+
+## Einzelne Datei wiederherstellen
+
+Soll z. B. nur eine versehentlich gelöschte Reservierung zurück, kann die
+Datei einzeln aus dem Archiv geholt und über die Import-Funktion eingespielt
+werden (ersetzt den Bestand!):
+
+```bash
+tar -xzf kapa_backup_....tar.gz kapa_reservierungen.json
+```
+
+Dann als Admin im Dashboard: „Reservierungen importieren (JSON)".
+
+## Wiederherstellung auf einem neuen Host
+
+1. Repository klonen bzw. `aria_kapa.py` nach `/opt/kapa/` kopieren
+2. Installation gemäß Kommentar in `config/kapa-dashboard.service`
+   (Benutzer, `/etc/kapa/kapa.env`, `/etc/kapa/aria.pass`, nginx-Snippet)
+3. Backup wie oben nach `/opt/kapa/data` entpacken — die Rollen- und
+   Reservierungsdaten sind damit sofort wieder da

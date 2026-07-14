@@ -51,4 +51,5 @@ backup-target = backup@backupsrv.firma.local:/backup/kapa
 backup-key = /etc/kapa/backup_ed25519
 #backup-password = nur-mit-installiertem-sshpass
 backup-port = 22
-backup-interval = 86400
+backup-interval = 43200          ; zweimal täglich
+backup-keep-days = 30            ; ältere Archive auf dem Ziel löschen

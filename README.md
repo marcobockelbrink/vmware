@@ -139,12 +139,17 @@ Kommandozeilen-Argumente überschreiben Werte aus der Datei; unbekannte
 Schlüssel werden mit Fehlermeldung abgewiesen.
 
 **SFTP-Backup**: Mit `--backup-target backup@srv:/backup/kapa` werden die
-Datendateien (Reservierungen, Rollen, Cache) regelmäßig als `tar.gz`
-per scp übertragen (Standard: täglich, `--backup-interval`). Authentifizierung
-bevorzugt per SSH-Key (`--backup-key`); ein Passwort (`--backup-password`
-bzw. `BACKUP_PASSWORD`) funktioniert nur mit installiertem `sshpass`.
-Admins können ein Backup auch manuell auslösen: `POST /api/backup`.
-Ergebnisse (auch Fehler) landen im Audit-Log.
+Datendateien (Reservierungen, Rollen, Audit-Log, Cache) regelmäßig als
+`tar.gz` per scp übertragen — Standard: **zweimal täglich**
+(`--backup-interval 43200`). **Rotation**: Archive älter als 30 Tage werden
+auf dem Ziel automatisch gelöscht (`--backup-keep-days`, per sftp, auch auf
+sftp-only-Servern). Authentifizierung bevorzugt per SSH-Key (`--backup-key`);
+ein Passwort (`--backup-password` bzw. `BACKUP_PASSWORD`) funktioniert nur
+mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
+`POST /api/backup`. Ergebnisse (auch Fehler) landen im Audit-Log.
+
+**Restore**: Schritt-für-Schritt-Anleitung in
+[`config/RESTORE.md`](config/RESTORE.md).
 
 ## Optionen
 
@@ -171,7 +176,9 @@ Ergebnisse (auch Fehler) landen im Audit-Log.
 | `--smtp-user`, `--smtp-password`, `--smtp-tls` | SMTP-Anmeldung / STARTTLS |
 | `--backup-target user@srv:/pfad` | SFTP/SCP-Backupziel |
 | `--backup-key`, `--backup-password` | SSH-Key (empfohlen) bzw. Passwort (braucht sshpass) |
-| `--backup-port 22`, `--backup-interval 86400` | SSH-Port / Backup-Intervall in s |
+| `--backup-port 22`, `--backup-interval 43200` | SSH-Port / Backup-Intervall in s (2×/Tag) |
+| `--backup-keep-days 30` | Rotation: ältere Archive auf dem Ziel löschen |
+| `--password-file datei` | Aria-Passwort aus Datei (systemd LoadCredential) |
 | `--log-file data/kapa_log.jsonl` | Audit-Log-Datei |
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
@@ -191,11 +198,14 @@ Fertige Vorlagen liegen unter [`config/`](config/):
   Neustart bei Fehlern, gehärtete Sandbox. Installationsschritte stehen
   als Kommentar in der Datei.
 - **`config/kapa.env.example`** — Vorlage für `/etc/kapa/kapa.env`
-  (Mode 640): Aria-Zugangsdaten, AD, SMTP. **Passwörter werden über die
-  Umgebungsvariablen `ARIA_PASSWORD`/`SMTP_PASSWORD` übergeben** — nie per
-  `--password`-Parameter, damit sie nicht in `ps aux`, Shell-History oder
-  systemd-Status auftauchen. Empfehlung: eigenes Nur-Lese-Servicekonto in
-  Aria Operations verwenden, das Skript liest ausschließlich.
+  (Mode 640): Aria-URL/-Benutzer, AD, SMTP. **Das Aria-Passwort liegt als
+  eigene Datei** `/etc/kapa/aria.pass` (root, Mode 600) und wird per
+  systemd `LoadCredential` + `--password-file` an den Dienst gereicht —
+  es taucht damit weder in `ps aux` noch in `systemctl show` auf.
+  Alternativ gehen Umgebungsvariablen (`ARIA_PASSWORD`, `SMTP_PASSWORD`,
+  `BACKUP_PASSWORD`) oder `--smtp-password-file`/`--backup-password-file`.
+  Empfehlung: eigenes Nur-Lese-Servicekonto in Aria Operations verwenden,
+  das Skript liest ausschließlich.
 - **`config/nginx-kapa.conf`** — Snippet für den bestehenden 443er-Server:
   stellt das Dashboard unter `https://<host>/capa/` bereit (Redirect
   `/capa` → `/capa/`, Prefix-Stripping, Cookie-Pfad). Die Weboberfläche
