@@ -1,0 +1,56 @@
+# =============================================================================
+# systemd-Unit für die VMware Kapazitätsplanung
+# =============================================================================
+# Installation:
+#   sudo useradd --system --home /opt/kapa --shell /usr/sbin/nologin kapa
+#   sudo mkdir -p /opt/kapa && sudo cp aria_kapa.py /opt/kapa/
+#   sudo mkdir -p /etc/kapa
+#   sudo cp config/kapa.env.example /etc/kapa/kapa.env   # und Werte eintragen!
+#   sudo chown root:kapa /etc/kapa/kapa.env && sudo chmod 640 /etc/kapa/kapa.env
+#   sudo chown -R kapa:kapa /opt/kapa
+#   sudo cp config/kapa-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kapa-dashboard
+# Logs: journalctl -u kapa-dashboard -f
+# =============================================================================
+
+[Unit]
+Description=VMware Kapazitätsplanung (Aria Operations Dashboard)
+Documentation=https://github.com/marcobockelbrink/vmware
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kapa
+Group=kapa
+WorkingDirectory=/opt/kapa
+
+# Zugangsdaten & Umgebung (ARIA_URL, ARIA_USER, ARIA_PASSWORD, ...) —
+# liegt mit Mode 640 unter /etc/kapa/kapa.env, taucht nie in `ps aux` auf
+EnvironmentFile=/etc/kapa/kapa.env
+
+# Passwörter kommen aus der Umgebung (ARIA_PASSWORD/SMTP_PASSWORD),
+# NICHT als --password-Parameter angeben!
+ExecStart=/usr/bin/python3 /opt/kapa/aria_kapa.py --serve \
+    --bind 127.0.0.1 --port 8080 \
+    --url ${ARIA_URL} --user ${ARIA_USER} --auth-source ${ARIA_AUTH_SOURCE} \
+    --ad-url ${AD_URL} --ad-domain ${AD_DOMAIN} --admin-user ${ADMIN_USER} \
+    --smtp-server ${SMTP_SERVER} --smtp-from ${SMTP_FROM} --smtp-to ${SMTP_TO} \
+    $KAPA_EXTRA_ARGS
+
+Restart=on-failure
+RestartSec=10
+
+# Härtung: Daten nur unter /opt/kapa/data, sonst read-only
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kapa/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

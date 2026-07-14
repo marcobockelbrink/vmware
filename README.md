@@ -13,6 +13,10 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
   mit allen Kapazitätsanfragen, Status und Summenzeile
 - **Genehmigungs-Dashboard** (Tab „Genehmigungen" bzw. `/genehmigungen`):
   offene Anträge genehmigen oder ablehnen
+- **Audit-Log** (Tab „Log" bzw. `/log`, nur Admins): protokolliert
+  Anmeldungen (auch fehlgeschlagene), Anträge, Genehmigungen/Ablehnungen,
+  Löschungen, Importe, Rollenänderungen und Backups nach
+  `data/kapa_log.jsonl`
 - **Auto-Aktualisierung** im Serve-Modus (Standard: alle 30 Minuten, sichtbarer
   Countdown) plus Knopf „⟳ Jetzt aktualisieren"
 
@@ -122,10 +126,31 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
   über das Netz (`--ad-insecure` für Self-Signed-Zertifikate).
 - Ohne `--ad-url` läuft alles wie bisher ohne Anmeldung (Vollzugriff).
 
+## Konfigurationsdatei und SFTP-Backup
+
+Statt vieler Parameter kann alles in einer INI-Datei stehen
+(Vorlage: [`config/kapa.ini.example`](config/kapa.ini.example)):
+
+```bash
+python3 aria_kapa.py --config /etc/kapa/kapa.ini
+```
+
+Kommandozeilen-Argumente überschreiben Werte aus der Datei; unbekannte
+Schlüssel werden mit Fehlermeldung abgewiesen.
+
+**SFTP-Backup**: Mit `--backup-target backup@srv:/backup/kapa` werden die
+Datendateien (Reservierungen, Rollen, Cache) regelmäßig als `tar.gz`
+per scp übertragen (Standard: täglich, `--backup-interval`). Authentifizierung
+bevorzugt per SSH-Key (`--backup-key`); ein Passwort (`--backup-password`
+bzw. `BACKUP_PASSWORD`) funktioniert nur mit installiertem `sshpass`.
+Admins können ein Backup auch manuell auslösen: `POST /api/backup`.
+Ergebnisse (auch Fehler) landen im Audit-Log.
+
 ## Optionen
 
 | Option | Beschreibung |
 |---|---|
+| `--config kapa.ini` | Alle Optionen aus INI-Datei laden |
 | `--cpu-factor 6` | CPU-Überprovisionierungsfaktor |
 | `--failover-hosts 1` | Ausfall-Hosts pro Cluster (N+1), `0` = aus |
 | `--auth-source local` | Auth-Quelle (z. B. AD-Quelle) |
@@ -144,6 +169,10 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 | `--smtp-server mail.firma.local:25` | Mailserver für Reports |
 | `--smtp-from`, `--smtp-to` | Absender / Report-Empfänger (kommagetrennt) |
 | `--smtp-user`, `--smtp-password`, `--smtp-tls` | SMTP-Anmeldung / STARTTLS |
+| `--backup-target user@srv:/pfad` | SFTP/SCP-Backupziel |
+| `--backup-key`, `--backup-password` | SSH-Key (empfohlen) bzw. Passwort (braucht sshpass) |
+| `--backup-port 22`, `--backup-interval 86400` | SSH-Port / Backup-Intervall in s |
+| `--log-file data/kapa_log.jsonl` | Audit-Log-Datei |
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
 
@@ -153,10 +182,29 @@ ausgeschlossen ist. Auch per Parameter angegebene Dateinamen ohne
 Pfadangabe landen automatisch unter `data/`; explizite Pfade
 (z. B. `/var/lib/kapa/cache.json`) werden respektiert.
 
-## Hinweis zum Betrieb
+## Betrieb auf einem Linux-Host (systemd + nginx)
+
+Fertige Vorlagen liegen unter [`config/`](config/):
+
+- **`config/kapa-dashboard.service`** — systemd-Unit: läuft als eigener
+  Benutzer `kapa` unter `/opt/kapa`, bindet nur an `127.0.0.1:8080`,
+  Neustart bei Fehlern, gehärtete Sandbox. Installationsschritte stehen
+  als Kommentar in der Datei.
+- **`config/kapa.env.example`** — Vorlage für `/etc/kapa/kapa.env`
+  (Mode 640): Aria-Zugangsdaten, AD, SMTP. **Passwörter werden über die
+  Umgebungsvariablen `ARIA_PASSWORD`/`SMTP_PASSWORD` übergeben** — nie per
+  `--password`-Parameter, damit sie nicht in `ps aux`, Shell-History oder
+  systemd-Status auftauchen. Empfehlung: eigenes Nur-Lese-Servicekonto in
+  Aria Operations verwenden, das Skript liest ausschließlich.
+- **`config/nginx-kapa.conf`** — Snippet für den bestehenden 443er-Server:
+  stellt das Dashboard unter `https://<host>/capa/` bereit (Redirect
+  `/capa` → `/capa/`, Prefix-Stripping, Cookie-Pfad). Die Weboberfläche
+  nutzt relative API-Pfade und funktioniert daher unverändert unter dem
+  Unterpfad. Einbinden per `include`, dann `nginx -t && systemctl reload nginx`.
 
 Ohne `--ad-url` hat der eingebaute Webserver keine Authentifizierung — dann
-nur im vertrauenswürdigen Verwaltungsnetz betreiben. Der Server spricht
-selbst kein HTTPS; für den Betrieb über `localhost` hinaus empfiehlt sich
-`--bind 127.0.0.1` hinter einem Reverse-Proxy mit TLS (z. B. nginx), damit
-Anmeldedaten und Session-Cookies verschlüsselt übertragen werden.
+nur im vertrauenswürdigen Verwaltungsnetz betreiben. TLS übernimmt der
+Reverse-Proxy; das Dashboard selbst spricht nur HTTP auf localhost.
+
+Die laufende Version wird im Footer der Weboberfläche und per
+`aria_kapa.py --version` angezeigt.

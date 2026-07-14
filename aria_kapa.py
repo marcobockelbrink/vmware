@@ -18,6 +18,8 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
+VERSION = "0.5"
+
 import argparse
 import getpass
 import json
@@ -238,6 +240,55 @@ def migrate_data_files(*paths):
             os.replace(old, p)
             print(f"Datendatei verschoben: {old} -> {p}", file=sys.stderr)
 
+# ---------------------------------------------------------- SFTP-Backup -----
+
+def sftp_backup(args):
+    """Datendateien als tar.gz per scp auf das Backupziel kopieren.
+
+    Authentifizierung per SSH-Key (--backup-key, empfohlen) oder Passwort
+    (--backup-password bzw. BACKUP_PASSWORD; erfordert installiertes sshpass).
+    Gibt den Namen des übertragenen Archivs zurück."""
+    import subprocess
+    import tarfile
+    import tempfile
+    if not args.backup_target:
+        raise RuntimeError("kein --backup-target konfiguriert")
+    files = [p for p in (args.cache, args.res_file, args.roles_file)
+             if p and os.path.exists(p)]
+    if not files:
+        raise RuntimeError("keine Datendateien vorhanden")
+    name = "kapa_backup_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".tar.gz"
+    tmp = os.path.join(tempfile.gettempdir(), name)
+    with tarfile.open(tmp, "w:gz") as tar:
+        for f in files:
+            tar.add(f, arcname=os.path.basename(f))
+    scp = ["scp", "-q", "-P", str(args.backup_port),
+           "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15"]
+    env = os.environ.copy()
+    if args.backup_key:
+        cmd = scp + ["-i", args.backup_key, "-o", "BatchMode=yes"]
+    elif args.backup_password:
+        env["SSHPASS"] = args.backup_password
+        cmd = ["sshpass", "-e"] + scp
+    else:
+        cmd = scp + ["-o", "BatchMode=yes"]   # ssh-agent / Standard-Keys
+    cmd = cmd + [tmp, args.backup_target.rstrip("/") + "/" + name]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=180, env=env)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.decode(errors="replace").strip()
+                               or f"scp beendet mit Exit-Code {r.returncode}")
+    except FileNotFoundError as e:
+        raise RuntimeError("sshpass nicht installiert – für Passwort-Backups "
+                           "'sshpass' installieren oder besser --backup-key verwenden"
+                           if "sshpass" in str(e) else str(e)) from None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return name
+
 # ----------------------------------------------------------- Mail-Reports ----
 
 def send_mail(args, subject, body, extra_to=()):
@@ -451,6 +502,7 @@ LOGIN_TEMPLATE = r"""<!DOCTYPE html>
   <input id="p" type="password" autocomplete="current-password">
   <button>Anmelden</button>
   <div class="err" id="e"></div>
+  <p style="margin:14px 0 0;text-align:center">Version __VERSION__</p>
 </form>
 <script>
 async function login(ev) {
@@ -458,7 +510,7 @@ async function login(ev) {
   const e = document.getElementById("e");
   e.textContent = "";
   try {
-    const r = await fetch("/api/login", { method: "POST",
+    const r = await fetch("api/login", { method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ username: document.getElementById("u").value.trim(),
                              password: document.getElementById("p").value }) });
@@ -539,6 +591,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .hc-close { position:absolute; top:10px; right:12px; z-index:1;
               background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
   .hc-close:hover { color:var(--text); }
+  .foot { margin-top:28px; text-align:center; color:var(--muted); font-size:11px; }
   .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
@@ -608,6 +661,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
   <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
+  <span class="tab" id="tabLog" onclick="setView('log')">Log</span>
 </div>
 <div class="tablewrap" id="kapaView">
 <table class="kt" id="ktable">
@@ -641,7 +695,14 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
+<div class="tablewrap" id="logView" style="display:none">
+<table class="kt" id="ltable">
+  <thead><tr><th>Zeit</th><th>Benutzer</th><th>Aktion</th><th>Details</th></tr></thead>
+  <tbody id="ltbody"></tbody>
+</table>
+</div>
 <div class="hovercard" id="hovercard"></div>
+<div class="foot">VMware Kapazitätsplanung · Version __VERSION__</div>
 <script>
 let CLUSTERS = __DATA__;
 const FACTOR = __FACTOR__;
@@ -661,7 +722,7 @@ function canDel(r) {
                       && !r.approved && !r.rejected);
 }
 async function logout() {
-  try { await fetch("/api/logout", { method: "POST" }); } catch (e) {}
+  try { await fetch("api/logout", { method: "POST" }); } catch (e) {}
   location.reload();
 }
 
@@ -676,7 +737,7 @@ if (!SERVE) {
 }
 function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(RES)); } catch (e) {} }
 async function apiRes(method, path, body) {
-  const r = await fetch("/api/reservations" + (path || ""), {
+  const r = await fetch("api/reservations" + (path || ""), {
     method: method, headers: {"Content-Type": "application/json"},
     body: body ? JSON.stringify(body) : undefined });
   if (!r.ok) throw new Error("HTTP " + r.status);
@@ -942,36 +1003,61 @@ function row(c, idx, isTotal) {
 }
 
 // ---- Ansichten: Kapazität / Reservierungen / Genehmigungen / Verwaltung ----
-let VIEW = (location.pathname === "/reservierungen" || location.hash === "#reservierungen") ? "res"
-         : (location.pathname === "/genehmigungen" || location.hash === "#genehmigungen") ? "app"
-         : (location.pathname === "/verwaltung" || location.hash === "#verwaltung") ? "adm"
+// endsWith statt ===, damit die Routen auch hinter einem Proxy-Unterpfad
+// (z. B. https://host/capa/reservierungen) funktionieren
+let VIEW = (location.pathname.endsWith("/reservierungen") || location.hash === "#reservierungen") ? "res"
+         : (location.pathname.endsWith("/genehmigungen") || location.hash === "#genehmigungen") ? "app"
+         : (location.pathname.endsWith("/verwaltung") || location.hash === "#verwaltung") ? "adm"
+         : (location.pathname.endsWith("/log") || location.hash === "#log") ? "log"
          : "kapa";
-if (VIEW === "adm" && !IS_ADMIN) VIEW = "kapa";
+if ((VIEW === "adm" || VIEW === "log") && !IS_ADMIN) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  const tabs = { kapa: "tabKapa", res: "tabRes", app: "tabApp", adm: "tabAdm" };
-  const views = { kapa: "kapaView", res: "resView", app: "appView", adm: "admView" };
+  const tabs = { kapa: "tabKapa", res: "tabRes", app: "tabApp", adm: "tabAdm", log: "tabLog" };
+  const views = { kapa: "kapaView", res: "resView", app: "appView", adm: "admView", log: "logView" };
   for (const k in tabs) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
   document.getElementById("filter").placeholder =
-    v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …" : "Reservierungen filtern …";
+    v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
+    : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
   try {
     history.replaceState(null, "",
       v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
-      : v === "adm" ? "#verwaltung" : location.pathname);
+      : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
   if (v === "adm") loadRoles();
+  if (v === "log") loadLog();
   render();
+}
+
+// ---- Audit-Log (nur Admins) ----
+let LOGS = [];
+function loadLog() {
+  fetch("api/log").then(r => r.json())
+    .then(d => { if (Array.isArray(d)) { LOGS = d; if (VIEW === "log") render(); } })
+    .catch(() => {});
+}
+function renderLogTable() {
+  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+  const list = LOGS.filter(e => !q ||
+    (e.user || "").toLowerCase().includes(q) ||
+    (e.action || "").toLowerCase().includes(q) ||
+    (e.detail || "").toLowerCase().includes(q));
+  document.getElementById("ltbody").innerHTML = list.map(e =>
+    `<tr><td style="white-space:nowrap">${esc((e.ts || "").replace("T", " "))}</td>
+     <td>${esc(e.user || "–")}</td><td>${esc(e.action || "")}</td>
+     <td>${esc(e.detail || "")}</td></tr>`).join("") ||
+    `<tr><td colspan="4" style="color:var(--muted)">Keine Log-Einträge${q ? " für diesen Filter" : ""}.</td></tr>`;
 }
 
 // ---- Verwaltung: AD-Benutzer → Rollen ----
 let ROLES = {};   // {benutzer: rolle}
 async function apiRoles(method, path, body) {
-  const r = await fetch("/api/roles" + (path || ""), {
+  const r = await fetch("api/roles" + (path || ""), {
     method: method, headers: {"Content-Type": "application/json"},
     body: body ? JSON.stringify(body) : undefined });
   if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1107,6 +1193,7 @@ function render() {
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "adm") { renderAdmTable(); return; }
+  if (VIEW === "log") { renderLogTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
   TOTAL = {
@@ -1170,6 +1257,7 @@ if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
+if (!IS_ADMIN || !SERVE) document.getElementById("tabLog").style.display = "none";
 if (ROLE === "anforderer") {
   const th = document.getElementById("thDec");
   if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
@@ -1182,13 +1270,13 @@ if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
 let nextRefresh = null;   // Zeitpunkt (ms) der nächsten automatischen Aktualisierung
 
 async function refreshData() {
-  try { await fetch("/api/refresh", { method: "POST" }); pollStatus(); }
+  try { await fetch("api/refresh", { method: "POST" }); pollStatus(); }
   catch (e) { document.getElementById("refreshStatus").textContent = "Server nicht erreichbar."; }
 }
 
 async function pollStatus() {
   let s;
-  try { s = await (await fetch("/api/status")).json(); } catch (e) { return; }
+  try { s = await (await fetch("api/status")).json(); } catch (e) { return; }
   const st = document.getElementById("refreshStatus");
   document.getElementById("refreshBtn").disabled = !!s.refreshing;
   nextRefresh = (s.next != null) ? Date.now() + s.next * 1000 : null;
@@ -1198,7 +1286,7 @@ async function pollStatus() {
   if (!s.refreshing && s.updated &&
       s.updated !== document.getElementById("stand").textContent) {
     try {
-      const d = await (await fetch("/api/data")).json();
+      const d = await (await fetch("api/data")).json();
       CLUSTERS = d.clusters || [];
       document.getElementById("stand").textContent = d.updated || "";
       render();
@@ -1268,6 +1356,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__USERINFO__", json.dumps(userinfo, ensure_ascii=False))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
+            .replace("__VERSION__", VERSION)
             .replace("__DATE__", updated or datetime.now().strftime("%d.%m.%Y %H:%M")))
 
 
@@ -1393,6 +1482,39 @@ def serve(args, password):
 
     reservations = load_res()
 
+    # ---- Audit-Log (JSONL, nur für Admins einsehbar) ----
+    log_lock = threading.Lock()
+
+    def audit(user, action, detail=""):
+        entry = {"ts": datetime.now().isoformat(timespec="seconds"),
+                 "user": user or "system", "action": action, "detail": detail}
+        try:
+            with log_lock:
+                ensure_dir(args.log_file)
+                with open(args.log_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            print(f"Audit-Log nicht schreibbar: {e}", file=sys.stderr)
+
+    def read_log(limit=500):
+        try:
+            with log_lock, open(args.log_file, encoding="utf-8") as f:
+                lines = f.readlines()[-limit:]
+        except OSError:
+            return []
+        out = []
+        for ln in lines:
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                pass
+        return list(reversed(out))   # neueste zuerst
+
+    def res_detail(r):
+        return (f"{r.get('name', '?')} ({r.get('change') or 'ohne Change'}, "
+                f"{r.get('cluster', '?')}, {r.get('vcpu', 0)} vCPU / "
+                f"{r.get('ram_gb', 0)} GB)")
+
     def notify_mail(r, action, admin):
         """Report-Mail zu Genehmigung/Ablehnung im Hintergrund verschicken."""
         if not args.smtp_server:
@@ -1468,6 +1590,21 @@ def serve(args, password):
             else:
                 time.sleep(min(wait, 10))
 
+    def backup_loop():
+        time.sleep(60)   # erst nach dem Anlauf (Cache/Migration abgeschlossen)
+        while True:
+            try:
+                name = sftp_backup(args)
+                print(f"Backup übertragen: {name} -> {args.backup_target}",
+                      file=sys.stderr)
+                audit(None, "Automatisches Backup", name)
+            except Exception as e:
+                print(f"Backup fehlgeschlagen: {e}", file=sys.stderr)
+                audit(None, "Automatisches Backup fehlgeschlagen", str(e))
+            if args.backup_interval <= 0:
+                return
+            time.sleep(args.backup_interval)
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, body, ctype, code=200, headers=None):
             data = body.encode() if isinstance(body, str) else body
@@ -1520,10 +1657,11 @@ def serve(args, password):
 
         def do_GET(self):
             if self.path in ("/", "/index.html", "/reservierungen",
-                             "/genehmigungen", "/verwaltung"):
+                             "/genehmigungen", "/verwaltung", "/log"):
                 s = self._session()
                 if auth_enabled and not s:
-                    self._send(LOGIN_TEMPLATE, "text/html; charset=utf-8")
+                    self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION),
+                               "text/html; charset=utf-8")
                     return
                 userinfo = ({"user": s["user"], "role": s["role"],
                              "abteilung": s.get("abteilung") or ""}
@@ -1561,6 +1699,10 @@ def serve(args, password):
                     return
                 with roles_lock:
                     self._json(dict(roles))
+            elif self.path == "/api/log":
+                if not self._require("admin"):
+                    return
+                self._json(read_log())
             else:
                 self.send_error(404)
 
@@ -1574,6 +1716,7 @@ def serve(args, password):
                 pw = str(body.get("password") or "")
                 entry = role_entry(user)
                 if not user or not entry:
+                    audit(user, "Anmeldung abgewiesen", "keine Rolle zugewiesen")
                     self._json({"error": "Diesem Benutzer ist keine Rolle zugewiesen – "
                                          "bitte an die Administratoren wenden."}, 403)
                     return
@@ -1583,8 +1726,12 @@ def serve(args, password):
                     self._json({"error": f"Active Directory nicht erreichbar: {e}"}, 502)
                     return
                 if not ok:
+                    audit(user, "Anmeldung fehlgeschlagen", "falsches Passwort")
                     self._json({"error": "Benutzername oder Passwort falsch."}, 401)
                     return
+                audit(user, "Anmeldung", f"Rolle: {entry['role']}"
+                      + (f", Abteilung: {entry.get('abteilung')}"
+                         if entry.get("abteilung") else ""))
                 token = secrets.token_urlsafe(32)
                 sessions[token] = {"user": user, "role": entry["role"],
                                    "abteilung": entry.get("abteilung") or "",
@@ -1594,13 +1741,16 @@ def serve(args, password):
                            headers={"Set-Cookie": f"kapa_session={token}; "
                                     "HttpOnly; SameSite=Lax; Path=/"})
             elif self.path == "/api/logout":
-                sessions.pop(self._cookie_token(), None)
+                old = sessions.pop(self._cookie_token(), None)
+                if old:
+                    audit(old["user"], "Abmeldung")
                 self._json({"ok": True},
                            headers={"Set-Cookie": "kapa_session=; Max-Age=0; Path=/"})
             elif self.path == "/api/refresh":
                 if not self._require("admin"):
                     return
                 if not state["refreshing"]:
+                    audit(self._session()["user"], "Datenabruf aus Aria gestartet")
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"started": True}, 202)
             elif self.path == "/api/reservations":
@@ -1635,6 +1785,7 @@ def serve(args, password):
                     reservations.append(entry)
                     save_res()
                     self._json(visible_res(s))
+                audit(s["user"], "Antrag erstellt", res_detail(entry))
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/approve")):
                 s = self._require("admin")
@@ -1656,6 +1807,8 @@ def serve(args, password):
                     save_res()
                     self._json(list(reservations))
                 if notify:
+                    audit(s["user"], "Antrag genehmigt", res_detail(notify)
+                          + (f" – Kommentar: {comment}" if comment else ""))
                     notify_mail(notify, "genehmigt", s["user"] or "unbekannt")
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/reject")):
@@ -1678,7 +1831,20 @@ def serve(args, password):
                     save_res()
                     self._json(list(reservations))
                 if notify:
+                    audit(s["user"], "Antrag abgelehnt", res_detail(notify)
+                          + (f" – Kommentar: {comment}" if comment else ""))
                     notify_mail(notify, "abgelehnt", s["user"] or "unbekannt")
+            elif self.path == "/api/backup":
+                if not self._require("admin"):
+                    return
+                try:
+                    with res_lock:
+                        name = sftp_backup(args)
+                    audit(self._session()["user"], "Backup ausgelöst", name)
+                    self._json({"ok": True, "backup": name})
+                except Exception as e:
+                    audit(self._session()["user"], "Backup fehlgeschlagen", str(e))
+                    self._json({"error": str(e)}, 502)
             elif self.path == "/api/roles":
                 if not self._require("admin"):
                     return
@@ -1693,6 +1859,8 @@ def serve(args, password):
                     roles[user] = {"role": role, "abteilung": dept}
                     save_roles()
                     self._json(dict(roles))
+                audit(self._session()["user"], "Rolle zugewiesen",
+                      f"{user} -> {role}" + (f" ({dept})" if dept else ""))
             else:
                 self.send_error(404)
 
@@ -1717,6 +1885,8 @@ def serve(args, password):
                     reservations[:] = prune_res(cleaned)
                     save_res()
                     self._json(list(reservations))
+                audit(self._session()["user"], "Reservierungen importiert",
+                      f"{len(cleaned)} Einträge (ersetzt Bestand)")
             else:
                 self.send_error(404)
 
@@ -1737,14 +1907,20 @@ def serve(args, password):
                     reservations[:] = [r for r in reservations if r.get("id") != rid]
                     save_res()
                     self._json(visible_res(s))
+                if target:
+                    audit(s["user"], "Reservierung gelöscht", res_detail(target))
             elif self.path.startswith("/api/roles/"):
-                if not self._require("admin"):
+                s = self._require("admin")
+                if not s:
                     return
                 user = urllib.parse.unquote(self.path.rsplit("/", 1)[1]).lower()
                 with roles_lock:
-                    roles.pop(user, None)
+                    removed = roles.pop(user, None)
                     save_roles()
                     self._json(dict(roles))
+                if removed:
+                    audit(s["user"], "Rolle entfernt",
+                          f"{user} (war {removed.get('role')})")
             else:
                 self.send_error(404)
 
@@ -1752,6 +1928,8 @@ def serve(args, password):
             pass
 
     threading.Thread(target=scheduler, daemon=True).start()
+    if args.backup_target:
+        threading.Thread(target=backup_loop, daemon=True).start()
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)
     print(f"Dashboard läuft: http://localhost:{args.port}  (Strg+C zum Beenden)"
           + (f" · Auto-Refresh alle {interval // 60} min" if interval else "")
@@ -1764,11 +1942,45 @@ def serve(args, password):
 
 # ------------------------------------------------------------------- main ----
 
+def apply_config_file(ap, path):
+    """INI-Datei (Sektion [kapa]) als neue Defaults in den Parser übernehmen.
+    Schlüssel entsprechen den Optionsnamen (Bindestrich oder Unterstrich)."""
+    import configparser
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    try:
+        with open(path, encoding="utf-8") as f:
+            cp.read_file(f)
+    except (OSError, configparser.Error) as e:
+        ap.error(f"Konfigurationsdatei {path}: {e}")
+    sec = cp["kapa"] if cp.has_section("kapa") else cp[cp.default_section]
+    by_dest = {a.dest: a for a in ap._actions}
+    defaults = {}
+    for key, raw in sec.items():
+        dest = key.strip().lower().replace("-", "_")
+        action = by_dest.get(dest)
+        if action is None or dest in ("help", "version", "config"):
+            ap.error(f"Unbekannte Option '{key}' in {path}")
+        raw = raw.strip()
+        if isinstance(action, argparse._StoreTrueAction):
+            defaults[dest] = raw.lower() in ("1", "true", "yes", "ja", "on")
+        elif action.type is int:
+            try:
+                defaults[dest] = int(raw)
+            except ValueError:
+                ap.error(f"Option '{key}' in {path}: Ganzzahl erwartet, '{raw}' erhalten")
+        else:
+            defaults[dest] = raw
+    ap.set_defaults(**defaults)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Aria Ops Kapazitätsauswertung pro Cluster")
+    ap.add_argument("--version", action="version", version=f"aria_kapa {VERSION}")
     ap.add_argument("--url", help="Basis-URL, z.B. https://aria-ops.firma.de")
     ap.add_argument("--user", help="Benutzername")
-    ap.add_argument("--password", help="Passwort (sonst interaktive Abfrage)")
+    ap.add_argument("--password",
+                    help="Passwort (alternativ Umgebungsvariable ARIA_PASSWORD, "
+                         "sonst interaktive Abfrage)")
     ap.add_argument("--auth-source", default="local", help="Auth-Quelle (Standard: local)")
     ap.add_argument("--cpu-factor", type=int, default=6, help="CPU-Überprovisionierungsfaktor (Standard: 6)")
     ap.add_argument("--failover-hosts", type=int, default=1,
@@ -1816,14 +2028,40 @@ def main():
     ap.add_argument("--smtp-user", default="", help="SMTP-Anmeldung (optional)")
     ap.add_argument("--smtp-password", default="", help="SMTP-Passwort (optional)")
     ap.add_argument("--smtp-tls", action="store_true", help="STARTTLS verwenden")
+    ap.add_argument("--config",
+                    help="INI-Datei mit allen Optionen (Sektion [kapa], Schlüssel wie "
+                         "die Optionsnamen); Kommandozeile überschreibt die Datei")
+    ap.add_argument("--backup-target", default="",
+                    help="SFTP/SCP-Backupziel, z. B. backup@srv:/backup/kapa "
+                         "(ohne Angabe: kein Backup)")
+    ap.add_argument("--backup-port", type=int, default=22, help="SSH-Port (Standard: 22)")
+    ap.add_argument("--backup-key", default="",
+                    help="SSH-Private-Key für das Backup (empfohlen)")
+    ap.add_argument("--backup-password", default="",
+                    help="SSH-Passwort (alternativ BACKUP_PASSWORD; erfordert sshpass)")
+    ap.add_argument("--backup-interval", type=int, default=86400,
+                    help="Backup-Intervall in Sekunden (Standard: 86400 = täglich, "
+                         "0 = nur einmal beim Start)")
+    ap.add_argument("--log-file", default="data/kapa_log.jsonl",
+                    help="Audit-Log-Datei (Standard: data/kapa_log.jsonl)")
+    # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
+    pre, _ = ap.parse_known_args()
+    if pre.config:
+        apply_config_file(ap, pre.config)
     args = ap.parse_args()
 
     # JSON-Datendateien ohne Pfadangabe immer unter data/ ablegen
     args.cache = data_path(args.cache)
     args.res_file = data_path(args.res_file)
     args.roles_file = data_path(args.roles_file)
+    args.log_file = data_path(args.log_file)
     if args.json:
         args.json = data_path(args.json)
+
+    # Zugangsdaten auch aus der Umgebung (für systemd/EnvironmentFile)
+    args.password = args.password or os.environ.get("ARIA_PASSWORD")
+    args.smtp_password = args.smtp_password or os.environ.get("SMTP_PASSWORD", "")
+    args.backup_password = args.backup_password or os.environ.get("BACKUP_PASSWORD", "")
 
     if args.serve:
         pw = None

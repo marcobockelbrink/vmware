@@ -1,0 +1,54 @@
+# =============================================================================
+# Konfigurationsdatei für aria_kapa.py — Vorlage
+# =============================================================================
+# Verwendung:  python3 aria_kapa.py --config /etc/kapa/kapa.ini --serve
+# Schlüssel entsprechen den Kommandozeilen-Optionen (mit - oder _).
+# Kommandozeilen-Argumente überschreiben Werte aus dieser Datei.
+# Enthält die Datei Passwörter: chmod 600 nicht vergessen!
+# (Alternativ Passwörter per Umgebung: ARIA_PASSWORD, SMTP_PASSWORD,
+#  BACKUP_PASSWORD — siehe kapa.env.example)
+# =============================================================================
+
+[kapa]
+# --- Aria Operations --------------------------------------------------------
+url = https://aria-ops.firma.de
+user = svc-kapa-readonly
+#password = besser-per-ARIA_PASSWORD-umgebungsvariable
+auth-source = local
+#insecure = true                 ; Self-Signed-Zertifikat akzeptieren
+
+# --- Berechnung ---------------------------------------------------------------
+cpu-factor = 6
+failover-hosts = 1
+
+# --- Webserver ----------------------------------------------------------------
+serve = true
+bind = 127.0.0.1
+port = 8080
+refresh-interval = 1800
+
+# --- Reservierungen -----------------------------------------------------------
+res-ttl-days = 31
+#res-file = data/kapa_reservierungen.json
+#cache = data/kapa_cache.json
+
+# --- Active-Directory-Anmeldung ------------------------------------------------
+ad-url = ldaps://dc01.firma.local
+ad-domain = firma.local
+admin-user = vorname.nachname@firma.local
+#ad-insecure = true
+#roles-file = data/kapa_rollen.json
+
+# --- Mail-Reports ---------------------------------------------------------------
+smtp-server = mail.firma.local:25
+smtp-from = kapa-dashboard@firma.local
+smtp-to = vmware-team@firma.local
+#smtp-user =
+#smtp-tls = true
+
+# --- SFTP-Backup ----------------------------------------------------------------
+backup-target = backup@backupsrv.firma.local:/backup/kapa
+backup-key = /etc/kapa/backup_ed25519
+#backup-password = nur-mit-installiertem-sshpass
+backup-port = 22
+backup-interval = 86400
