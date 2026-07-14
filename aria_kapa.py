@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "0.6"
+VERSION = "0.7"
 
 import argparse
 import getpass
