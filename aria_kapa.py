@@ -273,6 +273,7 @@ def reservation_mail_body(r, action, admin, res_ttl):
             f"Abteilung:   {r.get('abteilung') or '–'}\n"
             f"Beantragt:   von {r.get('von') or '–'} am {r.get('created') or '–'}\n"
             f"Gültig bis:  {valid or '–'}\n"
+            f"Kommentar:   {r.get('comment') or '–'}\n"
             f"\n"
             f"{action} von {admin} am {datetime.now().strftime('%d.%m.%Y %H:%M')}\n")
 
@@ -607,7 +608,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
@@ -685,10 +686,11 @@ function validUntil(r) {
   return d.toISOString().slice(0, 10);
 }
 function stBadge(r) {
+  const cmt = r.comment ? " · Kommentar: " + esc(r.comment) : "";
   if (r.rejected)
-    return `<span class="st rej" title="abgelehnt von ${esc(r.rejected_by || "?")} am ${fmtDate(r.rejected_on)}">abgelehnt</span>`;
+    return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
   if (r.approved)
-    return `<span class="st ok" title="genehmigt von ${esc(r.approved_by || "?")} am ${fmtDate(r.approved_on)}">genehmigt</span>`;
+    return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt</span>`;
   return '<span class="st pend">beantragt</span>';
 }
 function isPend(r) { return !r.approved && !r.rejected; }
@@ -725,22 +727,31 @@ function createRes(c, name, vcpu, ram, errEl) {
 
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
-  if (!confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen? " +
-               "Die Ablehnung bleibt " + (TTL > 0 ? TTL : 31) +
-               " Tage in der Historie sichtbar.")) return;
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject").then(setRes).catch(resFail);
+  const c = prompt("Antrag „" + ((r && r.name) || "?") + "“ ablehnen?\n" +
+                   "Kommentar / Begründung (optional) – die Ablehnung bleibt " +
+                   (TTL > 0 ? TTL : 31) + " Tage in der Historie sichtbar:", "");
+  if (c === null) return;   // Abbrechen
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject",
+                    { comment: c.trim() }).then(setRes).catch(resFail);
   else if (r) {
     r.rejected = true;
     r.rejected_on = new Date().toISOString().slice(0, 10);
+    if (c.trim()) r.comment = c.trim();
     saveLocal(); render();
   }
 }
 
 function approveRes(id) {
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve").then(setRes).catch(resFail);
-  else {
-    const r = RES.find(x => x.id === id);
-    if (r) { r.approved = true; saveLocal(); render(); }
+  const r = RES.find(x => x.id === id);
+  const c = prompt("Antrag „" + ((r && r.name) || "?") + "“ genehmigen?\n" +
+                   "Kommentar (optional):", "");
+  if (c === null) return;   // Abbrechen
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve",
+                    { comment: c.trim() }).then(setRes).catch(resFail);
+  else if (r) {
+    r.approved = true;
+    if (c.trim()) r.comment = c.trim();
+    saveLocal(); render();
   }
 }
 
@@ -1001,17 +1012,21 @@ function filterRes(list) {
 function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
+  const showDec = ROLE !== "anforderer";
+  const nCols = showDec ? 12 : 11;
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
+     ${showDec ? `<td>${esc(r.approved_by || r.rejected_by || "–")}</td>` : ""}
+     <td>${esc(r.comment || "–")}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td></td><td></td><td></td><td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="10" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+     <td colspan="${nCols - 4}"></td></tr>` +
+    (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
@@ -1109,8 +1124,12 @@ if (ME) {
 }
 if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
-if (ROLE === "auditor") document.getElementById("refreshBtn").style.display = "none";
+if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
+if (ROLE === "anforderer") {
+  const th = document.getElementById("thDec");
+  if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
+}
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
@@ -1357,7 +1376,9 @@ def serve(args, password):
         for r in reservations:
             mine = (dept and r.get("abteilung") == dept) or r.get("von") == s["user"]
             if mine:
-                out.append(r)
+                # Anforderer sehen nicht, welcher Admin entschieden hat
+                out.append({k: v for k, v in r.items()
+                            if k not in ("approved_by", "rejected_by")})
             elif r.get("approved"):
                 out.append({"id": r.get("id"), "cluster": r.get("cluster"),
                             "name": "(andere Abteilung)", "vcpu": r.get("vcpu"),
@@ -1532,7 +1553,7 @@ def serve(args, password):
                 self._json({"ok": True},
                            headers={"Set-Cookie": "kapa_session=; Max-Age=0; Path=/"})
             elif self.path == "/api/refresh":
-                if not self._require("admin", "anforderer"):
+                if not self._require("admin"):
                     return
                 if not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
@@ -1570,6 +1591,7 @@ def serve(args, password):
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/approve")])
+                comment = str((self._body() or {}).get("comment") or "").strip()[:500]
                 notify = None
                 with res_lock:
                     for r in reservations:
@@ -1577,6 +1599,8 @@ def serve(args, password):
                             r["approved"] = True
                             r["approved_on"] = datetime.now().date().isoformat()
                             r["approved_by"] = s["user"] or ""
+                            if comment:
+                                r["comment"] = comment
                             notify = dict(r)
                     save_res()
                     self._json(list(reservations))
@@ -1589,6 +1613,7 @@ def serve(args, password):
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/reject")])
+                comment = str((self._body() or {}).get("comment") or "").strip()[:500]
                 notify = None
                 with res_lock:
                     for r in reservations:
@@ -1596,6 +1621,8 @@ def serve(args, password):
                             r["rejected"] = True
                             r["rejected_on"] = datetime.now().date().isoformat()
                             r["rejected_by"] = s["user"] or ""
+                            if comment:
+                                r["comment"] = comment
                             notify = dict(r)
                     save_res()
                     self._json(list(reservations))

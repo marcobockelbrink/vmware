@@ -63,8 +63,14 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Genehmigungsübersicht zeigt je Antrag die freie Kapazität des Ziel-Clusters
   (⚠ wenn der Antrag nicht mehr hineinpasst).
 - **Ablehnungen** bleiben 31 Tage (ab Ablehnung) als Historie sichtbar
-  (Status „abgelehnt"), inkl. wer abgelehnt hat; genehmigte Einträge zeigen
-  den genehmigenden Admin (Tooltip auf dem Status).
+  (Status „abgelehnt").
+- **Kommentar**: Beim Genehmigen/Ablehnen kann der Admin einen Kommentar
+  (z. B. Begründung) erfassen; er erscheint in der Reservierungsübersicht
+  und in der Report-Mail.
+- **Entschieden von**: Die Übersicht zeigt, welcher Admin genehmigt bzw.
+  abgelehnt hat — für Anforderer ist diese Information verborgen (Spalte und
+  Datenfeld werden serverseitig entfernt); Admins und technische Prüfung
+  sehen sie.
 - **Mail-Reports**: Mit `--smtp-server` verschickt das Dashboard bei jeder
   Genehmigung/Ablehnung eine Mail mit den Reservierungsdaten und dem
   ausführenden Admin an `--smtp-to` sowie automatisch an den Anforderer.
@@ -88,8 +94,8 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 | Rolle | Rechte |
 |---|---|
-| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung** |
-| **Administrator** | Anträge genehmigen/ablehnen, alle Reservierungen verwalten, Import, Rollen und Abteilungen pflegen (Tab „Verwaltung"); sieht alles |
+| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung**, nicht den entscheidenden Admin |
+| **Administrator** | Anträge genehmigen/ablehnen (mit Kommentar), Daten aus Aria aktualisieren, alle Reservierungen verwalten, Import, Rollen und Abteilungen pflegen (Tab „Verwaltung"); sieht alles |
 | **Technische Prüfung** | Alle Daten und Seiten einsehen — keinerlei Änderungen möglich |
 
 - **Rollen zuweisen**: Tab „Verwaltung" (`/verwaltung`) — AD-Benutzernamen

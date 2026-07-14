@@ -94,7 +94,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:56</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 18:11</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -145,7 +145,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
@@ -223,10 +223,11 @@ function validUntil(r) {
   return d.toISOString().slice(0, 10);
 }
 function stBadge(r) {
+  const cmt = r.comment ? " · Kommentar: " + esc(r.comment) : "";
   if (r.rejected)
-    return `<span class="st rej" title="abgelehnt von ${esc(r.rejected_by || "?")} am ${fmtDate(r.rejected_on)}">abgelehnt</span>`;
+    return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
   if (r.approved)
-    return `<span class="st ok" title="genehmigt von ${esc(r.approved_by || "?")} am ${fmtDate(r.approved_on)}">genehmigt</span>`;
+    return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt</span>`;
   return '<span class="st pend">beantragt</span>';
 }
 function isPend(r) { return !r.approved && !r.rejected; }
@@ -263,22 +264,31 @@ function createRes(c, name, vcpu, ram, errEl) {
 
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
-  if (!confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen? " +
-               "Die Ablehnung bleibt " + (TTL > 0 ? TTL : 31) +
-               " Tage in der Historie sichtbar.")) return;
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject").then(setRes).catch(resFail);
+  const c = prompt("Antrag „" + ((r && r.name) || "?") + "“ ablehnen?\n" +
+                   "Kommentar / Begründung (optional) – die Ablehnung bleibt " +
+                   (TTL > 0 ? TTL : 31) + " Tage in der Historie sichtbar:", "");
+  if (c === null) return;   // Abbrechen
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject",
+                    { comment: c.trim() }).then(setRes).catch(resFail);
   else if (r) {
     r.rejected = true;
     r.rejected_on = new Date().toISOString().slice(0, 10);
+    if (c.trim()) r.comment = c.trim();
     saveLocal(); render();
   }
 }
 
 function approveRes(id) {
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve").then(setRes).catch(resFail);
-  else {
-    const r = RES.find(x => x.id === id);
-    if (r) { r.approved = true; saveLocal(); render(); }
+  const r = RES.find(x => x.id === id);
+  const c = prompt("Antrag „" + ((r && r.name) || "?") + "“ genehmigen?\n" +
+                   "Kommentar (optional):", "");
+  if (c === null) return;   // Abbrechen
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve",
+                    { comment: c.trim() }).then(setRes).catch(resFail);
+  else if (r) {
+    r.approved = true;
+    if (c.trim()) r.comment = c.trim();
+    saveLocal(); render();
   }
 }
 
@@ -539,17 +549,21 @@ function filterRes(list) {
 function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
+  const showDec = ROLE !== "anforderer";
+  const nCols = showDec ? 12 : 11;
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
+     ${showDec ? `<td>${esc(r.approved_by || r.rejected_by || "–")}</td>` : ""}
+     <td>${esc(r.comment || "–")}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td></td><td></td><td></td><td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="10" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+     <td colspan="${nCols - 4}"></td></tr>` +
+    (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
@@ -647,8 +661,12 @@ if (ME) {
 }
 if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
-if (ROLE === "auditor") document.getElementById("refreshBtn").style.display = "none";
+if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
+if (ROLE === "anforderer") {
+  const th = document.getElementById("thDec");
+  if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
+}
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
