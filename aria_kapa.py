@@ -155,7 +155,7 @@ def name_of(res):
     return res.get("resourceKey", {}).get("name", "?")
 
 
-def collect(api, cpu_factor, progress=None):
+def collect(api, cpu_factor, progress=None, failover_hosts=1):
     log = progress or (lambda m: print(m, file=sys.stderr))
 
     log("Lese Cluster ...")
@@ -222,15 +222,21 @@ def collect(api, cpu_factor, progress=None):
             "on": "on" in power.lower().replace(" ", ""),
         })
 
-    return build_summary(data, cpu_factor)
+    return build_summary(data, cpu_factor, failover_hosts)
 
 
-def build_summary(data, cpu_factor):
-    """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}"""
+def build_summary(data, cpu_factor, failover_hosts=1):
+    """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}
+
+    Pro Cluster werden die größten `failover_hosts` Hosts als Ausfallreserve
+    (N+1) von der Gesamtkapazität abgezogen."""
     clusters = []
     for cl, d in sorted(data.items()):
-        cores = sum(h["cores"] for h in d["hosts"])
-        host_ram = round(sum(h["ram_gb"] for h in d["hosts"]), 1)
+        n_spare = min(max(0, failover_hosts), max(0, len(d["hosts"]) - 1))
+        spare_cores = sum(sorted((h["cores"] for h in d["hosts"]), reverse=True)[:n_spare])
+        spare_ram = sum(sorted((h["ram_gb"] for h in d["hosts"]), reverse=True)[:n_spare])
+        cores = sum(h["cores"] for h in d["hosts"]) - spare_cores
+        host_ram = round(sum(h["ram_gb"] for h in d["hosts"]) - spare_ram, 1)
         vcpu_cap = cores * cpu_factor
         vcpu_used = sum(v["vcpu"] for v in d["vms"])
         ram_used = round(sum(v["ram_gb"] for v in d["vms"]), 1)
@@ -238,6 +244,8 @@ def build_summary(data, cpu_factor):
             "name": cl,
             "hostCount": len(d["hosts"]),
             "cores": cores,
+            "spareCores": spare_cores,
+            "spareRamGb": round(spare_ram, 1),
             "vcpuCap": vcpu_cap,
             "vcpuUsed": vcpu_used,
             "vcpuFree": vcpu_cap - vcpu_used,
@@ -330,12 +338,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           border-radius:10px; padding:3px; gap:3px; margin-bottom:16px; }
   .tab { padding:6px 14px; font-size:13px; color:var(--muted); cursor:pointer; border-radius:8px; }
   .tab.active { background:var(--card); color:var(--text); }
+  .cl { color:var(--accent); cursor:pointer; }
+  .cl:hover { text-decoration:underline; }
+  .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
+  .st.ok { background:rgba(34,197,94,.15); color:var(--ok); }
+  .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
+  .btn.approve { border-color:var(--ok); color:var(--ok); }
+  .btn.approve:hover { background:rgba(34,197,94,.15); }
+  .hc-close { position:absolute; top:10px; right:12px; z-index:1;
+              background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
+  .hc-close:hover { color:var(--text); }
   .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
   .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
-  .resform { display:grid; grid-template-columns:2fr 70px 80px 1fr auto; gap:6px; margin-top:8px; }
+  .resform { display:grid; grid-template-columns:2fr 70px 80px auto; gap:6px; margin-top:8px; }
   .resform input { background:#0b1220; border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
   .resform input:focus { outline:none; border-color:var(--res); }
@@ -358,8 +376,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt Reservierungen · Stand: <span id="stand">__DATE__</span><br>
-Zeile mit der Maus überfahren zeigt Details und Reservierungen. __RESNOTE__</div>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen__FAILNOTE__ · Stand: <span id="stand">__DATE__</span><br>
+Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
   <button class="btn primary" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
@@ -380,19 +398,19 @@ Zeile mit der Maus überfahren zeigt Details und Reservierungen. __RESNOTE__</di
     <input id="mCpu" type="number" min="0" placeholder="0">
     <label>RAM (GB)</label>
     <input id="mRam" type="number" min="0" placeholder="0">
-    <label>geplant ab (optional)</label>
-    <input id="mDate" type="date">
     <div class="hint" id="mHint"></div>
+    <div class="hint" id="mValid" style="color:var(--muted)"></div>
     <div class="err" id="mErr"></div>
     <div class="actions">
       <button class="btn" onclick="closeModal()">Abbrechen</button>
-      <button class="btn primary" onclick="submitModal()">Reservieren</button>
+      <button class="btn primary" onclick="submitModal()">Beantragen</button>
     </div>
   </div>
 </div>
 <div class="tabs">
   <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
+  <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
 </div>
 <div class="tablewrap" id="kapaView">
 <table class="kt" id="ktable">
@@ -406,8 +424,15 @@ Zeile mit der Maus überfahren zeigt Details und Reservierungen. __RESNOTE__</di
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>geplant ab</th><th>angelegt</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
+</table>
+</div>
+<div class="tablewrap" id="appView" style="display:none">
+<table class="kt" id="atable">
+  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
+    <th class="num">RAM (GB)</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+  <tbody id="atbody"></tbody>
 </table>
 </div>
 <div class="hovercard" id="hovercard"></div>
@@ -437,7 +462,24 @@ async function apiRes(method, path, body) {
 }
 function setRes(list) { if (Array.isArray(list)) { RES = list; render(); } }
 function resFail() { alert("Reservierungen konnten nicht auf dem Server gespeichert werden."); }
-function resFor(cl) { return RES.filter(r => r.cluster === cl); }
+// Nur genehmigte Reservierungen zählen gegen die Kapazität
+function resFor(cl) { return RES.filter(r => r.cluster === cl && r.approved); }
+function allFor(cl) { return RES.filter(r => r.cluster === cl); }
+function fmtDate(iso) {
+  if (!iso) return "–";
+  const p = String(iso).slice(0, 10).split("-");
+  return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : iso;
+}
+function validUntil(r) {
+  if (!r.created) return "";
+  const d = new Date(r.created + "T12:00:00");
+  d.setDate(d.getDate() + (TTL > 0 ? TTL - 1 : 30));
+  return d.toISOString().slice(0, 10);
+}
+function stBadge(r) {
+  return r.approved ? '<span class="st ok">genehmigt</span>'
+                    : '<span class="st pend">beantragt</span>';
+}
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
 function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
 
@@ -447,7 +489,7 @@ function freeAfter(c) {
            ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
 }
 
-function createRes(c, name, vcpu, ram, date, errEl) {
+function createRes(c, name, vcpu, ram, errEl) {
   errEl.style.display = "none";
   if (!name || (vcpu <= 0 && ram <= 0)) {
     errEl.textContent = "Bitte Bezeichnung sowie vCPU und/oder RAM angeben.";
@@ -456,23 +498,37 @@ function createRes(c, name, vcpu, ram, date, errEl) {
   const f = freeAfter(c);
   if ((vcpu > f.cpu || ram > f.ram) &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
-               "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem anlegen?")) return false;
-  const item = { cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram, date: date };
+               "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem beantragen?")) return false;
+  const item = { cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram };
   if (SERVE) {
     apiRes("POST", "", item).then(setRes).catch(resFail);
   } else {
     item.id = Date.now() + "-" + Math.random().toString(36).slice(2,7);
     item.created = new Date().toISOString().slice(0,10);
+    item.approved = false;
     RES.push(item); saveLocal(); render();
   }
   return true;
+}
+
+function rejectRes(id) {
+  const r = RES.find(x => x.id === id);
+  if (confirm("Antrag „" + ((r && r.name) || "?") + "“ ablehnen und löschen?")) delRes(id);
+}
+
+function approveRes(id) {
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve").then(setRes).catch(resFail);
+  else {
+    const r = RES.find(x => x.id === id);
+    if (r) { r.approved = true; saveLocal(); render(); }
+  }
 }
 
 function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
   createRes(c, g("n").value.trim(), parseInt(g("c").value) || 0,
-            parseFloat(g("r").value) || 0, g("d").value, g("e"));
+            parseFloat(g("r").value) || 0, g("e"));
 }
 function delRes(id) {
   if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
@@ -484,8 +540,12 @@ function openModal(prefIdx) {
   const sel = document.getElementById("mCluster");
   sel.innerHTML = CLUSTERS.map((c, i) =>
     `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
-  ["mName", "mCpu", "mRam", "mDate"].forEach(id => document.getElementById(id).value = "");
+  ["mName", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("mErr").style.display = "none";
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("mValid").textContent =
+    "Gilt ab heute (" + fmtDate(today) + ") bis " +
+    fmtDate(validUntil({created: today})) + " · wirksam erst nach Genehmigung.";
   modalHint();
   document.getElementById("modalBg").classList.add("open");
   document.getElementById("mName").focus();
@@ -502,7 +562,7 @@ function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
   const v = id => document.getElementById(id).value;
   const ok = createRes(c, v("mName").trim(), parseInt(v("mCpu")) || 0,
-                       parseFloat(v("mRam")) || 0, v("mDate"),
+                       parseFloat(v("mRam")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -547,24 +607,27 @@ function metric(label, used, resv, cap, unit) {
 }
 
 function card(c, idx, isTotal) {
-  const rv = isTotal ? RES.filter(r => !TOTAL || TOTAL._names.has(r.cluster)) : resFor(c.name);
+  const clRes = isTotal ? RES.filter(r => !TOTAL || TOTAL._names.has(r.cluster)) : allFor(c.name);
+  const rv = clRes.filter(r => r.approved);
   const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
   const vmRows = (c.vms || []).sort((a,b)=>b.vcpu-a.vcpu).map(v =>
     `<tr class="${v.on?'':'off'}"><td>${esc(v.name)}${v.on?'':' (aus)'}</td>
      <td class="num">${v.vcpu}</td><td class="num">${fmt(v.ram_gb)}</td></tr>`).join("");
   const hostRows = (c.hosts || []).map(h =>
     `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
-  const resRows = rv.map(r =>
+  const resRows = clRes.map(r =>
     `<tr><td>${esc(r.name)}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
-     <td>${r.date || "–"}</td>
+     <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td><button class="del" title="Reservierung löschen" onclick="delRes('${r.id}')">✕</button></td></tr>`).join("");
-  const resTable = rv.length ?
-    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>geplant ab</th><th></th></tr>${resRows}</table>`
+  const resTable = clRes.length ?
+    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
+  const spare = (c.spareCores || c.spareRamGb) ?
+    ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
   return `<div class="card ${isTotal?'total':''}">
     <h2>${esc(c.name)}</h2>
-    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} phys. Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} Reservierung${rv.length===1?'':'en'}</div>
+    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.length-rv.length?` / ${clRes.length-rv.length} beantragt`:''}${spare}</div>
     ${metric("vCPU (Cores × " + FACTOR + ")", c.vcpuUsed, rvCpu, c.vcpuCap, "vCPU")}
     ${metric("RAM", c.ramUsed, rvRam, c.ramCap, "GB")}
     <div class="kpis">
@@ -580,8 +643,7 @@ function card(c, idx, isTotal) {
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
         <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
-        <input id="f${idx}d" type="date" title="geplant ab">
-        <button class="btn" onclick="addRes(${idx})">+ Reservieren</button>
+        <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
     </div>
@@ -610,61 +672,90 @@ function miniBar(used, resv, cap) {
 }
 
 function row(c, idx, isTotal) {
-  const rv = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : resFor(c.name);
+  const clRes = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : allFor(c.name);
+  const rv = clRes.filter(r => r.approved);
+  const pend = clRes.length - rv.length;
   const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
   const fCpu = c.vcpuFree - rvCpu;
   const fRam = Math.round((c.ramFree - rvRam) * 10) / 10;
   const cCpu = color(pct(c.vcpuUsed + rvCpu, c.vcpuCap));
   const cRam = color(pct(c.ramUsed + rvRam, c.ramCap));
-  return `<tr class="${isTotal ? 'trtotal' : ''}" onmouseenter="showCard(${idx},this)">
-    <td>${esc(c.name)}</td>
+  return `<tr class="${isTotal ? 'trtotal' : ''}">
+    <td class="cl" title="Details anzeigen" onclick="toggleCard(${idx},this)">${esc(c.name)}</td>
     <td class="num">${fmt(c.hostCount)}</td>
     <td class="num">${fmt(c.vmCount)}</td>
     <td class="num free" style="color:${cCpu}">${fmt(fCpu)}</td>
     <td class="barcol">${miniBar(c.vcpuUsed, rvCpu, c.vcpuCap)}</td>
     <td class="num free" style="color:${cRam}">${fmt(fRam)}</td>
     <td class="barcol">${miniBar(c.ramUsed, rvRam, c.ramCap)}</td>
-    <td class="num">${rv.length || "–"}</td></tr>`;
+    <td class="num">${rv.length || "–"}${pend ? ` <span class="st pend">+${pend}</span>` : ""}</td></tr>`;
 }
 
-// ---- Ansichten: Kapazität / Reservierungen ----
-let VIEW = (location.pathname === "/reservierungen" ||
-            location.hash === "#reservierungen") ? "res" : "kapa";
+// ---- Ansichten: Kapazität / Reservierungen / Genehmigungen ----
+let VIEW = (location.pathname === "/reservierungen" || location.hash === "#reservierungen") ? "res"
+         : (location.pathname === "/genehmigungen" || location.hash === "#genehmigungen") ? "app"
+         : "kapa";
 
 function setView(v) {
   VIEW = v;
   document.getElementById("tabKapa").classList.toggle("active", v === "kapa");
   document.getElementById("tabRes").classList.toggle("active", v === "res");
+  document.getElementById("tabApp").classList.toggle("active", v === "app");
   document.getElementById("kapaView").style.display = v === "kapa" ? "" : "none";
   document.getElementById("resView").style.display = v === "res" ? "" : "none";
+  document.getElementById("appView").style.display = v === "app" ? "" : "none";
   document.getElementById("filter").placeholder =
-    v === "res" ? "Reservierungen filtern …" : "Cluster filtern …";
-  try { history.replaceState(null, "", v === "res" ? "#reservierungen" : location.pathname); } catch (e) {}
+    v === "kapa" ? "Cluster filtern …" : "Reservierungen filtern …";
+  try {
+    history.replaceState(null, "",
+      v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen" : location.pathname);
+  } catch (e) {}
   hideCard();
   render();
 }
 
-function renderResTable() {
+function filterRes(list) {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
-  const list = RES.filter(r => !q ||
+  return list.filter(r => !q ||
       (r.name || "").toLowerCase().includes(q) ||
       (r.cluster || "").toLowerCase().includes(q))
     .slice().sort((a, b) => (a.cluster || "").localeCompare(b.cluster || "") ||
-                            (a.date || "").localeCompare(b.date || ""));
+                            (a.created || "").localeCompare(b.created || ""));
+}
+
+function renderResTable() {
+  const list = filterRes(RES);
+  const appr = list.filter(r => r.approved);
   const rows = list.map(r =>
     `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
-     <td>${esc(r.date || "–")}</td><td>${esc(r.created || "–")}</td>
+     <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td><button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button></td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
-    `<tr class="trtotal"><td>Summe (${list.length} Reservierung${list.length === 1 ? "" : "en"})</td><td></td>
-     <td class="num">${fmt(sumCpu(list))}</td><td class="num">${fmt(sumRam(list))}</td>
-     <td></td><td></td><td></td></tr>` +
-    (rows || `<tr><td colspan="7" style="color:var(--muted)">Keine Reservierungen${q ? " für diesen Filter" : ""}.</td></tr>`);
+    `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
+     <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
+     <td></td><td></td><td></td><td></td></tr>` +
+    (rows || `<tr><td colspan="8" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+}
+
+function renderAppTable() {
+  const list = filterRes(RES.filter(r => !r.approved));
+  const rows = list.map(r =>
+    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
+     <td><button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
+         <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
+                 onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button></td></tr>`).join("");
+  document.getElementById("atbody").innerHTML =
+    rows || `<tr><td colspan="7" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
+  const pend = RES.filter(r => !r.approved).length;
+  document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
+  if (VIEW === "app") { renderAppTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
   TOTAL = {
@@ -677,6 +768,8 @@ function render() {
     ramUsed: Math.round(vis.reduce((s,c)=>s+c.ramUsed,0)*10)/10,
     vmCount: vis.reduce((s,c)=>s+c.vmCount,0),
     vmOff: vis.reduce((s,c)=>s+c.vmOff,0),
+    spareCores: vis.reduce((s,c)=>s+(c.spareCores||0),0),
+    spareRamGb: Math.round(vis.reduce((s,c)=>s+(c.spareRamGb||0),0)*10)/10,
     _names: new Set(vis.map(c => c.name)),
   };
   TOTAL.vcpuFree = TOTAL.vcpuCap - TOTAL.vcpuUsed;
@@ -686,17 +779,18 @@ function render() {
     (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
                  : '<tr><td colspan="8" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
   if (hoverIdx !== null && hc.style.display === "block")
-    hc.innerHTML = card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
+    hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
+                   card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
 }
 
-// ---- Hover-Popover ----
-let hoverIdx = null, hideTimer = null;
+// ---- Detail-Popover (Klick auf Clusternamen) ----
+let hoverIdx = null;
 const hc = document.getElementById("hovercard");
 
 function showCard(idx, rowEl) {
-  clearTimeout(hideTimer);
   hoverIdx = idx;
-  hc.innerHTML = card(idx === -1 ? TOTAL : CLUSTERS[idx], idx, idx === -1);
+  hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
+                 card(idx === -1 ? TOTAL : CLUSTERS[idx], idx, idx === -1);
   hc.style.display = "block";
   const r = rowEl.getBoundingClientRect();
   let top = r.bottom + 6;
@@ -705,14 +799,15 @@ function showCard(idx, rowEl) {
   hc.style.top = top + "px";
   hc.style.left = Math.min(Math.max(10, r.left + 60), Math.max(10, innerWidth - hc.offsetWidth - 10)) + "px";
 }
-function hideCard() { hc.style.display = "none"; hoverIdx = null; }
-function scheduleHide() {
-  clearTimeout(hideTimer);
-  hideTimer = setTimeout(() => { if (!hc.contains(document.activeElement)) hideCard(); }, 350);
+function toggleCard(idx, cell) {
+  if (hoverIdx === idx && hc.style.display === "block") hideCard();
+  else showCard(idx, cell.parentElement);
 }
-hc.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-hc.addEventListener("mouseleave", scheduleHide);
-document.getElementById("ktable").addEventListener("mouseleave", scheduleHide);
+function hideCard() { hc.style.display = "none"; hoverIdx = null; }
+document.addEventListener("click", e => {
+  if (hc.style.display === "block" && !hc.contains(e.target) && !e.target.closest(".cl"))
+    hideCard();
+});
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
@@ -765,22 +860,36 @@ if (SERVE) {
 """
 
 
-def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31):
-    resnote = ("Reservierungen werden zentral auf dem Server gespeichert" if serve_mode
-               else "Reservierungen werden lokal im Browser gespeichert")
-    resnote += (f" und nach {res_ttl} Tagen automatisch entfernt." if res_ttl > 0 else ".")
+def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
+                failover_hosts=1):
+    valid_days = res_ttl - 1 if res_ttl > 0 else 30
+    resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
+               "zählen erst nach Genehmigung gegen die Kapazität und werden "
+               + (f"nach {res_ttl} Tagen automatisch entfernt. " if res_ttl > 0
+                  else "nicht automatisch entfernt. "))
+    resnote += ("Speicherung zentral auf dem Server." if serve_mode
+                else "Speicherung lokal im Browser.")
+    if failover_hosts == 1:
+        failnote = " · Ausfallreserve (N+1): größter Host je Cluster abgezogen"
+    elif failover_hosts > 1:
+        failnote = (f" · Ausfallreserve (N+{failover_hosts}): größte {failover_hosts} "
+                    "Hosts je Cluster abgezogen")
+    else:
+        failnote = ""
     return (HTML_TEMPLATE
             .replace("__DATA__", json.dumps(clusters, ensure_ascii=False))
             .replace("__FACTOR__", str(cpu_factor))
             .replace("__SERVE__", "true" if serve_mode else "false")
             .replace("__TTL__", str(res_ttl))
             .replace("__RESNOTE__", resnote)
+            .replace("__FAILNOTE__", failnote)
             .replace("__DATE__", updated or datetime.now().strftime("%d.%m.%Y %H:%M")))
 
 
-def render_dashboard(clusters, cpu_factor, path, res_ttl=31):
+def render_dashboard(clusters, cpu_factor, path, res_ttl=31, failover_hosts=1):
     with open(path, "w", encoding="utf-8") as f:
-        f.write(render_html(clusters, cpu_factor, res_ttl=res_ttl))
+        f.write(render_html(clusters, cpu_factor, res_ttl=res_ttl,
+                            failover_hosts=failover_hosts))
 
 # ------------------------------------------------------------- Serve-Modus ---
 
@@ -840,12 +949,13 @@ def serve(args, password):
         try:
             if args.sample:
                 time.sleep(2)  # Demo: Ladezeit simulieren
-                clusters = build_summary(sample_data(), args.cpu_factor)
+                clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
             else:
                 api = AriaOps(args.url, args.user, password, args.auth_source,
                               verify_tls=not args.insecure)
                 clusters = collect(api, args.cpu_factor,
-                                   progress=lambda m: state.update(progress=m))
+                                   progress=lambda m: state.update(progress=m),
+                                   failover_hosts=args.failover_hosts)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
             with open(args.cache, "w", encoding="utf-8") as f:
@@ -892,12 +1002,13 @@ def serve(args, password):
                 return None
 
         def do_GET(self):
-            if self.path in ("/", "/index.html", "/reservierungen"):
+            if self.path in ("/", "/index.html", "/reservierungen", "/genehmigungen"):
                 self._send(render_html(state["clusters"], args.cpu_factor,
                                        serve_mode=True,
                                        updated=state["updated"] or
                                        "noch keine Daten – erster Abruf läuft ...",
-                                       res_ttl=args.res_ttl_days),
+                                       res_ttl=args.res_ttl_days,
+                                       failover_hosts=args.failover_hosts),
                            "text/html; charset=utf-8")
             elif self.path == "/api/data":
                 self._json({"updated": state["updated"], "clusters": state["clusters"]})
@@ -931,14 +1042,25 @@ def serve(args, password):
                              "name": str(item.get("name")).strip(),
                              "vcpu": int(item.get("vcpu") or 0),
                              "ram_gb": float(item.get("ram_gb") or 0),
-                             "date": str(item.get("date") or ""),
-                             "created": datetime.now().date().isoformat()}
+                             "created": datetime.now().date().isoformat(),
+                             "approved": False}
                 except (TypeError, ValueError):
                     self._json({"error": "Ungültige Zahlenwerte"}, 400)
                     return
                 with res_lock:
                     reservations[:] = prune_res(reservations)
                     reservations.append(entry)
+                    save_res()
+                    self._json(list(reservations))
+            elif (self.path.startswith("/api/reservations/")
+                    and self.path.endswith("/approve")):
+                rid = urllib.parse.unquote(
+                    self.path[len("/api/reservations/"):-len("/approve")])
+                with res_lock:
+                    for r in reservations:
+                        if r.get("id") == rid:
+                            r["approved"] = True
+                            r["approved_on"] = datetime.now().date().isoformat()
                     save_res()
                     self._json(list(reservations))
             else:
@@ -957,6 +1079,7 @@ def serve(args, password):
                     r = dict(r)
                     r.setdefault("id", uuid.uuid4().hex[:12])
                     r.setdefault("created", datetime.now().date().isoformat())
+                    r.setdefault("approved", False)
                     cleaned.append(r)
                 with res_lock:
                     reservations[:] = prune_res(cleaned)
@@ -997,6 +1120,9 @@ def main():
     ap.add_argument("--password", help="Passwort (sonst interaktive Abfrage)")
     ap.add_argument("--auth-source", default="local", help="Auth-Quelle (Standard: local)")
     ap.add_argument("--cpu-factor", type=int, default=6, help="CPU-Überprovisionierungsfaktor (Standard: 6)")
+    ap.add_argument("--failover-hosts", type=int, default=1,
+                    help="Ausfall-Hosts pro Cluster (N+1): die größten N Hosts werden "
+                         "von der Kapazität abgezogen (Standard: 1, 0 = aus)")
     ap.add_argument("--insecure", action="store_true", help="TLS-Zertifikat nicht prüfen (Self-Signed)")
     ap.add_argument("--output", default="kapa_dashboard.html", help="Ausgabedatei")
     ap.add_argument("--json", help="Rohdaten zusätzlich als JSON speichern")
@@ -1027,20 +1153,21 @@ def main():
         return
 
     if args.sample:
-        clusters = build_summary(sample_data(), args.cpu_factor)
+        clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
     else:
         if not args.url or not args.user:
             ap.error("--url und --user sind erforderlich (oder --sample für Demo)")
         pw = args.password or getpass.getpass("Passwort: ")
         api = AriaOps(args.url, args.user, pw, args.auth_source,
                       verify_tls=not args.insecure)
-        clusters = collect(api, args.cpu_factor)
+        clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts)
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(clusters, f, ensure_ascii=False, indent=2)
 
-    render_dashboard(clusters, args.cpu_factor, args.output, args.res_ttl_days)
+    render_dashboard(clusters, args.cpu_factor, args.output,
+                     args.res_ttl_days, args.failover_hosts)
 
     print(f"\n{'Cluster':<22}{'Hosts':>6}{'Cores':>7}{'vCPU-Kap':>10}{'vCPU-belegt':>12}"
           f"{'vCPU-frei':>10}{'RAM-Kap GB':>12}{'RAM-belegt':>12}{'RAM-frei':>10}")
