@@ -848,8 +848,26 @@ function tickTimer() {
                    String(s % 60).padStart(2, "0") + " min";
 }
 
+// Einmalige Migration: alte localStorage-Reservierungen auf den Server übernehmen
+function migrateLocalRes(serverList) {
+  if (serverList.length || localStorage.getItem(LS_KEY + "_migriert")) return;
+  let old = [];
+  try { old = JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch (e) {}
+  if (!old.length) return;
+  if (confirm(old.length + " Reservierung(en) aus dem Browser-Speicher gefunden " +
+              "(alter Speicherort). Auf den Server übernehmen?\n" +
+              "Sie erscheinen dann mit Status „beantragt“ und können unter " +
+              "„Genehmigungen“ freigegeben werden.")) {
+    apiRes("PUT", "", old).then(l => {
+      setRes(l);
+      localStorage.removeItem(LS_KEY);
+    }).catch(resFail);
+  }
+  try { localStorage.setItem(LS_KEY + "_migriert", "1"); } catch (e) {}
+}
+
 if (SERVE) {
-  apiRes("GET").then(setRes).catch(() => {});
+  apiRes("GET").then(l => { setRes(l); migrateLocalRes(l); }).catch(() => {});
   pollStatus();
   setInterval(pollStatus, 3000);
   setInterval(tickTimer, 1000);

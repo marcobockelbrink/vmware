@@ -93,7 +93,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:14</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 17:21</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -565,8 +565,26 @@ function tickTimer() {
                    String(s % 60).padStart(2, "0") + " min";
 }
 
+// Einmalige Migration: alte localStorage-Reservierungen auf den Server übernehmen
+function migrateLocalRes(serverList) {
+  if (serverList.length || localStorage.getItem(LS_KEY + "_migriert")) return;
+  let old = [];
+  try { old = JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch (e) {}
+  if (!old.length) return;
+  if (confirm(old.length + " Reservierung(en) aus dem Browser-Speicher gefunden " +
+              "(alter Speicherort). Auf den Server übernehmen?\n" +
+              "Sie erscheinen dann mit Status „beantragt“ und können unter " +
+              "„Genehmigungen“ freigegeben werden.")) {
+    apiRes("PUT", "", old).then(l => {
+      setRes(l);
+      localStorage.removeItem(LS_KEY);
+    }).catch(resFail);
+  }
+  try { localStorage.setItem(LS_KEY + "_migriert", "1"); } catch (e) {}
+}
+
 if (SERVE) {
-  apiRes("GET").then(setRes).catch(() => {});
+  apiRes("GET").then(l => { setRes(l); migrateLocalRes(l); }).catch(() => {});
   pollStatus();
   setInterval(pollStatus, 3000);
   setInterval(tickTimer, 1000);
