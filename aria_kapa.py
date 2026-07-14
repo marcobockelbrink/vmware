@@ -22,6 +22,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import ssl
 import sys
 import urllib.request
@@ -218,6 +219,14 @@ def ensure_dir(path):
         os.makedirs(d, exist_ok=True)
 
 
+def data_path(path):
+    """JSON-Datendateien ohne Verzeichnisangabe landen immer im Ordner data/;
+    explizite Pfade (relativ mit Ordner oder absolut) bleiben unverändert."""
+    if path and not os.path.dirname(path):
+        return os.path.join("data", path)
+    return path
+
+
 def migrate_data_files(*paths):
     """Alt-Dateien aus dem Arbeitsverzeichnis in den Datenordner verschieben
     (frühere Versionen legten kapa_*.json direkt neben dem Skript ab)."""
@@ -267,6 +276,7 @@ def reservation_mail_body(r, action, admin, res_ttl):
     return (f"Kapazitätsreservierung {action}\n"
             f"\n"
             f"Anfrage:     {r.get('name', '?')}\n"
+            f"Change:      {r.get('change') or '–'}\n"
             f"Cluster:     {r.get('cluster', '?')}\n"
             f"vCPU:        {r.get('vcpu', 0)}\n"
             f"RAM:         {r.get('ram_gb', 0)} GB\n"
@@ -534,7 +544,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .btn:hover { border-color:var(--accent); }
   .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
-  .resform { display:grid; grid-template-columns:2fr 70px 80px auto; gap:6px; margin-top:8px; }
+  .resform { display:grid; grid-template-columns:2fr 110px 70px 80px auto; gap:6px; margin-top:8px; }
   .resform input { background:#0b1220; border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
   .resform input:focus { outline:none; border-color:var(--res); }
@@ -578,6 +588,8 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
     <select id="mCluster" onchange="modalHint()"></select>
     <label>Bezeichnung / Projekt</label>
     <input id="mName" placeholder="z. B. SAP-Erweiterung Q4">
+    <label>Change-Nummer (CHB… oder CHI…)</label>
+    <input id="mChange" placeholder="z. B. CHB0012345">
     <label>vCPU</label>
     <input id="mCpu" type="number" min="0" placeholder="0">
     <label>RAM (GB)</label>
@@ -608,14 +620,14 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 </div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
-  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
+  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
-  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
+  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
@@ -704,17 +716,22 @@ function freeAfter(c) {
            ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
 }
 
-function createRes(c, name, vcpu, ram, errEl) {
+function createRes(c, name, change, vcpu, ram, errEl) {
   errEl.style.display = "none";
   if (!name || (vcpu <= 0 && ram <= 0)) {
     errEl.textContent = "Bitte Bezeichnung sowie vCPU und/oder RAM angeben.";
+    errEl.style.display = "block"; return false;
+  }
+  const ch = String(change || "").toUpperCase().replace(/\s+/g, "");
+  if (!/^CH[BI][A-Z0-9-]{3,20}$/.test(ch)) {
+    errEl.textContent = "Bitte gültige Change-Nummer angeben (beginnt mit CHB oder CHI).";
     errEl.style.display = "block"; return false;
   }
   const f = freeAfter(c);
   if ((vcpu > f.cpu || ram > f.ram) &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
                "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem beantragen?")) return false;
-  const item = { cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram };
+  const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu, ram_gb: ram };
   if (SERVE) {
     apiRes("POST", "", item).then(setRes).catch(resFail);
   } else {
@@ -759,7 +776,7 @@ function approveRes(id) {
 function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
-  createRes(c, g("n").value.trim(), parseInt(g("c").value) || 0,
+  createRes(c, g("n").value.trim(), g("ch").value, parseInt(g("c").value) || 0,
             parseFloat(g("r").value) || 0, g("e"));
 }
 function delRes(id) {
@@ -772,7 +789,7 @@ function openModal(prefIdx) {
   const sel = document.getElementById("mCluster");
   sel.innerHTML = CLUSTERS.map((c, i) =>
     `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
-  ["mName", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
+  ["mName", "mChange", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("mErr").style.display = "none";
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById("mValid").textContent =
@@ -793,8 +810,8 @@ function modalHint() {
 function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
   const v = id => document.getElementById(id).value;
-  const ok = createRes(c, v("mName").trim(), parseInt(v("mCpu")) || 0,
-                       parseFloat(v("mRam")) || 0,
+  const ok = createRes(c, v("mName").trim(), v("mChange"),
+                       parseInt(v("mCpu")) || 0, parseFloat(v("mRam")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -848,7 +865,7 @@ function card(c, idx, isTotal) {
   const hostRows = (c.hosts || []).map(h =>
     `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
   const resRows = clRes.map(r =>
-    `<tr><td>${esc(r.name)}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
+    `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
@@ -873,6 +890,7 @@ function card(c, idx, isTotal) {
       ${isTotal || !CAN_REQUEST ? "" : `
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
+        <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
         <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
@@ -1039,9 +1057,9 @@ function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
   const showDec = ROLE !== "anforderer";
-  const nCols = showDec ? 12 : 11;
+  const nCols = showDec ? 13 : 12;
   const rows = list.map(r =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
+    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
@@ -1049,9 +1067,9 @@ function renderResTable() {
      <td>${esc(r.comment || "–")}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
-    `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
+    `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td colspan="${nCols - 4}"></td></tr>` +
+     <td colspan="${nCols - 5}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
@@ -1073,14 +1091,14 @@ function renderAppTable() {
     return cell(f.cpu, cpuOk) + cell(f.ram, ramOk);
   };
   const rows = list.map(r =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
+    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      ${freeCells(r)}
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="11" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="12" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
@@ -1406,6 +1424,7 @@ def serve(args, password):
                 out.append({k: v for k, v in r.items()
                             if k not in ("approved_by", "rejected_by")})
             elif r.get("approved"):
+                # bewusst ohne Name, von, Change, Kommentar
                 out.append({"id": r.get("id"), "cluster": r.get("cluster"),
                             "name": "(andere Abteilung)", "vcpu": r.get("vcpu"),
                             "ram_gb": r.get("ram_gb"), "created": r.get("created"),
@@ -1592,10 +1611,16 @@ def serve(args, password):
                 if not isinstance(item, dict) or not str(item.get("name") or "").strip():
                     self._json({"error": "Ungültige Reservierung"}, 400)
                     return
+                change = re.sub(r"\s+", "", str(item.get("change") or "")).upper()
+                if not re.fullmatch(r"CH[BI][A-Z0-9-]{3,20}", change):
+                    self._json({"error": "Ungültige Change-Nummer "
+                                         "(muss mit CHB oder CHI beginnen)"}, 400)
+                    return
                 try:
                     entry = {"id": uuid.uuid4().hex[:12],
                              "cluster": str(item.get("cluster") or ""),
                              "name": str(item.get("name")).strip(),
+                             "change": change,
                              "vcpu": int(item.get("vcpu") or 0),
                              "ram_gb": float(item.get("ram_gb") or 0),
                              "von": s["user"] or "",
@@ -1793,6 +1818,13 @@ def main():
     ap.add_argument("--smtp-tls", action="store_true", help="STARTTLS verwenden")
     args = ap.parse_args()
 
+    # JSON-Datendateien ohne Pfadangabe immer unter data/ ablegen
+    args.cache = data_path(args.cache)
+    args.res_file = data_path(args.res_file)
+    args.roles_file = data_path(args.roles_file)
+    if args.json:
+        args.json = data_path(args.json)
+
     if args.serve:
         pw = None
         if not args.sample:
@@ -1813,6 +1845,7 @@ def main():
         clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts)
 
     if args.json:
+        ensure_dir(args.json)
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(clusters, f, ensure_ascii=False, indent=2)
 

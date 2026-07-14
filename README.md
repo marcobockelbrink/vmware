@@ -56,6 +56,12 @@ python3 aria_kapa.py --sample --serve        # Server-Modus
 Anlegen per Dialog („+ Neue Kapazitätsanfrage") oder direkt in der
 Detailkarte eines Clusters; Export/Import als JSON.
 
+- **Change-Nummer (Pflichtfeld)**: Jede Anfrage benötigt eine Change-Nummer,
+  beginnend mit `CHB` oder `CHI` (z. B. `CHB0012345`); Eingaben werden
+  normalisiert (Großschreibung, ohne Leerzeichen) und client- wie
+  serverseitig validiert. Die Nummer erscheint in den Übersichten und in
+  der Report-Mail.
+
 - **Gültigkeit**: Reservierungen gelten automatisch ab dem Anlagetag für
   30 Tage; das „gültig bis"-Datum wird in jeder Reservierung angezeigt.
 - **Genehmigung**: Neue Anträge haben den Status „beantragt" und zählen erst
@@ -141,8 +147,11 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
 
-Cache- und Reservierungsdatei sind lokale Laufzeitdaten und per `.gitignore`
-vom Repository ausgeschlossen.
+Alle JSON-Datendateien (Cache, Reservierungen, Rollen, `--json`-Export)
+liegen im Ordner `data/`, der komplett per `.gitignore` vom Repository
+ausgeschlossen ist. Auch per Parameter angegebene Dateinamen ohne
+Pfadangabe landen automatisch unter `data/`; explizite Pfade
+(z. B. `/var/lib/kapa/cache.json`) werden respektiert.
 
 ## Hinweis zum Betrieb
 

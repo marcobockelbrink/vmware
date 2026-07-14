@@ -71,7 +71,7 @@
   .btn:hover { border-color:var(--accent); }
   .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
-  .resform { display:grid; grid-template-columns:2fr 70px 80px auto; gap:6px; margin-top:8px; }
+  .resform { display:grid; grid-template-columns:2fr 110px 70px 80px auto; gap:6px; margin-top:8px; }
   .resform input { background:#0b1220; border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
   .resform input:focus { outline:none; border-color:var(--res); }
@@ -95,7 +95,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 18:20</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">14.07.2026 18:56</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -115,6 +115,8 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
     <select id="mCluster" onchange="modalHint()"></select>
     <label>Bezeichnung / Projekt</label>
     <input id="mName" placeholder="z. B. SAP-Erweiterung Q4">
+    <label>Change-Nummer (CHB… oder CHI…)</label>
+    <input id="mChange" placeholder="z. B. CHB0012345">
     <label>vCPU</label>
     <input id="mCpu" type="number" min="0" placeholder="0">
     <label>RAM (GB)</label>
@@ -145,14 +147,14 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 </div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
-  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
+  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
-  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th class="num">vCPU</th>
+  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
@@ -241,17 +243,22 @@ function freeAfter(c) {
            ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
 }
 
-function createRes(c, name, vcpu, ram, errEl) {
+function createRes(c, name, change, vcpu, ram, errEl) {
   errEl.style.display = "none";
   if (!name || (vcpu <= 0 && ram <= 0)) {
     errEl.textContent = "Bitte Bezeichnung sowie vCPU und/oder RAM angeben.";
+    errEl.style.display = "block"; return false;
+  }
+  const ch = String(change || "").toUpperCase().replace(/\s+/g, "");
+  if (!/^CH[BI][A-Z0-9-]{3,20}$/.test(ch)) {
+    errEl.textContent = "Bitte gültige Change-Nummer angeben (beginnt mit CHB oder CHI).";
     errEl.style.display = "block"; return false;
   }
   const f = freeAfter(c);
   if ((vcpu > f.cpu || ram > f.ram) &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
                "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem beantragen?")) return false;
-  const item = { cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram };
+  const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu, ram_gb: ram };
   if (SERVE) {
     apiRes("POST", "", item).then(setRes).catch(resFail);
   } else {
@@ -296,7 +303,7 @@ function approveRes(id) {
 function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
-  createRes(c, g("n").value.trim(), parseInt(g("c").value) || 0,
+  createRes(c, g("n").value.trim(), g("ch").value, parseInt(g("c").value) || 0,
             parseFloat(g("r").value) || 0, g("e"));
 }
 function delRes(id) {
@@ -309,7 +316,7 @@ function openModal(prefIdx) {
   const sel = document.getElementById("mCluster");
   sel.innerHTML = CLUSTERS.map((c, i) =>
     `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
-  ["mName", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
+  ["mName", "mChange", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("mErr").style.display = "none";
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById("mValid").textContent =
@@ -330,8 +337,8 @@ function modalHint() {
 function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
   const v = id => document.getElementById(id).value;
-  const ok = createRes(c, v("mName").trim(), parseInt(v("mCpu")) || 0,
-                       parseFloat(v("mRam")) || 0,
+  const ok = createRes(c, v("mName").trim(), v("mChange"),
+                       parseInt(v("mCpu")) || 0, parseFloat(v("mRam")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -385,7 +392,7 @@ function card(c, idx, isTotal) {
   const hostRows = (c.hosts || []).map(h =>
     `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
   const resRows = clRes.map(r =>
-    `<tr><td>${esc(r.name)}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
+    `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
@@ -410,6 +417,7 @@ function card(c, idx, isTotal) {
       ${isTotal || !CAN_REQUEST ? "" : `
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
+        <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
         <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
@@ -576,9 +584,9 @@ function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
   const showDec = ROLE !== "anforderer";
-  const nCols = showDec ? 12 : 11;
+  const nCols = showDec ? 13 : 12;
   const rows = list.map(r =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
+    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
@@ -586,9 +594,9 @@ function renderResTable() {
      <td>${esc(r.comment || "–")}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
-    `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td>
+    `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td colspan="${nCols - 4}"></td></tr>` +
+     <td colspan="${nCols - 5}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
@@ -610,14 +618,14 @@ function renderAppTable() {
     return cell(f.cpu, cpuOk) + cell(f.ram, ramOk);
   };
   const rows = list.map(r =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td>
+    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      ${freeCells(r)}
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="11" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="12" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
