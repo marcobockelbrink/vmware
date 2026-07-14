@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VMware Kapazitätsübersicht pro Cluster</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0;
+          --muted:#94a3b8; --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444;
+          --accent:#38bdf8; --res:#818cf8; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text);
+         font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:24px; }
+  h1 { font-size:22px; margin-bottom:4px; }
+  .sub { color:var(--muted); margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .card h2 { font-size:17px; margin-bottom:2px; color:var(--accent); }
+  .meta { color:var(--muted); font-size:12px; margin-bottom:12px; }
+  .metric { margin-bottom:14px; }
+  .metric .row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
+  .bar { height:10px; background:#0b1220; border-radius:5px; overflow:hidden; display:flex; }
+  .bar i { display:block; height:100%; }
+  .bar .r { background:repeating-linear-gradient(45deg,var(--res),var(--res) 4px,#4f46e5 4px,#4f46e5 8px); }
+  .free { font-weight:600; }
+  .kpis { display:flex; gap:14px; margin-top:10px; flex-wrap:wrap; }
+  .kpi { background:#0b1220; border-radius:8px; padding:8px 12px; font-size:12px; color:var(--muted); }
+  .kpi b { display:block; font-size:16px; color:var(--text); }
+  details { margin-top:12px; }
+  summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
+  th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; }
+  .off { color:var(--muted); font-style:italic; }
+  .total { background:linear-gradient(135deg,#1e293b,#16233b); border-color:#3b5479; }
+  .toolbar { display:flex; gap:10px; margin-bottom:20px; }
+  .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
+         border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
+  .btn:hover { border-color:var(--accent); }
+  .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
+  .resform { display:grid; grid-template-columns:2fr 70px 80px 1fr auto; gap:6px; margin-top:8px; }
+  .resform input { background:#0b1220; border:1px solid var(--line); color:var(--text);
+                   border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
+  .resform input:focus { outline:none; border-color:var(--res); }
+  .del { background:none; border:none; color:var(--crit); cursor:pointer; font-size:13px; }
+  .err { color:var(--crit); font-size:12px; margin-top:4px; display:none; }
+  .btn.primary { background:var(--res); color:#0b1220; border-color:var(--res); font-weight:600; }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none;
+              align-items:center; justify-content:center; z-index:10; }
+  .modal-bg.open { display:flex; }
+  .modal { background:var(--card); border:1px solid var(--line); border-radius:12px;
+           padding:22px; width:440px; max-width:92vw; }
+  .modal h2 { color:var(--res); font-size:16px; margin-bottom:8px; }
+  .modal label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+  .modal input, .modal select { width:100%; background:#0b1220; border:1px solid var(--line);
+           color:var(--text); border-radius:6px; padding:7px 9px; font-size:13px; }
+  .modal input:focus, .modal select:focus { outline:none; border-color:var(--res); }
+  .modal .hint { font-size:12px; color:var(--accent); margin-top:10px; }
+  .modal .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+</style>
+</head>
+<body>
+<h1>Kapazitätsübersicht pro Cluster</h1>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · Stand: <span id="stand">14.07.2026 15:55</span><br>
+Reservierungen werden lokal im Browser gespeichert und bleiben auch nach Neu-Generierung des Dashboards erhalten.</div>
+<div class="toolbar">
+  <button class="btn primary" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
+  <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Daten aus Aria abrufen</button>
+  <span id="refreshStatus" style="align-self:center;font-size:12px;color:var(--muted)"></span>
+  <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
+  <label class="btn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
+</div>
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h2>Neue Kapazitätsanfrage</h2>
+    <label>Ziel-Cluster</label>
+    <select id="mCluster" onchange="modalHint()"></select>
+    <label>Bezeichnung / Projekt</label>
+    <input id="mName" placeholder="z. B. SAP-Erweiterung Q4">
+    <label>vCPU</label>
+    <input id="mCpu" type="number" min="0" placeholder="0">
+    <label>RAM (GB)</label>
+    <input id="mRam" type="number" min="0" placeholder="0">
+    <label>geplant ab (optional)</label>
+    <input id="mDate" type="date">
+    <div class="hint" id="mHint"></div>
+    <div class="err" id="mErr"></div>
+    <div class="actions">
+      <button class="btn" onclick="closeModal()">Abbrechen</button>
+      <button class="btn primary" onclick="submitModal()">Reservieren</button>
+    </div>
+  </div>
+</div>
+<div class="grid" id="grid"></div>
+<script>
+let CLUSTERS = [{"name": "Cluster-01", "hostCount": 3, "cores": 112, "vcpuCap": 672, "vcpuUsed": 370, "vcpuFree": 302, "ramCap": 2048, "ramUsed": 1504, "ramFree": 544, "vmCount": 52, "vmOff": 5, "hosts": [{"name": "esx101.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx102.firma.local", "cores": 48, "ram_gb": 512}, {"name": "esx103.firma.local", "cores": 32, "ram_gb": 512}], "vms": [{"name": "vm-1001", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-1002", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-1003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1004", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-1005", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1006", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1007", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1008", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1009", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-1010", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1011", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1012", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1013", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1014", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1015", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1016", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1017", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1018", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-1019", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1021", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-1022", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1023", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-1024", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1025", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1026", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1027", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1029", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-1030", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1031", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1032", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1033", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1034", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1035", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1036", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1037", "vcpu": 8, "ram_gb": 64, "on": false}, {"name": "vm-1038", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1040", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1041", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1042", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1043", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-1044", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1045", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1046", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1047", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1048", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1049", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1050", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1051", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1052", "vcpu": 4, "ram_gb": 64, "on": true}]}, {"name": "Cluster-02", "hostCount": 3, "cores": 128, "vcpuCap": 768, "vcpuUsed": 650, "vcpuFree": 118, "ramCap": 2304, "ramUsed": 2680, "ramFree": -376, "vmCount": 99, "vmOff": 13, "hosts": [{"name": "esx201.firma.local", "cores": 64, "ram_gb": 768}, {"name": "esx202.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx203.firma.local", "cores": 32, "ram_gb": 512}], "vms": [{"name": "vm-2001", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2002", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2003", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2004", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2005", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2006", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2007", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2008", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-2009", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2010", "vcpu": 2, "ram_gb": 16, "on": false}, {"name": "vm-2011", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2012", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2013", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2014", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2015", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2016", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2017", "vcpu": 2, "ram_gb": 8, "on": false}, {"name": "vm-2018", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2019", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2020", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2021", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2022", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2023", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2024", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2025", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2026", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2027", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2029", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2030", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2031", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2032", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2033", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2034", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2035", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2036", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2037", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2038", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2040", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2041", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2042", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2043", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2044", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2045", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2046", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2047", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2048", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2049", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2050", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2051", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2052", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-2053", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2054", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2055", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-2056", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2057", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2058", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2059", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2060", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-2061", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2062", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2063", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2064", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2065", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2066", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-2067", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2068", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2069", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2070", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2071", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2072", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-2073", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2074", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2075", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2076", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2077", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2078", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-2079", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2080", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2081", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2082", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2083", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2084", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2085", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2086", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2087", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2088", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2089", "vcpu": 16, "ram_gb": 32, "on": false}, {"name": "vm-2090", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2091", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2092", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2093", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2094", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2095", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2096", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2097", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2098", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2099", "vcpu": 4, "ram_gb": 16, "on": true}]}, {"name": "Cluster-03", "hostCount": 5, "cores": 208, "vcpuCap": 1248, "vcpuUsed": 346, "vcpuFree": 902, "ramCap": 4864, "ramUsed": 1376, "ramFree": 3488, "vmCount": 49, "vmOff": 6, "hosts": [{"name": "esx301.firma.local", "cores": 48, "ram_gb": 768}, {"name": "esx302.firma.local", "cores": 48, "ram_gb": 1024}, {"name": "esx303.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx304.firma.local", "cores": 48, "ram_gb": 1024}, {"name": "esx305.firma.local", "cores": 32, "ram_gb": 1024}], "vms": [{"name": "vm-3001", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3002", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3004", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3005", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3006", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3007", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3008", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3009", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3010", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3011", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3012", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3013", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3014", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3015", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3016", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3017", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3018", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3019", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3020", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3021", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3022", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3023", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-3024", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3025", "vcpu": 4, "ram_gb": 64, "on": false}, {"name": "vm-3026", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3027", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3029", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3030", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3031", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3032", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3033", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3034", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3035", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3036", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3037", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3038", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3040", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3041", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3042", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3043", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3044", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3045", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3046", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3047", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3048", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3049", "vcpu": 2, "ram_gb": 16, "on": true}]}];
+const FACTOR = 6;
+const SERVE = false;
+const LS_KEY = "aria_kapa_reservierungen";
+
+// ---- Reservierungen (localStorage) ----
+let RES = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch(e) { return []; } })();
+function saveRes() { try { localStorage.setItem(LS_KEY, JSON.stringify(RES)); } catch(e) {} render(); }
+function resFor(cl) { return RES.filter(r => r.cluster === cl); }
+function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
+function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
+
+function freeAfter(c) {
+  const rv = resFor(c.name);
+  return { cpu: c.vcpuFree - sumCpu(rv),
+           ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
+}
+
+function createRes(c, name, vcpu, ram, date, errEl) {
+  errEl.style.display = "none";
+  if (!name || (vcpu <= 0 && ram <= 0)) {
+    errEl.textContent = "Bitte Bezeichnung sowie vCPU und/oder RAM angeben.";
+    errEl.style.display = "block"; return false;
+  }
+  const f = freeAfter(c);
+  if ((vcpu > f.cpu || ram > f.ram) &&
+      !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
+               "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem anlegen?")) return false;
+  RES.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
+             cluster: c.name, name: name, vcpu: vcpu, ram_gb: ram, date: date,
+             created: new Date().toISOString().slice(0,10) });
+  saveRes();
+  return true;
+}
+
+function addRes(idx) {
+  const c = CLUSTERS[idx];
+  const g = s => document.getElementById("f" + idx + s);
+  createRes(c, g("n").value.trim(), parseInt(g("c").value) || 0,
+            parseFloat(g("r").value) || 0, g("d").value, g("e"));
+}
+function delRes(id) { RES = RES.filter(r => r.id !== id); saveRes(); }
+
+// ---- Dialog "Neue Kapazitätsanfrage" ----
+function openModal(prefIdx) {
+  const sel = document.getElementById("mCluster");
+  sel.innerHTML = CLUSTERS.map((c, i) =>
+    `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+  ["mName", "mCpu", "mRam", "mDate"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("mErr").style.display = "none";
+  modalHint();
+  document.getElementById("modalBg").classList.add("open");
+  document.getElementById("mName").focus();
+}
+function closeModal() { document.getElementById("modalBg").classList.remove("open"); }
+function modalHint() {
+  const c = CLUSTERS[+document.getElementById("mCluster").value];
+  if (!c) return;
+  const f = freeAfter(c);
+  document.getElementById("mHint").textContent =
+    "Frei nach bestehenden Reservierungen: " + fmt(f.cpu) + " vCPU / " + fmt(f.ram) + " GB RAM";
+}
+function submitModal() {
+  const c = CLUSTERS[+document.getElementById("mCluster").value];
+  const v = id => document.getElementById(id).value;
+  const ok = createRes(c, v("mName").trim(), parseInt(v("mCpu")) || 0,
+                       parseFloat(v("mRam")) || 0, v("mDate"),
+                       document.getElementById("mErr"));
+  if (ok) closeModal();
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+function exportRes() {
+  const blob = new Blob([JSON.stringify(RES, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "kapa_reservierungen.json";
+  a.click();
+}
+function importRes(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    const d = JSON.parse(t);
+    if (Array.isArray(d)) { RES = d; saveRes(); }
+    else alert("Ungültige Datei.");
+  }).catch(() => alert("Datei konnte nicht gelesen werden."));
+  ev.target.value = "";
+}
+
+// ---- Darstellung ----
+function pct(v, cap) { return cap > 0 ? Math.min(100, v / cap * 100) : 0; }
+function color(p) { return p < 70 ? "var(--ok)" : p < 90 ? "var(--warn)" : "var(--crit)"; }
+function fmt(n) { return n.toLocaleString("de-DE"); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function metric(label, used, resv, cap, unit) {
+  const pu = pct(used, cap);
+  const pr = pct(used + resv, cap) - pu;
+  const free = Math.round((cap - used - resv) * 10) / 10;
+  const c = color(pu + pr);
+  return `<div class="metric">
+    <div class="row"><span>${label}</span>
+      <span>${fmt(used)} belegt${resv ? " + " + fmt(resv) + " reserviert" : ""} / ${fmt(cap)} ${unit} ·
+      <span class="free" style="color:${c}">${fmt(free)} ${unit} frei</span></span></div>
+    <div class="bar"><i style="width:${pu}%;background:${color(pu)}"></i><i class="r" style="width:${pr}%"></i></div>
+  </div>`;
+}
+
+function card(c, idx, isTotal) {
+  const rv = isTotal ? RES : resFor(c.name);
+  const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
+  const vmRows = (c.vms || []).sort((a,b)=>b.vcpu-a.vcpu).map(v =>
+    `<tr class="${v.on?'':'off'}"><td>${esc(v.name)}${v.on?'':' (aus)'}</td>
+     <td class="num">${v.vcpu}</td><td class="num">${fmt(v.ram_gb)}</td></tr>`).join("");
+  const hostRows = (c.hosts || []).map(h =>
+    `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
+  const resRows = rv.map(r =>
+    `<tr><td>${esc(r.name)}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
+     <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
+     <td>${r.date || "–"}</td>
+     <td><button class="del" title="Reservierung löschen" onclick="delRes('${r.id}')">✕</button></td></tr>`).join("");
+  const resTable = rv.length ?
+    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>geplant ab</th><th></th></tr>${resRows}</table>`
+    : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
+  return `<div class="card ${isTotal?'total':''}">
+    <h2>${esc(c.name)}</h2>
+    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} phys. Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} Reservierung${rv.length===1?'':'en'}</div>
+    ${metric("vCPU (Cores × " + FACTOR + ")", c.vcpuUsed, rvCpu, c.vcpuCap, "vCPU")}
+    ${metric("RAM", c.ramUsed, rvRam, c.ramCap, "GB")}
+    <div class="kpis">
+      <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB</b></div>
+      <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
+      <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
+    </div>
+    <div class="resbox">
+      <h3>Kapazitätsreservierungen</h3>
+      ${resTable}
+      ${isTotal ? "" : `
+      <div class="resform">
+        <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
+        <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
+        <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
+        <input id="f${idx}d" type="date" title="geplant ab">
+        <button class="btn" onclick="addRes(${idx})">+ Reservieren</button>
+      </div>
+      <div class="err" id="f${idx}e"></div>`}
+    </div>
+    ${isTotal ? "" : `
+    <details><summary>Hosts anzeigen</summary>
+      <table><tr><th>Host</th><th class="num">Cores</th><th class="num">RAM (GB)</th></tr>${hostRows}</table>
+    </details>
+    <details><summary>VMs anzeigen</summary>
+      <table><tr><th>VM</th><th class="num">vCPU</th><th class="num">RAM (GB)</th></tr>${vmRows}</table>
+    </details>`}
+  </div>`;
+}
+
+function render() {
+  const total = {
+    name: "Gesamt (alle Cluster)",
+    hostCount: CLUSTERS.reduce((s,c)=>s+c.hostCount,0),
+    cores: CLUSTERS.reduce((s,c)=>s+c.cores,0),
+    vcpuCap: CLUSTERS.reduce((s,c)=>s+c.vcpuCap,0),
+    vcpuUsed: CLUSTERS.reduce((s,c)=>s+c.vcpuUsed,0),
+    ramCap: Math.round(CLUSTERS.reduce((s,c)=>s+c.ramCap,0)*10)/10,
+    ramUsed: Math.round(CLUSTERS.reduce((s,c)=>s+c.ramUsed,0)*10)/10,
+    vmCount: CLUSTERS.reduce((s,c)=>s+c.vmCount,0),
+    vmOff: CLUSTERS.reduce((s,c)=>s+c.vmOff,0),
+  };
+  total.vcpuFree = total.vcpuCap - total.vcpuUsed;
+  total.ramFree = Math.round((total.ramCap - total.ramUsed)*10)/10;
+  document.getElementById("grid").innerHTML =
+    card(total, -1, true) + CLUSTERS.map((c, i) => card(c, i, false)).join("");
+}
+render();
+if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
+
+// ---- Live-Abruf aus Aria (nur im Serve-Modus) ----
+async function refreshData() {
+  const btn = document.getElementById("refreshBtn");
+  const st = document.getElementById("refreshStatus");
+  btn.disabled = true;
+  try { await fetch("/api/refresh", { method: "POST" }); }
+  catch (e) { st.textContent = "Server nicht erreichbar."; btn.disabled = false; return; }
+  const poll = setInterval(async () => {
+    let s;
+    try { s = await (await fetch("/api/status")).json(); } catch (e) { return; }
+    if (s.refreshing) {
+      st.textContent = "Lade Daten aus Aria … " + (s.progress || "");
+      return;
+    }
+    clearInterval(poll);
+    btn.disabled = false;
+    if (s.error) { st.textContent = "Fehler: " + s.error; return; }
+    try {
+      const d = await (await fetch("/api/data")).json();
+      CLUSTERS = d.clusters || [];
+      document.getElementById("stand").textContent = d.updated || "";
+      st.textContent = "Aktualisiert.";
+      render();
+    } catch (e) { st.textContent = "Daten konnten nicht geladen werden."; }
+  }, 2000);
+}
+</script>
+</body>
+</html>

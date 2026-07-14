@@ -1,0 +1,12 @@
+# Laufzeitdaten / Cache
+kapa_cache.json
+kapa_dashboard.html
+*.json
+!package.json
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
