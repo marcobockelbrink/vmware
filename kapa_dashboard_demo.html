@@ -100,7 +100,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">15.07.2026 14:28</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">15.07.2026 15:06</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -123,11 +123,11 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
     <label>Change-Nummer (CHB… oder CHI…)</label>
     <input id="mChange" placeholder="z. B. CHB0012345">
     <label>vCPU</label>
-    <input id="mCpu" type="number" min="0" placeholder="0">
+    <input id="mCpu" type="number" min="0" step="1" placeholder="0">
     <label>RAM (GB)</label>
-    <input id="mRam" type="number" min="0" placeholder="0">
+    <input id="mRam" type="number" min="0" step="1" placeholder="0">
     <label>Storage (GB)</label>
-    <input id="mStorage" type="number" min="0" placeholder="0">
+    <input id="mStorage" type="number" min="0" step="1" placeholder="0">
     <div class="hint" id="mHint"></div>
     <div class="hint" id="mValid" style="color:var(--muted)"></div>
     <div class="err" id="mErr"></div>
@@ -178,6 +178,17 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
   <tbody id="mtbody"></tbody>
 </table>
 </div>
+<div class="sechead" style="margin-top:20px">Genehmigungs-Teams (Prüfreihenfolge)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Anträge durchlaufen die Teams von oben nach unten. Erst wenn alle Teams
+  freigegeben haben, ist ein Antrag genehmigt. Ohne Teams gilt einstufig
+  (Admin genehmigt direkt). Reviewer werden oben ihrem Team zugewiesen.</div>
+<div class="tablewrap">
+<table class="kt" id="tmtable">
+  <thead><tr><th style="width:60px">Stufe</th><th>Team</th><th style="width:220px">Aktion</th></tr></thead>
+  <tbody id="tmbody"></tbody>
+</table>
+</div>
 <div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
 <div class="tablewrap">
 <table class="kt" id="ttable">
@@ -208,7 +219,7 @@ const FACTOR = 6;
 const SERVE = false;
 const TTL = 31;
 const ME = null;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
-const TEAMS = [];    // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig)
+let TEAMS = [];      // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig); auf der Verwaltungsseite pflegbar
 const LS_KEY = "aria_kapa_reservierungen";
 
 // ---- Rollen ----
@@ -370,7 +381,7 @@ function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
   createRes(c, g("n").value.trim(), g("ch").value, parseInt(g("c").value) || 0,
-            parseFloat(g("r").value) || 0, parseFloat(g("s").value) || 0, g("e"));
+            parseInt(g("r").value) || 0, parseInt(g("s").value) || 0, g("e"));
 }
 function delRes(id) {
   if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
@@ -404,8 +415,8 @@ function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
   const v = id => document.getElementById(id).value;
   const ok = createRes(c, v("mName").trim(), v("mChange"),
-                       parseInt(v("mCpu")) || 0, parseFloat(v("mRam")) || 0,
-                       parseFloat(v("mStorage")) || 0,
+                       parseInt(v("mCpu")) || 0, parseInt(v("mRam")) || 0,
+                       parseInt(v("mStorage")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -485,9 +496,9 @@ function card(c, idx, isTotal) {
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
         <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
-        <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
-        <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
-        <input id="f${idx}s" type="number" min="0" placeholder="Storage GB">
+        <input id="f${idx}c" type="number" min="0" step="1" placeholder="vCPU">
+        <input id="f${idx}r" type="number" min="0" step="1" placeholder="RAM GB">
+        <input id="f${idx}s" type="number" min="0" step="1" placeholder="Storage GB">
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
@@ -563,7 +574,7 @@ function setView(v) {
       : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); }
   if (v === "log") loadLog();
   render();
 }
@@ -676,6 +687,55 @@ function saveEditRole(u) {
     .then(d => { ROLES = d; EDIT_USER = null; render(); })
     .catch(() => alert("Speichern fehlgeschlagen."));
 }
+// ---- Genehmigungs-Teams (Prüfreihenfolge) ----
+async function apiTeams(method, body) {
+  const r = await fetch("api/teams", {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadTeams() {
+  apiTeams("GET").then(d => { TEAMS = (d && d.teams) || []; if (VIEW === "adm") render(); })
+                 .catch(() => {});
+}
+function putTeams(list) {
+  apiTeams("PUT", list).then(d => { TEAMS = (d && d.teams) || []; render(); })
+                       .catch(() => alert("Speichern der Teams fehlgeschlagen."));
+}
+function addTeam() {
+  const el = document.getElementById("newTeam");
+  const t = (el.value || "").trim();
+  if (!t) return;
+  if (TEAMS.includes(t)) { alert("Team „" + t + "“ existiert bereits."); return; }
+  el.value = "";
+  putTeams(TEAMS.concat([t]));
+}
+function delTeam(i) {
+  if (!confirm("Team „" + TEAMS[i] + "“ aus dem Genehmigungsprozess entfernen?")) return;
+  putTeams(TEAMS.filter((_, j) => j !== i));
+}
+function moveTeam(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= TEAMS.length) return;
+  const t = TEAMS.slice();
+  [t[i], t[j]] = [t[j], t[i]];
+  putTeams(t);
+}
+function renderTeams() {
+  const rows = TEAMS.map((t, i) =>
+    `<tr><td class="num">${i + 1}</td><td>${esc(t)}</td>
+     <td><button class="edit" title="nach oben" ${i === 0 ? "disabled" : ""} onclick="moveTeam(${i},-1)">↑</button>
+         <button class="edit" title="nach unten" ${i === TEAMS.length - 1 ? "disabled" : ""} onclick="moveTeam(${i},1)">↓</button>
+         <button class="del" title="Team entfernen" onclick="delTeam(${i})">✕ Entfernen</button></td></tr>`).join("");
+  document.getElementById("tmbody").innerHTML =
+    `<tr><td></td><td><input class="filterbox" style="width:100%" id="newTeam"
+         placeholder="Neues Team, z. B. Team Betrieb"
+         onkeydown="if(event.key==='Enter')addTeam()"></td>
+     <td><button class="btn approve" onclick="addTeam()">+ Hinzufügen</button></td></tr>` +
+    (rows || `<tr><td colspan="3" style="color:var(--muted)">Keine Teams – einstufig (Admin genehmigt direkt).</td></tr>`);
+}
+
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
@@ -787,7 +847,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderTokenTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderTeams(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);

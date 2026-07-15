@@ -105,20 +105,25 @@ Detailkarte eines Clusters; Export/Import als JSON.
   der Report-Mail.
 
 - **Ressourcen**: Je Anfrage werden **vCPU**, **RAM (GB)** und **Storage (GB)**
-  erfasst. vCPU und RAM zählen gegen die berechnete Cluster-Kapazität; die
-  Storage-Größe wird zur Anfrage geführt und überall mit angezeigt.
+  als **Ganzzahlen** erfasst (keine Kommazahlen). vCPU und RAM zählen gegen die
+  berechnete Cluster-Kapazität; die Storage-Größe wird zur Anfrage geführt und
+  überall mit angezeigt.
 - **Gültigkeit**: Reservierungen gelten automatisch ab dem Anlagetag für
   30 Tage; das „gültig bis"-Datum wird in jeder Reservierung angezeigt.
-- **Mehrstufiger Genehmigungsprozess** (`--approval-teams`): Sind Teams
-  konfiguriert, durchläuft jeder Antrag sie **nacheinander** in der angegebenen
-  Reihenfolge. Der Status wandert von „beantragt" → „in Prüfung" (sobald das
-  erste Team freigegeben hat) → „genehmigt" (erst wenn **alle** Teams
-  freigegeben haben). Erst dann zählt der Antrag gegen die Kapazität. Beim
-  Status **„in Prüfung"** zeigt ein Mouseover, welche Teams (mit Person und
-  Datum) bereits freigegeben haben und welches Team als Nächstes dran ist.
-  Ein Team kann erst freigeben, wenn es an der Reihe ist; jedes Team kann in
-  seiner Stufe auch ablehnen. Ohne `--approval-teams` bleibt es einstufig
-  (Admin genehmigt direkt).
+- **Mehrstufiger Genehmigungsprozess**: Sind Teams konfiguriert, durchläuft
+  jeder Antrag sie **nacheinander** in der festgelegten Reihenfolge. Der Status
+  wandert von „beantragt" → „in Prüfung" (sobald das erste Team freigegeben hat)
+  → „genehmigt" (erst wenn **alle** Teams freigegeben haben). Erst dann zählt
+  der Antrag gegen die Kapazität. Beim Status **„in Prüfung"** zeigt ein
+  Mouseover, welche Teams (mit Person und Datum) bereits freigegeben haben und
+  welches Team als Nächstes dran ist. Ein Team kann erst freigeben, wenn es an
+  der Reihe ist; jedes Team kann in seiner Stufe auch ablehnen. Ohne Teams
+  bleibt es einstufig (Admin genehmigt direkt).
+  - **Teams pflegen**: im Tab „Verwaltung" (Abschnitt „Genehmigungs-Teams")
+    – hinzufügen, per ↑/↓ in die richtige Prüfreihenfolge bringen und
+    entfernen. Gespeichert in `data/kapa_teams.json`. Der Parameter
+    `--approval-teams` dient nur noch zur **Erstbefüllung**, falls diese Datei
+    noch nicht existiert.
 - **Genehmigungsübersicht** (Tab „Genehmigungen"): zeigt je Antrag die freie
   Kapazität des Ziel-Clusters (⚠ wenn er nicht mehr hineinpasst), den
   Fortschritt und – für das gerade zuständige Team bzw. Admins – die
@@ -178,9 +183,10 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 - **Rollen zuweisen**: Tab „Verwaltung" (`/verwaltung`) — AD-Benutzernamen
   eintragen, Rolle wählen und im Feld „Abteilung / Team" bei **Anforderern** die
-  Abteilung, bei **Reviewern** das Team (eines der `--approval-teams`, per
-  Auswahlliste) angeben; gespeichert in `data/kapa_rollen.json`. Benutzer ohne
-  zugewiesene Rolle können sich nicht anmelden.
+  Abteilung, bei **Reviewern** das Team (eines der im selben Tab gepflegten
+  Genehmigungs-Teams, per Auswahlliste) angeben; gespeichert in
+  `data/kapa_rollen.json`. Benutzer ohne zugewiesene Rolle können sich nicht
+  anmelden.
 - **Abteilungssicht**: Anforderer sehen nur Anfragen ihrer Abteilung.
   Fremde *genehmigte* Reservierungen bleiben anonymisiert als
   „(andere Abteilung)" sichtbar, damit die freie Kapazität stimmt;
@@ -253,7 +259,8 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--cache data/kapa_cache.json` | Datei-Cache der letzten Abfrage |
 | `--res-file data/kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
-| `--approval-teams "A,B,C"` | Team-Namen für die mehrstufige Genehmigung (Reihenfolge = Prüfreihenfolge; leer = einstufig) |
+| `--approval-teams "A,B,C"` | **Erstbefüllung** der Genehmigungs-Teams (nur wenn `--teams-file` noch fehlt); danach Pflege im Tab „Verwaltung" |
+| `--teams-file data/kapa_teams.json` | Datei mit den Genehmigungs-Teams (Pflege über die Verwaltungsseite) |
 | `--ad-url ldaps://dc01…` | AD-Anmeldung aktivieren |
 | `--ad-domain firma.local` | Domäne für Benutzernamen ohne `@` |
 | `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |

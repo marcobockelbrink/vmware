@@ -4,8 +4,9 @@ Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 
 | Datei | Inhalt | Kritisch? |
 |---|---|---|
-| `kapa_reservierungen.json` | Alle Kapazitätsanfragen inkl. Status, Kommentaren, Change-Nummern | **Ja** |
-| `kapa_rollen.json` | Rollen- und Abteilungszuweisungen | **Ja** |
+| `kapa_reservierungen.json` | Alle Kapazitätsanfragen inkl. Status, Freigaben, Kommentaren, Change-Nummern | **Ja** |
+| `kapa_rollen.json` | Rollen-, Abteilungs- und Team-Zuweisungen | **Ja** |
+| `kapa_teams.json` | Genehmigungs-Teams (Prüfreihenfolge) | **Ja** |
 | `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |
 | `kapa_cache.json` | Letzter Aria-Datenabruf | Nein (wird neu abgerufen) |
 

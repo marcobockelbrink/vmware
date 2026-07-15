@@ -283,7 +283,7 @@ def sftp_backup(args):
     if not args.backup_target:
         raise RuntimeError("kein --backup-target konfiguriert")
     files = [p for p in (args.cache, args.res_file, args.roles_file,
-                         args.log_file, args.tokens_file)
+                         args.log_file, args.tokens_file, args.teams_file)
              if p and os.path.exists(p)]
     if not files:
         raise RuntimeError("keine Datendateien vorhanden")
@@ -710,11 +710,11 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
     <label>Change-Nummer (CHB… oder CHI…)</label>
     <input id="mChange" placeholder="z. B. CHB0012345">
     <label>vCPU</label>
-    <input id="mCpu" type="number" min="0" placeholder="0">
+    <input id="mCpu" type="number" min="0" step="1" placeholder="0">
     <label>RAM (GB)</label>
-    <input id="mRam" type="number" min="0" placeholder="0">
+    <input id="mRam" type="number" min="0" step="1" placeholder="0">
     <label>Storage (GB)</label>
-    <input id="mStorage" type="number" min="0" placeholder="0">
+    <input id="mStorage" type="number" min="0" step="1" placeholder="0">
     <div class="hint" id="mHint"></div>
     <div class="hint" id="mValid" style="color:var(--muted)"></div>
     <div class="err" id="mErr"></div>
@@ -765,6 +765,17 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
+<div class="sechead" style="margin-top:20px">Genehmigungs-Teams (Prüfreihenfolge)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Anträge durchlaufen die Teams von oben nach unten. Erst wenn alle Teams
+  freigegeben haben, ist ein Antrag genehmigt. Ohne Teams gilt einstufig
+  (Admin genehmigt direkt). Reviewer werden oben ihrem Team zugewiesen.</div>
+<div class="tablewrap">
+<table class="kt" id="tmtable">
+  <thead><tr><th style="width:60px">Stufe</th><th>Team</th><th style="width:220px">Aktion</th></tr></thead>
+  <tbody id="tmbody"></tbody>
+</table>
+</div>
 <div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
 <div class="tablewrap">
 <table class="kt" id="ttable">
@@ -795,7 +806,7 @@ const FACTOR = __FACTOR__;
 const SERVE = __SERVE__;
 const TTL = __TTL__;
 const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
-const TEAMS = __TEAMS__;    // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig)
+let TEAMS = __TEAMS__;      // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig); auf der Verwaltungsseite pflegbar
 const LS_KEY = "aria_kapa_reservierungen";
 
 // ---- Rollen ----
@@ -957,7 +968,7 @@ function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
   createRes(c, g("n").value.trim(), g("ch").value, parseInt(g("c").value) || 0,
-            parseFloat(g("r").value) || 0, parseFloat(g("s").value) || 0, g("e"));
+            parseInt(g("r").value) || 0, parseInt(g("s").value) || 0, g("e"));
 }
 function delRes(id) {
   if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
@@ -991,8 +1002,8 @@ function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
   const v = id => document.getElementById(id).value;
   const ok = createRes(c, v("mName").trim(), v("mChange"),
-                       parseInt(v("mCpu")) || 0, parseFloat(v("mRam")) || 0,
-                       parseFloat(v("mStorage")) || 0,
+                       parseInt(v("mCpu")) || 0, parseInt(v("mRam")) || 0,
+                       parseInt(v("mStorage")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -1072,9 +1083,9 @@ function card(c, idx, isTotal) {
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
         <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
-        <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
-        <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
-        <input id="f${idx}s" type="number" min="0" placeholder="Storage GB">
+        <input id="f${idx}c" type="number" min="0" step="1" placeholder="vCPU">
+        <input id="f${idx}r" type="number" min="0" step="1" placeholder="RAM GB">
+        <input id="f${idx}s" type="number" min="0" step="1" placeholder="Storage GB">
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
@@ -1150,7 +1161,7 @@ function setView(v) {
       : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); }
   if (v === "log") loadLog();
   render();
 }
@@ -1263,6 +1274,55 @@ function saveEditRole(u) {
     .then(d => { ROLES = d; EDIT_USER = null; render(); })
     .catch(() => alert("Speichern fehlgeschlagen."));
 }
+// ---- Genehmigungs-Teams (Prüfreihenfolge) ----
+async function apiTeams(method, body) {
+  const r = await fetch("api/teams", {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadTeams() {
+  apiTeams("GET").then(d => { TEAMS = (d && d.teams) || []; if (VIEW === "adm") render(); })
+                 .catch(() => {});
+}
+function putTeams(list) {
+  apiTeams("PUT", list).then(d => { TEAMS = (d && d.teams) || []; render(); })
+                       .catch(() => alert("Speichern der Teams fehlgeschlagen."));
+}
+function addTeam() {
+  const el = document.getElementById("newTeam");
+  const t = (el.value || "").trim();
+  if (!t) return;
+  if (TEAMS.includes(t)) { alert("Team „" + t + "“ existiert bereits."); return; }
+  el.value = "";
+  putTeams(TEAMS.concat([t]));
+}
+function delTeam(i) {
+  if (!confirm("Team „" + TEAMS[i] + "“ aus dem Genehmigungsprozess entfernen?")) return;
+  putTeams(TEAMS.filter((_, j) => j !== i));
+}
+function moveTeam(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= TEAMS.length) return;
+  const t = TEAMS.slice();
+  [t[i], t[j]] = [t[j], t[i]];
+  putTeams(t);
+}
+function renderTeams() {
+  const rows = TEAMS.map((t, i) =>
+    `<tr><td class="num">${i + 1}</td><td>${esc(t)}</td>
+     <td><button class="edit" title="nach oben" ${i === 0 ? "disabled" : ""} onclick="moveTeam(${i},-1)">↑</button>
+         <button class="edit" title="nach unten" ${i === TEAMS.length - 1 ? "disabled" : ""} onclick="moveTeam(${i},1)">↓</button>
+         <button class="del" title="Team entfernen" onclick="delTeam(${i})">✕ Entfernen</button></td></tr>`).join("");
+  document.getElementById("tmbody").innerHTML =
+    `<tr><td></td><td><input class="filterbox" style="width:100%" id="newTeam"
+         placeholder="Neues Team, z. B. Team Betrieb"
+         onkeydown="if(event.key==='Enter')addTeam()"></td>
+     <td><button class="btn approve" onclick="addTeam()">+ Hinzufügen</button></td></tr>` +
+    (rows || `<tr><td colspan="3" style="color:var(--muted)">Keine Teams – einstufig (Admin genehmigt direkt).</td></tr>`);
+}
+
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
@@ -1374,7 +1434,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderTokenTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderTeams(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
@@ -1584,10 +1644,49 @@ def serve(args, password):
     roles_lock = threading.Lock()
     VALID_ROLES = ("admin", "anforderer", "auditor", "reviewer")
 
-    # Mehrstufiger Genehmigungsprozess: Team-Namen (in Prüfreihenfolge) aus der
-    # Konfiguration, NICHT im Code. Leer = einstufig (Admin genehmigt direkt).
-    approval_teams = [t.strip() for t in (args.approval_teams or "").split(",")
-                      if t.strip()]
+    # Mehrstufiger Genehmigungsprozess: Team-Namen (in Prüfreihenfolge) werden
+    # auf der Admin-Seite gepflegt und in data/kapa_teams.json abgelegt.
+    # --approval-teams dient nur noch als Erstbefüllung, falls die Datei fehlt.
+    # Leer = einstufig (Admin genehmigt direkt). In-place mutiert, damit die
+    # Closures (current_team, approve/reject) immer den aktuellen Stand sehen.
+    teams_lock = threading.Lock()
+
+    def clean_teams(seq):
+        out = []
+        for t in seq:
+            t = str(t or "").strip()
+            if t and t not in out:
+                out.append(t)
+        return out
+
+    def load_teams():
+        if os.path.exists(args.teams_file):
+            try:
+                with open(args.teams_file, encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, list):
+                    return clean_teams(d)
+            except Exception as e:
+                print(f"Team-Datei unlesbar, starte ohne Teams: {e}",
+                      file=sys.stderr)
+            return []
+        # Datei fehlt: einmalig aus --approval-teams befüllen (Migration)
+        seed = clean_teams((args.approval_teams or "").split(","))
+        if seed:
+            try:
+                ensure_dir(args.teams_file)
+                with open(args.teams_file, "w", encoding="utf-8") as f:
+                    json.dump(seed, f, ensure_ascii=False, indent=2)
+            except OSError as e:
+                print(f"Team-Datei nicht schreibbar: {e}", file=sys.stderr)
+        return seed
+
+    def save_teams():
+        ensure_dir(args.teams_file)
+        with open(args.teams_file, "w", encoding="utf-8") as f:
+            json.dump(approval_teams, f, ensure_ascii=False, indent=2)
+
+    approval_teams = load_teams()
 
     def current_team(r):
         """Team, das als Nächstes freigeben muss – None, wenn keine Teams
@@ -2108,6 +2207,11 @@ def serve(args, password):
                     return
                 with roles_lock:
                     self._json(dict(roles))
+            elif route == "/api/teams":
+                if not self._require("admin"):
+                    return
+                with teams_lock:
+                    self._json({"teams": list(approval_teams)})
             elif route == "/api/log":
                 if not self._require("admin"):
                     return
@@ -2123,19 +2227,19 @@ def serve(args, password):
                 body = self._body() or {}
                 user = normalize_user(body.get("username"))
                 pw = str(body.get("password") or "")
-                ip = self.client_address[0] if self.client_address else "?"
                 # Einheitliche Antwort für „kein Konto", „keine Rolle" und
                 # „falsches Passwort" – verrät nicht, welche Konten berechtigt sind.
+                # (Keine IP im Log: hinter dem nginx-Proxy wäre das immer 127.0.0.1.)
                 bad = {"error": "Benutzername oder Passwort falsch."}
-                if login_blocked(user, ip):
-                    audit(user, "Anmeldung gesperrt", f"zu viele Fehlversuche (IP {ip})")
+                if login_blocked(user):
+                    audit(user, "Anmeldung gesperrt", "zu viele Fehlversuche")
                     self._json({"error": "Zu viele Fehlversuche – bitte einige "
                                          "Minuten warten und erneut versuchen."}, 429)
                     return
                 entry = role_entry(user)
                 if not user or not entry:
-                    login_note_fail(user, ip)
-                    audit(user, "Anmeldung abgewiesen", f"keine Rolle zugewiesen (IP {ip})")
+                    login_note_fail(user)
+                    audit(user, "Anmeldung abgewiesen", "keine Rolle zugewiesen")
                     self._json(bad, 401)
                     return
                 try:
@@ -2144,11 +2248,11 @@ def serve(args, password):
                     self._json({"error": f"Active Directory nicht erreichbar: {e}"}, 502)
                     return
                 if not ok:
-                    login_note_fail(user, ip)
-                    audit(user, "Anmeldung fehlgeschlagen", f"falsches Passwort (IP {ip})")
+                    login_note_fail(user)
+                    audit(user, "Anmeldung fehlgeschlagen", "falsches Passwort")
                     self._json(bad, 401)
                     return
-                login_reset(user, ip)
+                login_reset(user)
                 audit(user, "Anmeldung", f"Rolle: {entry['role']}"
                       + (f", Abteilung: {entry.get('abteilung')}"
                          if entry.get("abteilung") else ""))
@@ -2194,9 +2298,9 @@ def serve(args, password):
                              "cluster": str(item.get("cluster") or ""),
                              "name": str(item.get("name")).strip(),
                              "change": change,
-                             "vcpu": int(item.get("vcpu") or 0),
-                             "ram_gb": float(item.get("ram_gb") or 0),
-                             "storage_gb": float(item.get("storage_gb") or 0),
+                             "vcpu": int(float(item.get("vcpu") or 0)),
+                             "ram_gb": int(float(item.get("ram_gb") or 0)),
+                             "storage_gb": int(float(item.get("storage_gb") or 0)),
                              "von": s["user"] or "",
                              "abteilung": s.get("abteilung") or "",
                              "created": datetime.now().date().isoformat(),
@@ -2399,6 +2503,21 @@ def serve(args, password):
                     self._json(list(reservations))
                 audit(self._session()["user"], "Reservierungen importiert",
                       f"{len(cleaned)} Einträge (ersetzt Bestand)")
+            elif self.path == "/api/teams":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, list):
+                    self._json({"error": "Liste von Team-Namen erwartet"}, 400)
+                    return
+                new = clean_teams(body)
+                with teams_lock:
+                    approval_teams[:] = new   # in-place, damit Closures es sehen
+                    save_teams()
+                audit(s["user"], "Genehmigungs-Teams geändert",
+                      " → ".join(new) if new else "(keine – einstufig)")
+                self._json({"teams": list(approval_teams)})
             else:
                 self.send_error(404)
 
@@ -2533,12 +2652,11 @@ def main():
                     help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
                          "(0 = nie, Standard: 31)")
     ap.add_argument("--approval-teams", default="",
-                    help="Komma-getrennte Team-Namen für den mehrstufigen "
-                         "Genehmigungsprozess in Prüfreihenfolge, z. B. "
-                         "'Team Netzwerk,Team Security,Team Betrieb'. Jeder Antrag "
-                         "durchläuft die Teams der Reihe nach; erst wenn alle "
-                         "freigegeben haben, ist er genehmigt. Leer = einstufig "
-                         "(Admin genehmigt direkt).")
+                    help="Erstbefüllung der Genehmigungs-Teams (komma-getrennt, in "
+                         "Prüfreihenfolge), z. B. 'Team Netzwerk,Team Security,Team "
+                         "Betrieb'. Wird nur übernommen, wenn die Team-Datei noch "
+                         "nicht existiert; danach erfolgt die Pflege auf der "
+                         "Verwaltungsseite. Leer = einstufig (Admin genehmigt direkt).")
     ap.add_argument("--ad-url", default="",
                     help="Active Directory für die Anmeldung, z. B. "
                          "ldaps://dc01.firma.local (ohne Angabe: kein Login nötig)")
@@ -2586,6 +2704,9 @@ def main():
                     help="Audit-Log-Datei (Standard: data/kapa_log.jsonl)")
     ap.add_argument("--tokens-file", default="data/kapa_tokens.json",
                     help="API-Token-Datei (Standard: data/kapa_tokens.json)")
+    ap.add_argument("--teams-file", default="data/kapa_teams.json",
+                    help="Datei mit den Genehmigungs-Teams (Standard: "
+                         "data/kapa_teams.json); Pflege über die Verwaltungsseite")
     # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
     pre, _ = ap.parse_known_args()
     if pre.config:
@@ -2598,6 +2719,7 @@ def main():
     args.roles_file = data_path(args.roles_file)
     args.log_file = data_path(args.log_file)
     args.tokens_file = data_path(args.tokens_file)
+    args.teams_file = data_path(args.teams_file)
     if args.json:
         args.json = data_path(args.json)
 
