@@ -1,0 +1,26 @@
+# Beispiel-Compose für die VMware Kapazitätsplanung.
+# Start:  docker compose -f deploy/docker/docker-compose.yml up -d
+# (funktioniert genauso mit "podman compose")
+services:
+  kapa:
+    build:
+      # Context ist die Projektwurzel, damit aria_kapa.py kopiert werden kann.
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: kapa-dashboard:0.9
+    # Nur an localhost binden – davor gehört ein Reverse Proxy mit TLS.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Secrets als Umgebungsvariablen (oder besser: Docker/Podman-Secrets).
+      ARIA_PASSWORD: "${ARIA_PASSWORD:?ARIA_PASSWORD muss gesetzt sein}"
+      # SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+    volumes:
+      # Persistente Laufzeitdaten (Reservierungen, Rollen, Log, Tokens)
+      - kapa-data:/opt/kapa/data
+      # Konfiguration: eigene INI read-only einhängen
+      - ./kapa.ini:/etc/kapa/kapa.ini:ro
+    restart: unless-stopped
+
+volumes:
+  kapa-data:

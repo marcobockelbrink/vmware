@@ -292,3 +292,22 @@ Reverse-Proxy; das Dashboard selbst spricht nur HTTP auf localhost.
 
 Die laufende Version wird im Footer der Weboberfläche und per
 `aria_kapa.py --version` angezeigt.
+
+### Auslieferung: RPM, Ansible/AAP, Container
+
+Neben der manuellen Installation aus `config/` gibt es fertige
+Deployment-Varianten unter [`deploy/`](deploy/) – dasselbe Skript, drei
+Verpackungen:
+
+- **[`deploy/rpm/`](deploy/rpm/)** — natives RPM für RHEL/Alma/Rocky 9
+  (`dnf install`/`upgrade`, Dienst-Benutzer, systemd-Unit, Konfiguration unter
+  `/etc/kapa` mit `noreplace`). `deploy/rpm/build.sh` baut das Paket, die
+  Version kommt automatisch aus `aria_kapa.py`.
+- **[`deploy/ansible/`](deploy/ansible/)** — Role + Playbook für den Rollout
+  über eine Flotte bzw. die Ansible Automation Platform; installiert das RPM,
+  pflegt die Konfiguration aus dem Vault und setzt den SELinux-Schalter
+  `httpd_can_network_connect`.
+- **[`deploy/docker/`](deploy/docker/)** — Container-Image auf Basis von Red Hat
+  UBI 9 (läuft als nicht-root, auch mit Podman) samt `docker-compose.yml`.
+
+Details und die Auswahlhilfe stehen in [`deploy/README.md`](deploy/README.md).

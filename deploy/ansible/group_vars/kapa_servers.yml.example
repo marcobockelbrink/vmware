@@ -1,0 +1,32 @@
+# Nach group_vars/kapa_servers.yml kopieren und anpassen.
+# Secrets (Passwörter) NICHT im Klartext ablegen – mit ansible-vault verschlüsseln:
+#   ansible-vault encrypt_string 'DAS-ARIA-PASSWORT' --name kapa_aria_password
+# und den erzeugten Block hier einsetzen.
+---
+# RPM-Quelle: GitHub-Release-Asset, internes dnf-Repo oder lokaler Pfad
+kapa_rpm: "https://github.com/marcobockelbrink/vmware/releases/download/v0.9/kapa-dashboard-0.9-1.el9.noarch.rpm"
+
+# Aria Operations
+kapa_aria_url: "https://aria-ops.firma.de"
+kapa_aria_user: "svc-kapa-readonly"
+kapa_aria_auth_source: "local"
+kapa_aria_password: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  00000000000000000000000000000000000000000000000000000000000000000000000000000000
+  # ^ mit ansible-vault encrypt_string erzeugen und ersetzen
+
+# Active-Directory-Anmeldung
+kapa_ad_url: "ldaps://dc01.firma.local"
+kapa_ad_domain: "firma.local"
+kapa_admin_user: "vorname.nachname@firma.local"
+
+# Mail-Reports
+kapa_smtp_server: "mail.firma.local:25"
+kapa_smtp_from: "kapa-dashboard@firma.local"
+kapa_smtp_to: "vmware-team@firma.local"
+
+# nginx-Snippet mit ausrollen (setzt installiertes nginx voraus)
+kapa_manage_nginx: true
+
+# Weitere Optionen, z. B. INI-Datei oder Self-Signed-Zertifikate:
+# kapa_extra_args: "--config /etc/kapa/kapa.ini --insecure"

@@ -1,0 +1,33 @@
+---
+# Quelle des RPM: lokaler Pfad auf dem Control-Node, eine URL (GitHub-Release
+# oder internes dnf-Repo) oder einfach der Paketname, wenn ein Repo eingebunden
+# ist. Pflichtangabe.
+kapa_rpm: ""            # z. B. "https://…/kapa-dashboard-0.9-1.el9.noarch.rpm"
+
+# --- Aria Operations (Pflicht) ---
+kapa_aria_url: ""
+kapa_aria_user: "svc-kapa-readonly"
+kapa_aria_auth_source: "local"
+# Passwort NICHT im Klartext hier – aus dem Ansible-Vault übergeben:
+kapa_aria_password: ""
+
+# --- Active-Directory-Anmeldung (leer = kein Login) ---
+kapa_ad_url: ""
+kapa_ad_domain: ""
+kapa_admin_user: ""
+
+# --- Mail-Reports (leer = keine Mails) ---
+kapa_smtp_server: ""
+kapa_smtp_from: ""
+kapa_smtp_to: ""
+kapa_smtp_password: ""     # optional, aus dem Vault
+
+# Zusätzliche Argumente (z. B. --insecure, --ad-insecure, --config …)
+kapa_extra_args: ""
+
+# nginx-Snippet für /capa mit ausrollen und nginx neu laden?
+kapa_manage_nginx: false
+
+# Dienst nach der Konfiguration aktivieren und starten?
+kapa_service_enabled: true
+kapa_service_state: started
