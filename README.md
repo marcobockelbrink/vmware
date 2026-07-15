@@ -60,10 +60,13 @@ Entscheidungen und Backups:
 
 - **CPU-Kapazität** = Summe physischer Cores aller ESXi-Hosts im Cluster × Überprovisionierungsfaktor (Standard: 6)
 - **RAM-Kapazität** = Summe physischer RAM aller Hosts (1:1)
-- **Storage-Kapazität** = Summe der Datastore-Kapazität je Cluster aus Aria
-  (Zuordnung über `summary|parentCluster`; sauber bei vSAN/cluster-lokalen
-  Datastores). Wird die Kapazität nicht geliefert, zeigt die Spalte „–" und
-  der Rest funktioniert normal weiter.
+- **Storage-Kapazität** = Summe der Kapazität aller an den Cluster-Hosts
+  angedockten Datastores (vSAN **und** externe FC-LUNs). Die Zuordnung läuft
+  über die Host-Beziehungen in Aria (Datastore → angedockte Hosts → Cluster);
+  jeder Datastore zählt **je Cluster genau einmal**, auch wenn ihn alle Hosts
+  sehen (kein Doppeln geteilter LUNs). Wird keine Kapazität geliefert, zeigt die
+  Spalte „–". Der Abruf protokolliert im Log, wie viele Datastores zugeordnet
+  wurden und die Summe je Cluster – hilfreich zur Kontrolle.
 - **Ausfallreserve (N+1)**: pro Cluster wird der größte Host (Cores und RAM)
   von der Gesamtkapazität abgezogen (`--failover-hosts`, Standard: 1, `0` = aus);
   Storage bleibt davon unberührt.

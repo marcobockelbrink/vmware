@@ -160,6 +160,18 @@ class AriaOps:
             result[rid] = props
         return result
 
+    def related(self, resource_id, kinds=None, rel="ALL"):
+        """Identifier der verwandten Ressourcen (optional gefiltert nach
+        resourceKind, z. B. {'HostSystem'})."""
+        resp = self._request("GET", f"/resources/{resource_id}/relationships",
+                             params={"relationshipType": rel, "pageSize": 2000})
+        out = []
+        for r in resp.get("resourceList", []):
+            kind = r.get("resourceKey", {}).get("resourceKindKey")
+            if kinds is None or kind in kinds:
+                out.append(r.get("identifier"))
+        return out
+
 # -------------------------------------------------- Active Directory (LDAP) --
 
 def ldap_bind(url, username, password, timeout=10, insecure=False):
@@ -448,11 +460,9 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
          "config|hardware|numCpu", "config|hardware|memoryKB"],
         progress=lambda m: log(f"VM-Eigenschaften: {m}"))
 
-    # Storage-Kapazität aus den Datastores (best effort – fehlt sie, bleibt die
-    # Anzeige leer, der Rest funktioniert weiter). Zuordnung zum Cluster über
-    # summary|parentCluster: sauber bei vSAN/cluster-lokalen Datastores; geteilte
-    # Datastores ohne Cluster-Bezug werden übersprungen.
-    datastores, ds_stats, ds_props = [], {}, {}
+    # Storage-Kapazität aus den Datastores (vSAN + angedockte FC-LUNs).
+    # Best effort – schlägt es fehl, bleibt die Anzeige leer, der Rest läuft weiter.
+    datastores, ds_stats = [], {}
     try:
         log("Lese Datastores (Storage-Kapazität) ...")
         datastores = api.resources("Datastore")
@@ -460,8 +470,6 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
         ds_stats = api.latest_stats(ds_ids,
             ["capacity|total_capacity", "capacity|used_space"],
             progress=lambda m: log(f"Datastore-Metriken: {m}"))
-        ds_props = api.properties(ds_ids, ["summary|parentCluster"],
-            progress=lambda m: log(f"Datastore-Eigenschaften: {m}"))
     except Exception as e:
         log(f"Storage-Kapazität nicht verfügbar: {e}")
 
@@ -501,18 +509,45 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
             "on": "on" in power.lower().replace(" ", ""),
         })
 
-    for ds in datastores:
-        rid = ds["identifier"]
-        cl = (ds_props.get(rid) or {}).get("summary|parentCluster")
-        if cl not in data:
-            continue  # geteilter Datastore ohne eindeutigen Cluster-Bezug
-        st = ds_stats.get(rid) or {}
+    # Datastore -> Cluster über die angedockten Hosts. Jeder Datastore (auch ein
+    # von allen Hosts gesehenes FC-LUN oder der vSAN-Datastore) ist in vROps EINE
+    # Ressource und wird je Cluster genau EINMAL gezählt – kein Doppeln über die
+    # Hosts. Ein cluster-übergreifend geteiltes LUN zählt in jedem Cluster, an
+    # dessen Hosts es hängt, einmal.
+    host_cluster = {h["identifier"]: (host_props.get(h["identifier"]) or {})
+                    .get("summary|parentCluster") for h in hosts}
+    if datastores:
+        log(f"Ordne {len(datastores)} Datastores den Clustern zu (über Hosts) ...")
+    mapped = 0
+    for idx, ds in enumerate(datastores, 1):
+        did = ds["identifier"]
+        st = ds_stats.get(did) or {}
         cap = st.get("capacity|total_capacity")
         used = st.get("capacity|used_space")
-        if cap:
-            data[cl]["storage"]["cap_gb"] += float(cap)
-        if used:
-            data[cl]["storage"]["used_gb"] += float(used)
+        if not cap and not used:
+            continue
+        try:
+            host_ids = api.related(did, {"HostSystem"})
+        except Exception:
+            host_ids = []
+        cls = set()
+        for hid in host_ids:
+            cl = host_cluster.get(hid)
+            if cl in data:
+                cls.add(cl)
+        if cls:
+            mapped += 1
+        for cl in cls:
+            if cap:
+                data[cl]["storage"]["cap_gb"] += float(cap)
+            if used:
+                data[cl]["storage"]["used_gb"] += float(used)
+        if idx % 25 == 0:
+            log(f"Datastore-Zuordnung: {idx} / {len(datastores)}")
+    if datastores:
+        log(f"Storage zugeordnet: {mapped} von {len(datastores)} Datastores; "
+            + ", ".join(f"{cl}={round(d['storage']['cap_gb'])} GB"
+                        for cl, d in data.items() if d['storage']['cap_gb']))
 
     return build_summary(data, cpu_factor, failover_hosts)
 
