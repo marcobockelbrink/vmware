@@ -13,6 +13,10 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
   (nach Abzug genehmigter Reservierungen) mit Auslastungsbalken; Klick auf den
   Clusternamen zeigt Details (Hosts, VMs, Reservierungen, Antrags-Formular)
 - **Filterfeld** für Cluster bzw. Reservierungen
+- **Sortierbare Tabellen**: Klick auf eine Spaltenüberschrift sortiert auf-/
+  absteigend (numerisch, nach Datum oder Text) – in allen Datentabellen
+  (Kapazität, Reservierungen, Genehmigungen, Log, Benutzer/Rollen, Tokens). Die
+  Genehmigungs-Teams behalten ihre manuelle Prüfreihenfolge.
 - **Eigene Reservierungsseite** (Tab „Reservierungen" bzw. `/reservierungen`)
   mit allen Kapazitätsanfragen, Status und Summenzeile
 - **Genehmigungs-Dashboard** (Tab „Genehmigungen" bzw. `/genehmigungen`):
@@ -141,8 +145,8 @@ Detailkarte eines Clusters; Export/Import als JSON.
   den Status „storniert", bleibt als Historie erhalten und zählt nicht mehr
   gegen die Kapazität.
 - **Kommentar**: Beim Freigeben/Ablehnen/Stornieren kann ein Kommentar
-  (z. B. Begründung) erfasst werden; er erscheint in der Reservierungsübersicht
-  und in der Report-Mail.
+  (z. B. Begründung, **max. 64 Zeichen**) über einen schlanken Dialog erfasst
+  werden; er erscheint in der Reservierungsübersicht und in der Report-Mail.
 - **Entschieden von**: Die Übersicht zeigt, welcher Admin genehmigt bzw.
   abgelehnt hat — für Anforderer ist diese Information verborgen (Spalte und
   Datenfeld werden serverseitig entfernt); Admins und technische Prüfung

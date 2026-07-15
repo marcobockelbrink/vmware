@@ -654,6 +654,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .kt { width:100%; border-collapse:collapse; font-size:13px; margin:0; }
   .kt th, .kt td { padding:9px 14px; border-bottom:1px solid var(--line); }
   .kt thead th { color:var(--muted); font-size:12px; background:#0b1220; }
+  .kt thead th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+  .kt thead th.sortable:hover { color:var(--text); }
+  .kt thead th .sarr { opacity:.85; font-size:10px; margin-left:2px; }
   .kt tbody tr:hover td { background:#26334a; }
   .kt tbody tr:last-child td { border-bottom:none; }
   .kt .free { font-weight:600; }
@@ -704,6 +707,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
          color:var(--muted); white-space:nowrap; }
   .btn.approve { border-color:var(--ok); color:var(--ok); }
   .btn.approve:hover { background:rgba(34,197,94,.15); }
+  .btn.danger { border-color:var(--crit); color:var(--crit); font-weight:600; }
+  .btn.danger:hover { background:rgba(239,68,68,.15); }
   .hc-close { position:absolute; top:10px; right:12px; z-index:1;
               background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
   .hc-close:hover { color:var(--text); }
@@ -729,9 +734,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
            padding:22px; width:440px; max-width:92vw; }
   .modal h2 { color:var(--res); font-size:16px; margin-bottom:8px; }
   .modal label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
-  .modal input, .modal select { width:100%; background:#0b1220; border:1px solid var(--line);
-           color:var(--text); border-radius:6px; padding:7px 9px; font-size:13px; }
-  .modal input:focus, .modal select:focus { outline:none; border-color:var(--res); }
+  .modal input, .modal select, .modal textarea { width:100%; box-sizing:border-box;
+           background:#0b1220; border:1px solid var(--line); color:var(--text);
+           border-radius:6px; padding:7px 9px; font-size:13px; font-family:inherit; resize:vertical; }
+  .modal input:focus, .modal select:focus, .modal textarea:focus { outline:none; border-color:var(--res); }
   .modal .hint { font-size:12px; color:var(--accent); margin-top:10px; }
   .modal .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 </style>
@@ -775,6 +781,20 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
     </div>
   </div>
 </div>
+<div class="modal-bg" id="cmtBg" onclick="if(event.target===this)cmtCancel()">
+  <div class="modal">
+    <h2 id="cmtTitle">Kommentar</h2>
+    <div class="hint" id="cmtMsg" style="color:var(--muted);margin-bottom:10px"></div>
+    <label>Kommentar (optional)</label>
+    <textarea id="cmtInput" maxlength="64" rows="3" oninput="cmtCount()"
+              placeholder="kurze Begründung, max. 64 Zeichen"></textarea>
+    <div class="hint" id="cmtCnt" style="color:var(--muted);text-align:right"></div>
+    <div class="actions">
+      <button class="btn" onclick="cmtCancel()">Abbrechen</button>
+      <button class="btn primary" id="cmtOk" onclick="cmtConfirm()">OK</button>
+    </div>
+  </div>
+</div>
 <div class="tabs">
   <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
@@ -795,7 +815,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th class="nosort"></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
@@ -805,7 +825,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
     <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
-    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>Fortschritt</th><th>Aktion</th></tr></thead>
+    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>Fortschritt</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
 </div>
@@ -813,7 +833,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung / Team</th><th>Aktion</th></tr></thead>
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung / Team</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -842,7 +862,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="tablewrap">
 <table class="kt" id="ttable">
   <thead><tr><th>Anwendung</th><th>Token-Anfang</th><th>erstellt</th><th>von</th>
-    <th>zuletzt benutzt</th><th>Aktion</th></tr></thead>
+    <th>zuletzt benutzt</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="ttbody"></tbody>
 </table>
 </div>
@@ -1010,34 +1030,66 @@ function createRes(c, name, change, vcpu, ram, storage, errEl) {
   return true;
 }
 
+// ---- Kommentar-Dialog (schön statt prompt) ----
+let _cmtResolve = null;
+function askComment(opts) {
+  return new Promise(resolve => {
+    _cmtResolve = resolve;
+    document.getElementById("cmtTitle").textContent = opts.title || "Kommentar";
+    document.getElementById("cmtMsg").textContent = opts.message || "";
+    const ok = document.getElementById("cmtOk");
+    ok.textContent = opts.okLabel || "OK";
+    ok.className = "btn primary" + (opts.okClass ? " " + opts.okClass : "");
+    const inp = document.getElementById("cmtInput");
+    inp.value = "";
+    cmtCount();
+    document.getElementById("cmtBg").classList.add("open");
+    setTimeout(() => inp.focus(), 30);
+  });
+}
+function cmtCount() {
+  const inp = document.getElementById("cmtInput");
+  document.getElementById("cmtCnt").textContent = inp.value.length + " / 64 Zeichen";
+}
+function cmtClose(val) {
+  document.getElementById("cmtBg").classList.remove("open");
+  const r = _cmtResolve; _cmtResolve = null;
+  if (r) r(val);
+}
+function cmtConfirm() { cmtClose(document.getElementById("cmtInput").value.trim().slice(0, 64)); }
+function cmtCancel() { cmtClose(null); }
+
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
-  const c = prompt("Antrag „" + ((r && r.name) || "?") + "“ ablehnen?\n" +
-                   "Kommentar / Begründung (optional) – die Ablehnung bleibt " +
-                   (TTL > 0 ? TTL : 31) + " Tage in der Historie sichtbar:", "");
-  if (c === null) return;   // Abbrechen
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject",
-                    { comment: c.trim() }).then(setRes).catch(resFail);
-  else if (r) {
-    r.rejected = true;
-    r.rejected_on = new Date().toISOString().slice(0, 10);
-    if (c.trim()) r.comment = c.trim();
-    saveLocal(); render();
-  }
+  askComment({ title: "Antrag ablehnen", okLabel: "✕ Ablehnen", okClass: "danger",
+    message: "„" + ((r && r.name) || "?") + "“ – die Ablehnung bleibt " +
+             (TTL > 0 ? TTL : 31) + " Tage in der Historie sichtbar." }).then(c => {
+    if (c === null) return;
+    if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/reject",
+                      { comment: c }).then(setRes).catch(resFail);
+    else if (r) {
+      r.rejected = true;
+      r.rejected_on = new Date().toISOString().slice(0, 10);
+      if (c) r.comment = c;
+      saveLocal(); render();
+    }
+  });
 }
 
 function approveRes(id) {
   const r = RES.find(x => x.id === id);
-  const c = prompt("Antrag „" + ((r && r.name) || "?") + "“ genehmigen?\n" +
-                   "Kommentar (optional):", "");
-  if (c === null) return;   // Abbrechen
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve",
-                    { comment: c.trim() }).then(setRes).catch(resFail);
-  else if (r) {
-    r.approved = true;
-    if (c.trim()) r.comment = c.trim();
-    saveLocal(); render();
-  }
+  const team = r ? currentTeam(r) : null;
+  askComment({ title: team ? "Freigeben (" + team + ")" : "Antrag genehmigen",
+    okLabel: "✓ Bestätigen", message: "„" + ((r && r.name) || "?") + "“" }).then(c => {
+    if (c === null) return;
+    if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve",
+                      { comment: c }).then(setRes).catch(resFail);
+    else if (r) {
+      r.approved = true;
+      if (c) r.comment = c;
+      saveLocal(); render();
+    }
+  });
 }
 
 function addRes(idx) {
@@ -1052,18 +1104,19 @@ function delRes(id) {
 }
 function cancelRes(id) {
   const r = RES.find(x => x.id === id);
-  const c = prompt("Anfrage „" + ((r && r.name) || "?") + "“ stornieren?\n" +
-                   "Sie bleibt als „storniert“ in der Historie und zählt nicht " +
-                   "mehr gegen die Kapazität.\nKommentar / Grund (optional):", "");
-  if (c === null) return;   // Abbrechen
-  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/cancel",
-                    { comment: c.trim() }).then(setRes).catch(resFail);
-  else if (r) {
-    r.cancelled = true;
-    r.cancelled_on = new Date().toISOString().slice(0, 10);
-    if (c.trim()) r.comment = c.trim();
-    saveLocal(); render();
-  }
+  askComment({ title: "Anfrage stornieren", okLabel: "⦸ Stornieren", okClass: "danger",
+    message: "„" + ((r && r.name) || "?") + "“ bleibt als „storniert“ in der " +
+             "Historie und zählt nicht mehr gegen die Kapazität." }).then(c => {
+    if (c === null) return;
+    if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/cancel",
+                      { comment: c }).then(setRes).catch(resFail);
+    else if (r) {
+      r.cancelled = true;
+      r.cancelled_on = new Date().toISOString().slice(0, 10);
+      if (c) r.comment = c;
+      saveLocal(); render();
+    }
+  });
 }
 
 // ---- Dialog "Neue Kapazitätsanfrage" ----
@@ -1099,7 +1152,11 @@ function submitModal() {
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); hideCard(); } });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { closeModal(); cmtCancel(); hideCard(); }
+  else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) &&
+           document.getElementById("cmtBg").classList.contains("open")) cmtConfirm();
+});
 
 function exportRes() {
   const blob = new Blob([JSON.stringify(RES, null, 2)], {type:"application/json"});
@@ -1312,6 +1369,7 @@ function renderTokenTable() {
        onkeydown="if(event.key==='Enter')addToken()"></td>
      <td><button class="btn approve" onclick="addToken()">+ Token erzeugen</button></td></tr>` +
     (rows || `<tr><td colspan="6" style="color:var(--muted)">Keine API-Tokens vorhanden.</td></tr>`);
+  reSort("ttable");
 }
 
 // ---- Audit-Log (nur Admins) ----
@@ -1332,6 +1390,7 @@ function renderLogTable() {
      <td>${esc(e.user || "–")}</td><td>${esc(e.action || "")}</td>
      <td>${esc(e.detail || "")}</td></tr>`).join("") ||
     `<tr><td colspan="4" style="color:var(--muted)">Keine Log-Einträge${q ? " für diesen Filter" : ""}.</td></tr>`;
+  reSort("ltable");
 }
 
 // ---- Verwaltung: AD-Benutzer → Rollen ----
@@ -1483,6 +1542,7 @@ function renderAdmTable() {
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
     (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`) +
     `<datalist id="teamList">${TEAMS.map(t => `<option value="${esc(t)}">`).join("")}</datalist>`;
+  reSort("mtable");
 }
 
 function filterRes(list) {
@@ -1515,6 +1575,7 @@ function renderResTable() {
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td><td class="num">${fmt(sumStorage(appr))}</td>
      <td colspan="${nCols - 7}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+  reSort("rtable");
 }
 
 function renderAppTable() {
@@ -1550,6 +1611,7 @@ function renderAppTable() {
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
     rows || `<tr><td colspan="14" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+  reSort("atable");
 }
 
 function render() {
@@ -1584,6 +1646,7 @@ function render() {
     row(TOTAL, -1, true) +
     (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
                  : '<tr><td colspan="10" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
+  reSort("ktable");
   if (hoverIdx !== null && hc.style.display === "block")
     hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
                    card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
@@ -1630,6 +1693,73 @@ if (ROLE === "anforderer") {
   const th = document.getElementById("thDec");
   if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
 }
+
+// ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
+const SORT_CFG = { ktable:{pin:1}, rtable:{pin:1}, atable:{pin:0},
+                   ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1} };
+const sortState = {};
+function cellVal(td) {
+  let t = (td ? td.textContent : "").trim();
+  if (!t || t === "–" || t === "—") return { n: null, s: "" };
+  const dm = t.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);       // Datum dd.mm.yyyy
+  if (dm) return { n: Number(dm[3] + dm[2] + dm[1]), s: t };
+  const cl = t.replace(/[⚠+]/g, "").trim();               // deutsche Zahl
+  if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(cl) || /^-?\d+(,\d+)?$/.test(cl)) {
+    const v = parseFloat(cl.replace(/\./g, "").replace(",", "."));
+    if (!isNaN(v)) return { n: v, s: t };
+  }
+  return { n: null, s: t.toLowerCase() };
+}
+function sortCmp(a, b, dir) {
+  let r;
+  if (a.n !== null && b.n !== null) r = a.n - b.n;
+  else if (a.n !== null) r = -1;          // Zahlen vor Text
+  else if (b.n !== null) r = 1;
+  else r = a.s < b.s ? -1 : a.s > b.s ? 1 : 0;
+  return dir === "desc" ? -r : r;
+}
+function applySort(id) {
+  const st = sortState[id]; if (!st) return;
+  const table = document.getElementById(id); if (!table) return;
+  const tb = table.tBodies[0]; if (!tb) return;
+  const pin = (SORT_CFG[id] || {}).pin || 0;
+  const rows = Array.from(tb.rows);
+  const pinned = rows.slice(0, pin);
+  const rest = rows.slice(pin);
+  const isPlace = r => r.cells.length === 1 && r.cells[0].hasAttribute("colspan");
+  const data = rest.filter(r => !isPlace(r)), place = rest.filter(isPlace);
+  if (data.length > 1)
+    data.sort((x, y) => sortCmp(cellVal(x.cells[st.col]), cellVal(y.cells[st.col]), st.dir));
+  [...pinned, ...data, ...place].forEach(r => tb.appendChild(r));
+}
+function markArrows(id) {
+  const table = document.getElementById(id); if (!table || !table.tHead) return;
+  const st = sortState[id];
+  Array.from(table.tHead.rows[0].cells).forEach(th => {
+    if (!th.classList.contains("sortable")) return;
+    const base = th.getAttribute("data-base") || "";
+    const active = st && st.col === th.cellIndex;
+    th.innerHTML = base + (active ? '<span class="sarr">' + (st.dir === "asc" ? "▲" : "▼") + "</span>" : "");
+  });
+}
+function sortBy(id, col) {
+  const st = sortState[id];
+  sortState[id] = { col: col, dir: (st && st.col === col && st.dir === "asc") ? "desc" : "asc" };
+  markArrows(id); applySort(id);
+}
+function reSort(id) { if (sortState[id]) applySort(id); }
+function initSortable() {
+  Object.keys(SORT_CFG).forEach(id => {
+    const table = document.getElementById(id); if (!table || !table.tHead) return;
+    Array.from(table.tHead.rows[0].cells).forEach(th => {
+      if (th.classList.contains("barcol") || th.classList.contains("nosort")) return;
+      th.classList.add("sortable");
+      th.setAttribute("data-base", th.textContent);
+      th.addEventListener("click", () => sortBy(id, th.cellIndex));
+    });
+  });
+}
+initSortable();
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
@@ -2490,7 +2620,7 @@ def serve(args, password):
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/approve")])
-                comment = str((self._body() or {}).get("comment") or "").strip()[:500]
+                comment = str((self._body() or {}).get("comment") or "").strip()[:64]
                 notify = None
                 action = None
                 err = None
@@ -2551,7 +2681,7 @@ def serve(args, password):
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/reject")])
-                comment = str((self._body() or {}).get("comment") or "").strip()[:500]
+                comment = str((self._body() or {}).get("comment") or "").strip()[:64]
                 notify = None
                 err = None
                 with res_lock:
@@ -2599,7 +2729,7 @@ def serve(args, password):
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/cancel")])
-                comment = str((self._body() or {}).get("comment") or "").strip()[:500]
+                comment = str((self._body() or {}).get("comment") or "").strip()[:64]
                 notify = None
                 err = None
                 with res_lock:
