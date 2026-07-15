@@ -3,6 +3,10 @@
 Kapazitätsauswertung pro Cluster aus VMware Aria Operations mit browserbasiertem
 Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 
+![Dashboard mit Demo-Daten](docs/screenshot.png)
+
+*Screenshot mit Demo-Daten (`python3 aria_kapa.py --sample --serve`).*
+
 ## Dashboard
 
 - **Kompakte Tabellenansicht**: pro Cluster die freien vCPU-/RAM-Kapazitäten
