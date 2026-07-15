@@ -4,6 +4,10 @@ kapa_cache.json
 kapa_reservierungen.json
 kapa_rollen.json
 kapa_dashboard.html
+# Generierte Demo-Seite ist ein Build-Artefakt (jederzeit erzeugbar mit
+#   python3 aria_kapa.py --sample --output kapa_dashboard_demo.html
+# ) und blähte den Diff bei jedem Release auf.
+kapa_dashboard_demo.html
 *.json
 !package.json
 

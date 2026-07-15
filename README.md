@@ -23,8 +23,12 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
   offene Anträge genehmigen oder ablehnen
 - **Audit-Log** (Tab „Log" bzw. `/log`, nur Admins): protokolliert
   Anmeldungen (auch fehlgeschlagene), Anträge, Genehmigungen/Ablehnungen,
-  Löschungen, Importe, Rollenänderungen und Backups nach
-  `data/kapa_log.jsonl`
+  Stornos, Importe, Rollenänderungen und Backups nach `data/kapa_log.jsonl`.
+  Die Datei **rotiert automatisch** ab 10 MB (`.1` … `.3`), und die Ansicht
+  liest nur das Dateiende – das Log kann also nicht unbegrenzt wachsen oder
+  den Aufruf ausbremsen.
+- **Export**: Reservierungen als **CSV** (Semikolon, direkt Excel-tauglich)
+  oder als JSON über die Knöpfe in der Kopfleiste.
 - **Auto-Aktualisierung** im Serve-Modus (Standard: alle 30 Minuten, sichtbarer
   Countdown) plus Knopf „⟳ Jetzt aktualisieren"
 

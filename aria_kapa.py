@@ -697,42 +697,43 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag=""):
     # dessen Hosts es hängt, einmal.
     host_cluster = {h["identifier"]: (host_props.get(h["identifier"]) or {})
                     .get("summary|parentCluster") for h in hosts}
+    # Je Cluster genügt EIN Host: alle Hosts eines Clusters sehen dieselben LUNs
+    # (vSAN/FC). Das spart Abfragen (1 je Cluster statt 1 je Datastore). Liefert
+    # ein Host nichts (z. B. Wartung), wird der nächste versucht.
+    ds_by_id = {d["identifier"]: d for d in datastores}
     if datastores:
         log(f"Ordne {len(datastores)} Datastores den Clustern zu (über Hosts) ...")
-    mapped = 0
-    for idx, ds in enumerate(datastores, 1):
-        did = ds["identifier"]
-        st = ds_stats.get(did) or {}
-        cap = st.get("capacity|total_capacity")
-        used = st.get("capacity|used_space")
-        if not cap and not used:
-            continue
-        try:
-            host_ids = api.related(did, {"HostSystem"})
-        except Exception:
-            host_ids = []
-        cls = set()
-        for hid in host_ids:
-            cl = host_cluster.get(hid)
-            if cl in data:
-                cls.add(cl)
-        if cls:
-            mapped += 1
-        for cl in cls:
-            if cap:
-                data[cl]["storage"]["cap_gb"] += float(cap)
-            if used:
-                data[cl]["storage"]["used_gb"] += float(used)
+    for cl in data:
+        cl_hosts = [h["identifier"] for h in hosts
+                    if host_cluster.get(h["identifier"]) == cl]
+        seen = []
+        for hid in cl_hosts:
+            try:
+                seen = api.related(hid, {"Datastore"})
+            except Exception as e:
+                log(f"Datastore-Beziehungen für {cl} nicht lesbar: {e}")
+                seen = []
+            if seen:
+                break
+        for did in dict.fromkeys(seen):        # dedupliziert, Reihenfolge egal
+            ds = ds_by_id.get(did)
+            st = ds_stats.get(did) or {}
+            cap = st.get("capacity|total_capacity")
+            used = st.get("capacity|used_space")
+            if not ds or (not cap and not used):
+                continue
+            data[cl]["storage"]["cap_gb"] += float(cap or 0)
+            data[cl]["storage"]["used_gb"] += float(used or 0)
             data[cl]["storage"]["luns"].append({
                 "name": name_of(ds),
                 "cap_gb": float(cap or 0),
                 "used_gb": float(used or 0)})
-        if idx % 25 == 0:
-            log(f"Datastore-Zuordnung: {idx} / {len(datastores)}")
     if datastores:
-        log(f"Storage zugeordnet: {mapped} von {len(datastores)} Datastores; "
-            + ", ".join(f"{cl}={round(d['storage']['cap_gb'])} GB"
-                        for cl, d in data.items() if d['storage']['cap_gb']))
+        log("Storage zugeordnet: "
+            + (", ".join(f"{cl}={len(d['storage']['luns'])} LUNs / "
+                         f"{round(d['storage']['cap_gb'])} GB"
+                         for cl, d in data.items() if d["storage"]["luns"])
+               or "keinem Cluster (Beziehungen prüfen)"))
 
     return build_summary(data, cpu_factor, failover_hosts)
 
@@ -954,6 +955,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
+  a.btn { text-decoration:none; display:inline-block; line-height:normal; }
   .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
   .resform { display:grid; grid-template-columns:2fr 110px 70px 80px auto; gap:6px; margin-top:8px; }
@@ -1001,6 +1003,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
   <span id="refreshStatus" style="font-size:12px;color:var(--muted)"></span>
   <span id="timer" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+  <a class="btn" id="csvBtn" href="api/v1/reservations?format=csv"
+     download="reservierungen.csv" title="Reservierungen als CSV (Semikolon, für Excel)">CSV exportieren</a>
   <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
   <label class="btn" id="importBtn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
   <span id="userbox" style="font-size:12px;color:var(--muted)"></span>
@@ -1546,7 +1550,10 @@ function filteredIdx() {
 
 function miniBar(used, resv, cap) {
   const pu = pct(used, cap), pr = pct(used + resv, cap) - pu;
-  return `<div class="bar mini"><i style="width:${pu}%;background:${color(pu + pr)}"></i><i class="r" style="width:${pr}%"></i></div>`;
+  // Prozentwert als Tooltip: die Auslastung ist damit nicht nur über die Farbe
+  // erkennbar (Farbsehschwäche).
+  const tip = Math.round(pu + pr) + "% belegt" + (resv ? " (inkl. Reservierungen)" : "");
+  return `<div class="bar mini" title="${tip}"><i style="width:${pu}%;background:${color(pu + pr)}"></i><i class="r" style="width:${pr}%"></i></div>`;
 }
 
 function row(c, idx, isTotal) {
@@ -1856,8 +1863,15 @@ function renderAdmTable() {
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
     }
+    // Team-Zuweisung prüfen: nach Umbenennen/Löschen eines Teams (oder aus der
+    // früheren Freitext-Abteilung) kann hier ein Team stehen, das es nicht gibt.
+    const needsTeam = r.role === "anforderer" || r.role === "reviewer";
+    const orphan = needsTeam && r.abteilung && TEAMS.length && !TEAMS.includes(r.abteilung);
+    const warn = orphan
+      ? ' <span class="st rej" title="Dieses Team gibt es nicht (mehr) – bitte neu zuweisen">⚠ unbekannt</span>'
+      : (needsTeam && !r.abteilung ? ' <span class="st pend" title="Ohne Team: sieht nur eigene Anfragen bzw. kann nichts freigeben">⚠ kein Team</span>' : "");
     return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
-     <td>${esc(r.abteilung || "–")}</td>
+     <td>${esc(r.abteilung || "–")}${warn}</td>
      <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
@@ -1880,11 +1894,18 @@ function admKindSync() {
     : "benutzer@firma.local oder vorname.nachname";
 }
 
+// Status als reiner Text (für Filter/Export – stBadge liefert HTML)
+function statusText(r) {
+  if (r.rejected) return "abgelehnt";
+  if (r.cancelled) return "storniert";
+  if (r.approved) return "genehmigt";
+  return (TEAMS.length && stageOf(r) > 0) ? "in Prüfung" : "beantragt";
+}
 function filterRes(list) {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
-  return list.filter(r => !q ||
-      (r.name || "").toLowerCase().includes(q) ||
-      (r.cluster || "").toLowerCase().includes(q))
+  const hit = r => [r.name, r.cluster, r.change, r.von, r.abteilung, r.id,
+                    statusText(r)].some(v => (v || "").toLowerCase().includes(q));
+  return list.filter(r => !q || hit(r))
     .slice().sort((a, b) => (a.cluster || "").localeCompare(b.cluster || "") ||
                             (a.created || "").localeCompare(b.created || ""));
 }
@@ -2102,6 +2123,7 @@ initSortable();
 
 setView(VIEW);
 if (!SERVE) document.getElementById("refreshBtn").style.display = "none";
+if (!SERVE) document.getElementById("csvBtn").style.display = "none";  // API nur im Serve-Modus
 
 // ---- Live-Abruf & Auto-Update (nur im Serve-Modus) ----
 let nextRefresh = null;   // Zeitpunkt (ms) der nächsten automatischen Aktualisierung
@@ -2178,6 +2200,16 @@ def json_for_html(obj):
             .replace("<", "\\u003c").replace(">", "\\u003e")
             .replace("&", "\\u0026")
             .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+
+def int_or(default):
+    """argparse-Typ für Zahlen: ein leerer Wert (z. B. eine nicht gesetzte
+    Umgebungsvariable, die systemd als '' durchreicht) ergibt den Standard,
+    statt den Dienststart mit 'invalid int value' abzubrechen."""
+    def conv(s):
+        s = str(s or "").strip()
+        return default if not s else int(s)
+    return conv
 
 
 def _html_escape(s):
@@ -2556,7 +2588,27 @@ def serve(args, password):
         return buf.getvalue()
 
     # ---- Audit-Log (JSONL, nur für Admins einsehbar) ----
+    # Rotation: ab LOG_MAX_BYTES wird die Datei zu .1 (…, .LOG_KEEP) weggerollt,
+    # damit sie nicht unbegrenzt wächst. Gelesen wird nur das Dateiende.
     log_lock = threading.Lock()
+    LOG_MAX_BYTES = 10 * 1024 * 1024
+    LOG_KEEP = 3
+
+    def rotate_log():
+        """Nur mit gehaltenem log_lock aufrufen."""
+        try:
+            if os.path.getsize(args.log_file) < LOG_MAX_BYTES:
+                return
+            oldest = f"{args.log_file}.{LOG_KEEP}"
+            if os.path.exists(oldest):
+                os.remove(oldest)
+            for i in range(LOG_KEEP - 1, 0, -1):
+                src, dst = f"{args.log_file}.{i}", f"{args.log_file}.{i + 1}"
+                if os.path.exists(src):
+                    os.replace(src, dst)
+            os.replace(args.log_file, f"{args.log_file}.1")
+        except OSError as e:
+            print(f"Audit-Log-Rotation fehlgeschlagen: {e}", file=sys.stderr)
 
     def audit(user, action, detail=""):
         entry = {"ts": datetime.now().isoformat(timespec="seconds"),
@@ -2566,17 +2618,35 @@ def serve(args, password):
                 ensure_dir(args.log_file)
                 with open(args.log_file, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                rotate_log()
         except OSError as e:
             print(f"Audit-Log nicht schreibbar: {e}", file=sys.stderr)
 
-    def read_log(limit=500):
+    def _tail_lines(path, limit):
+        """Die letzten Zeilen einer Datei lesen, ohne sie ganz einzulesen."""
         try:
-            with log_lock, open(args.log_file, encoding="utf-8") as f:
-                lines = f.readlines()[-limit:]
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                chunk = min(size, max(64 * 1024, limit * 400))
+                f.seek(size - chunk)
+                data = f.read().decode("utf-8", errors="replace")
         except OSError:
             return []
+        lines = data.splitlines()
+        if chunk < size and lines:
+            lines = lines[1:]      # erste, evtl. angeschnittene Zeile verwerfen
+        return lines
+
+    def read_log(limit=500):
+        with log_lock:
+            lines = _tail_lines(args.log_file, limit)
+            # Direkt nach einer Rotation ist die aktuelle Datei fast leer –
+            # dann die vorherige Generation mit heranziehen.
+            if len(lines) < limit and os.path.exists(f"{args.log_file}.1"):
+                lines = _tail_lines(f"{args.log_file}.1", limit - len(lines)) + lines
         out = []
-        for ln in lines:
+        for ln in lines[-limit:]:
             try:
                 out.append(json.loads(ln))
             except ValueError:
@@ -2662,6 +2732,25 @@ def serve(args, password):
         finally:
             state["last"] = time.time()
             state["refreshing"] = False
+
+    def purge_stale():
+        """Abgelaufene Sitzungen und alte Login-Fehlversuche verwerfen, damit
+        beides nicht unbegrenzt im Speicher wächst."""
+        now = time.time()
+        for t in [t for t, s in list(sessions.items()) if s.get("exp", 0) <= now]:
+            sessions.pop(t, None)
+        with login_lock:
+            for k in [k for k, v in list(login_fails.items())
+                      if not v or now - max(v) > LOGIN_WINDOW]:
+                login_fails.pop(k, None)
+
+    def maintenance():
+        while True:
+            time.sleep(300)
+            try:
+                purge_stale()
+            except Exception as e:
+                print(f"Aufräumen fehlgeschlagen: {e}", file=sys.stderr)
 
     def scheduler():
         # Erster Start ohne Cache: sofort Daten holen
@@ -3348,6 +3437,7 @@ def serve(args, password):
             pass
 
     threading.Thread(target=scheduler, daemon=True).start()
+    threading.Thread(target=maintenance, daemon=True).start()
     if args.backup_target:
         threading.Thread(target=backup_loop, daemon=True).start()
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)
@@ -3406,8 +3496,8 @@ def main():
     ap.add_argument("--smtp-password-file", help="Datei mit dem SMTP-Passwort")
     ap.add_argument("--backup-password-file", help="Datei mit dem Backup-SSH-Passwort")
     ap.add_argument("--auth-source", default="local", help="Auth-Quelle (Standard: local)")
-    ap.add_argument("--cpu-factor", type=int, default=6, help="CPU-Überprovisionierungsfaktor (Standard: 6)")
-    ap.add_argument("--failover-hosts", type=int, default=1,
+    ap.add_argument("--cpu-factor", type=int_or(6), default=6, help="CPU-Überprovisionierungsfaktor (Standard: 6)")
+    ap.add_argument("--failover-hosts", type=int_or(1), default=1,
                     help="Ausfall-Hosts pro Cluster (N+1): die größten N Hosts werden "
                          "von der Kapazität abgezogen (Standard: 1, 0 = aus)")
     ap.add_argument("--exclude-tag", default="",
@@ -3423,7 +3513,7 @@ def main():
     ap.add_argument("--sample", action="store_true", help="Demo mit Beispieldaten")
     ap.add_argument("--serve", action="store_true",
                     help="Als lokaler Webserver laufen (Live-Abruf per Knopf, Disk-Cache)")
-    ap.add_argument("--port", type=int, default=8080, help="Port für --serve (Standard: 8080)")
+    ap.add_argument("--port", type=int_or(8080), default=8080, help="Port für --serve (Standard: 8080)")
     ap.add_argument("--bind", default="0.0.0.0", help="Bind-Adresse für --serve")
     ap.add_argument("--data-dir", default="data",
                     help="Basisordner für alle Laufzeitdaten (Cache, Reservierungen, "
@@ -3434,13 +3524,13 @@ def main():
                          "alle *-file-Optionen ohne eigene Pfadangabe.")
     ap.add_argument("--cache", default="kapa_cache.json",
                     help="Cache-Datei der letzten Abfrage (Standard: <data-dir>/kapa_cache.json)")
-    ap.add_argument("--refresh-interval", type=int, default=1800,
+    ap.add_argument("--refresh-interval", type=int_or(1800), default=1800,
                     help="Automatische Aktualisierung im Serve-Modus in Sekunden "
                          "(0 = aus, Standard: 1800 = 30 min)")
     ap.add_argument("--res-file", default="kapa_reservierungen.json",
                     help="Reservierungsdatei im Serve-Modus "
                          "(Standard: data/kapa_reservierungen.json)")
-    ap.add_argument("--res-ttl-days", type=int, default=31,
+    ap.add_argument("--res-ttl-days", type=int_or(31), default=31,
                     help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
                          "(0 = nie, Standard: 31)")
     ap.add_argument("--approval-teams", default="",
@@ -3493,15 +3583,15 @@ def main():
     ap.add_argument("--backup-target", default="",
                     help="SFTP/SCP-Backupziel, z. B. backup@srv:/backup/kapa "
                          "(ohne Angabe: kein Backup)")
-    ap.add_argument("--backup-port", type=int, default=22, help="SSH-Port (Standard: 22)")
+    ap.add_argument("--backup-port", type=int_or(22), default=22, help="SSH-Port (Standard: 22)")
     ap.add_argument("--backup-key", default="",
                     help="SSH-Private-Key für das Backup (empfohlen)")
     ap.add_argument("--backup-password", default="",
                     help="SSH-Passwort (alternativ BACKUP_PASSWORD; erfordert sshpass)")
-    ap.add_argument("--backup-interval", type=int, default=43200,
+    ap.add_argument("--backup-interval", type=int_or(43200), default=43200,
                     help="Backup-Intervall in Sekunden (Standard: 43200 = zweimal "
                          "täglich, 0 = nur einmal beim Start)")
-    ap.add_argument("--backup-keep-days", type=int, default=30,
+    ap.add_argument("--backup-keep-days", type=int_or(30), default=30,
                     help="Backups auf dem Ziel nach N Tagen löschen "
                          "(Standard: 30, 0 = nie aufräumen)")
     ap.add_argument("--log-file", default="kapa_log.jsonl",
