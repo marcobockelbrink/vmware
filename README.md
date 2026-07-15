@@ -213,10 +213,15 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 - **Rollen zuweisen**: Tab „Verwaltung" (`/verwaltung`) — AD-Benutzernamen
   eintragen, Rolle wählen und im Feld „Abteilung / Team" bei **Anforderern** die
-  Abteilung, bei **Reviewern** das Team (eines der im selben Tab gepflegten
-  Genehmigungs-Teams, per Auswahlliste) angeben; gespeichert in
-  `data/kapa_rollen.json`. Bestehende Zuweisungen lassen sich per Klick
-  bearbeiten (Rolle und Team/Abteilung) oder entfernen.
+  das **Team** (eines der im selben Tab gepflegten Genehmigungs-Teams, per
+  Auswahlliste) angeben – für **Anforderer und Reviewer** gleichermaßen; Admin
+  und Auditor brauchen kein Team. Gespeichert in `data/kapa_rollen.json`.
+  Bestehende Zuweisungen lassen sich per Klick bearbeiten oder entfernen.
+- **Team-Sicht (nur Anforderer)**: Ein **Anforderer** sieht in der
+  Reservierungsliste nur die Anfragen des **eigenen Teams** (fremde genehmigte
+  bleiben anonymisiert als „(anderes Team)" enthalten, damit die freie
+  Kapazität stimmt). **Reviewer, Admin und Auditor sehen alle** Anfragen – der
+  mehrstufige Genehmigungsprozess bleibt dadurch unberührt.
 - **Standardrolle**: Jeder erfolgreich am AD angemeldete Benutzer **ohne**
   explizite Zuweisung gilt automatisch als **Anforderer** — er kann Anfragen
   stellen, aber nichts freigeben. Reviewer-, Admin- und Auditor-Rechte gibt es
@@ -307,6 +312,7 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--res-file data/kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
 | `--exclude-tag Kapa_Filter:Ja` | VMs mit diesem vROps-Tag (Kategorie:Wert) aus der Auswertung ausschließen |
+| `--contact-info "…"` | Kontakt-/Impressumszeile (Footer + Login) für Rückfragen |
 | `--ad-bind-dn`, `--ad-bind-password`, `--ad-base-dn` | Service-Konto für die AD-Gruppen-Berechtigung (memberOf-Suche) |
 | `--approval-teams "A,B,C"` | **Erstbefüllung** der Genehmigungs-Teams (nur wenn `--teams-file` noch fehlt); danach Pflege im Tab „Verwaltung" |
 | `--teams-file data/kapa_teams.json` | Datei mit den Genehmigungs-Teams (Pflege über die Verwaltungsseite) |

@@ -27,6 +27,10 @@ bind = 127.0.0.1
 port = 8080
 refresh-interval = 1800
 
+# --- Kontakt / Impressum ------------------------------------------------------
+# Wird im Footer und auf der Login-Maske angezeigt (Rückfragen).
+contact-info = IT-Betrieb Musterfirma · kapa-support@firma.local
+
 # --- Datenablage --------------------------------------------------------------
 # Basisordner aller Laufzeitdaten. Bei CI/CD-Deployments AUSSERHALB des
 # Deploy-Verzeichnisses wählen, sonst löscht die Pipeline die Daten bei jedem

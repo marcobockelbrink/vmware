@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.4"
+VERSION = "1.5"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -851,6 +851,7 @@ LOGIN_TEMPLATE = r"""<!DOCTYPE html>
   <button>Anmelden</button>
   <div class="err" id="e"></div>
   <p style="margin:14px 0 0;text-align:center">Version __VERSION__</p>
+  <p style="margin:6px 0 0;text-align:center;color:#64748b;font-size:11px">__CONTACT__</p>
 </form>
 <script>
 async function login(ev) {
@@ -1063,7 +1064,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th class="nosort"></th></tr></thead>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Team</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th class="nosort"></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
@@ -1073,7 +1074,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
-    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>Fortschritt</th><th class="nosort">Aktion</th></tr></thead>
+    <th>von</th><th>Team</th><th>beantragt am</th><th>Fortschritt</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
 </div>
@@ -1081,7 +1082,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Abteilung / Team</th><th class="nosort">Aktion</th></tr></thead>
+  <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Team</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -1129,7 +1130,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 </div>
 <div class="hovercard" id="hovercard"></div>
-<div class="foot">VMware Kapazitätsplanung · Version __VERSION__</div>
+<div class="foot">VMware Kapazitätsplanung · Version __VERSION____CONTACT_FOOT__</div>
 <script>
 let CLUSTERS = __DATA__;
 const FACTOR = __FACTOR__;
@@ -1823,15 +1824,14 @@ function roleSelect(id, sel, onchange) {
   </select>`;
 }
 function roleField(id, role, val, u) {
-  if (role === "reviewer")
+  // Anforderer und Reviewer werden einem Team (aus teams.json) zugeordnet;
+  // Admin/Auditor brauchen kein Team.
+  if (role === "reviewer" || role === "anforderer")
     return `<select id="${id}" class="filterbox" style="width:100%">
       <option value="">${TEAMS.length ? "– Team wählen –" : "(erst Teams anlegen)"}</option>
       ${TEAMS.map(t => `<option value="${esc(t)}" ${val === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
     </select>`;
-  const enter = u ? ` onkeydown="if(event.key==='Enter')saveEditRole('${esc(u)}')"` : "";
-  if (role === "anforderer")
-    return `<input id="${id}" class="filterbox" style="width:100%" placeholder="Abteilung" value="${esc(val || "")}"${enter}>`;
-  return `<input id="${id}" class="filterbox" style="width:100%" placeholder="– für diese Rolle nicht nötig" value="${esc(val || "")}" disabled>`;
+  return `<input id="${id}" class="filterbox" style="width:100%" placeholder="– für diese Rolle nicht nötig" value="" disabled>`;
 }
 function syncRoleField(pfx, u) {
   const roleEl = document.getElementById(pfx === "adm" ? "admRole" : "editRole");
@@ -1856,10 +1856,8 @@ function renderAdmTable() {
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
     }
-    const label = r.role === "reviewer" && r.abteilung ? "Team: " + r.abteilung
-                : r.abteilung || "–";
     return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
-     <td>${esc(label)}</td>
+     <td>${esc(r.abteilung || "–")}</td>
      <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
@@ -2182,8 +2180,14 @@ def json_for_html(obj):
             .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
 
 
+def _html_escape(s):
+    return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
-                failover_hosts=1, userinfo=None, teams=None, rolenames=None):
+                failover_hosts=1, userinfo=None, teams=None, rolenames=None,
+                contact=""):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -2212,6 +2216,8 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
+            .replace("__CONTACT_FOOT__",
+                     " · " + _html_escape(contact) if contact else "")
             .replace("__DATE__", updated or datetime.now().strftime("%d.%m.%Y %H:%M")))
 
 
@@ -2602,15 +2608,16 @@ def serve(args, password):
         threading.Thread(target=worker, daemon=True).start()
 
     def visible_res(s):
-        """Sichtbare Reservierungen je Rolle: Admin/Prüfung alles; Anforderer nur
-        die eigene Abteilung – fremde genehmigte bleiben anonymisiert enthalten,
-        damit die freie Kapazität stimmt."""
+        """Sichtbare Reservierungen je Rolle: Admin, Auditor und Reviewer sehen
+        ALLE Anfragen. Nur Anforderer sind auf ihr eigenes Team beschränkt –
+        fremde genehmigte bleiben anonymisiert enthalten, damit die freie
+        Kapazität stimmt."""
         if s["role"] in ("admin", "auditor", "reviewer"):
             return list(reservations)
-        dept = s.get("abteilung") or ""
+        team = s.get("abteilung") or ""
         out = []
         for r in reservations:
-            mine = (dept and r.get("abteilung") == dept) or r.get("von") == s["user"]
+            mine = (team and r.get("abteilung") == team) or r.get("von") == s["user"]
             if mine:
                 # Anforderer sehen nicht, WER entschieden hat – der Fortschritt
                 # (welches Team schon freigegeben hat) bleibt jedoch sichtbar,
@@ -2624,7 +2631,7 @@ def serve(args, password):
             elif r.get("approved") and not r.get("cancelled"):
                 # bewusst ohne Name, von, Change, Kommentar; storniert zählt nicht
                 out.append({"id": r.get("id"), "cluster": r.get("cluster"),
-                            "name": "(andere Abteilung)", "vcpu": r.get("vcpu"),
+                            "name": "(anderes Team)", "vcpu": r.get("vcpu"),
                             "ram_gb": r.get("ram_gb"),
                             "storage_gb": r.get("storage_gb"),
                             "created": r.get("created"),
@@ -2785,7 +2792,8 @@ def serve(args, password):
                          "/genehmigungen", "/verwaltung", "/log"):
                 s = self._session()
                 if auth_enabled and not s:
-                    self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION),
+                    self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION)
+                               .replace("__CONTACT__", _html_escape(args.contact_info)),
                                "text/html; charset=utf-8")
                     return
                 userinfo = ({"user": s["user"], "role": s["role"],
@@ -2798,7 +2806,7 @@ def serve(args, password):
                                        res_ttl=args.res_ttl_days,
                                        failover_hosts=args.failover_hosts,
                                        userinfo=userinfo, teams=approval_teams,
-                                       rolenames=role_names),
+                                       rolenames=role_names, contact=args.contact_info),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 if not self._require():
@@ -3405,6 +3413,10 @@ def main():
     ap.add_argument("--exclude-tag", default="",
                     help="VMs mit diesem vROps-Tag aus der Auswertung ausschließen, "
                          "Format Kategorie:Wert, z. B. Kapa_Filter:Ja (leer = aus)")
+    ap.add_argument("--contact-info", default="",
+                    help="Kontakt-/Impressumszeile (Abteilung/Firma + Mailadresse "
+                         "für Rückfragen), wird im Footer und auf der Login-Maske "
+                         "angezeigt")
     ap.add_argument("--insecure", action="store_true", help="TLS-Zertifikat nicht prüfen (Self-Signed)")
     ap.add_argument("--output", default="kapa_dashboard.html", help="Ausgabedatei")
     ap.add_argument("--json", help="Rohdaten zusätzlich als JSON speichern")
