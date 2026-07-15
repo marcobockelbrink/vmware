@@ -1455,6 +1455,17 @@ if (SERVE) {
 """
 
 
+def json_for_html(obj):
+    """JSON so kodieren, dass es sicher in ein <script>-Tag eingebettet werden
+    kann. json.dumps escaped `<`, `>`, `&` und die Zeilentrenner U+2028/U+2029
+    nicht – ohne diese Ersetzung könnte ein aus Aria stammender Name wie
+    `</script>...` aus dem Script-Tag ausbrechen (Stored XSS)."""
+    return (json.dumps(obj, ensure_ascii=False)
+            .replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
@@ -1472,11 +1483,11 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
     else:
         failnote = ""
     return (HTML_TEMPLATE
-            .replace("__DATA__", json.dumps(clusters, ensure_ascii=False))
+            .replace("__DATA__", json_for_html(clusters))
             .replace("__FACTOR__", str(cpu_factor))
             .replace("__SERVE__", "true" if serve_mode else "false")
             .replace("__TTL__", str(res_ttl))
-            .replace("__USERINFO__", json.dumps(userinfo, ensure_ascii=False))
+            .replace("__USERINFO__", json_for_html(userinfo))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -1509,6 +1520,39 @@ def serve(args, password):
     session_ttl = 12 * 3600
     roles_lock = threading.Lock()
     VALID_ROLES = ("admin", "anforderer", "auditor")
+
+    # ---- Brute-Force-Bremse für den Login ----
+    # Pro Schlüssel (Benutzer bzw. Absender-IP) werden Fehlversuche gezählt;
+    # ab LOGIN_MAX innerhalb von LOGIN_WINDOW Sekunden wird für die Restzeit
+    # des Fensters gesperrt. Verhindert Password-Spraying gegen das AD und ein
+    # versehentliches Aussperren echter AD-Konten.
+    LOGIN_MAX = 5
+    LOGIN_WINDOW = 300
+    login_fails = {}                 # key -> [Zeitstempel, ...]
+    login_lock = threading.Lock()
+
+    def login_blocked(*keys):
+        now = time.time()
+        with login_lock:
+            for k in keys:
+                hits = [t for t in login_fails.get(k, []) if now - t < LOGIN_WINDOW]
+                login_fails[k] = hits
+                if len(hits) >= LOGIN_MAX:
+                    return True
+            return False
+
+    def login_note_fail(*keys):
+        now = time.time()
+        with login_lock:
+            for k in keys:
+                hits = [t for t in login_fails.get(k, []) if now - t < LOGIN_WINDOW]
+                hits.append(now)
+                login_fails[k] = hits
+
+    def login_reset(*keys):
+        with login_lock:
+            for k in keys:
+                login_fails.pop(k, None)
 
     def load_roles():
         """Rollendatei: {benutzer: {role, abteilung}}; alte Form {benutzer: rolle}
@@ -1808,6 +1852,17 @@ def serve(args, password):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            # Sicherheits-Header (Defense-in-depth): Clickjacking verhindern,
+            # MIME-Sniffing abschalten, Skripte/Objekte auf same-origin begrenzen
+            # (fängt zusätzlich einen etwaigen HTML-Injection-Ausbruch ab).
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "same-origin")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
             for k, v in (headers or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -1817,9 +1872,15 @@ def serve(args, password):
             self._send(json.dumps(obj, ensure_ascii=False),
                        "application/json; charset=utf-8", code, headers)
 
+        MAX_BODY = 2 * 1024 * 1024   # 2 MiB – reicht für große Reservierungs-Importe
+
         def _body(self):
+            # Body-Größe begrenzen: /api/login ruft das VOR der Anmeldung auf,
+            # ein riesiger Content-Length würde sonst den Prozess-Speicher fluten.
             try:
                 n = int(self.headers.get("Content-Length") or 0)
+                if n > self.MAX_BODY:
+                    return None
                 return json.loads(self.rfile.read(n).decode() or "null")
             except Exception:
                 return None
@@ -1970,11 +2031,20 @@ def serve(args, password):
                 body = self._body() or {}
                 user = normalize_user(body.get("username"))
                 pw = str(body.get("password") or "")
+                ip = self.client_address[0] if self.client_address else "?"
+                # Einheitliche Antwort für „kein Konto", „keine Rolle" und
+                # „falsches Passwort" – verrät nicht, welche Konten berechtigt sind.
+                bad = {"error": "Benutzername oder Passwort falsch."}
+                if login_blocked(user, ip):
+                    audit(user, "Anmeldung gesperrt", f"zu viele Fehlversuche (IP {ip})")
+                    self._json({"error": "Zu viele Fehlversuche – bitte einige "
+                                         "Minuten warten und erneut versuchen."}, 429)
+                    return
                 entry = role_entry(user)
                 if not user or not entry:
-                    audit(user, "Anmeldung abgewiesen", "keine Rolle zugewiesen")
-                    self._json({"error": "Diesem Benutzer ist keine Rolle zugewiesen – "
-                                         "bitte an die Administratoren wenden."}, 403)
+                    login_note_fail(user, ip)
+                    audit(user, "Anmeldung abgewiesen", f"keine Rolle zugewiesen (IP {ip})")
+                    self._json(bad, 401)
                     return
                 try:
                     ok = ldap_bind(args.ad_url, user, pw, insecure=args.ad_insecure)
@@ -1982,9 +2052,11 @@ def serve(args, password):
                     self._json({"error": f"Active Directory nicht erreichbar: {e}"}, 502)
                     return
                 if not ok:
-                    audit(user, "Anmeldung fehlgeschlagen", "falsches Passwort")
-                    self._json({"error": "Benutzername oder Passwort falsch."}, 401)
+                    login_note_fail(user, ip)
+                    audit(user, "Anmeldung fehlgeschlagen", f"falsches Passwort (IP {ip})")
+                    self._json(bad, 401)
                     return
+                login_reset(user, ip)
                 audit(user, "Anmeldung", f"Rolle: {entry['role']}"
                       + (f", Abteilung: {entry.get('abteilung')}"
                          if entry.get("abteilung") else ""))
@@ -1992,16 +2064,19 @@ def serve(args, password):
                 sessions[token] = {"user": user, "role": entry["role"],
                                    "abteilung": entry.get("abteilung") or "",
                                    "exp": time.time() + session_ttl}
+                secure = "" if args.cookie_insecure else " Secure;"
                 self._json({"user": user, "role": entry["role"],
                             "abteilung": entry.get("abteilung") or ""},
                            headers={"Set-Cookie": f"kapa_session={token}; "
-                                    "HttpOnly; SameSite=Lax; Path=/"})
+                                    f"HttpOnly;{secure} SameSite=Lax; Path=/"})
             elif self.path == "/api/logout":
                 old = sessions.pop(self._cookie_token(), None)
                 if old:
                     audit(old["user"], "Abmeldung")
+                secure = "" if args.cookie_insecure else " Secure;"
                 self._json({"ok": True},
-                           headers={"Set-Cookie": "kapa_session=; Max-Age=0; Path=/"})
+                           headers={"Set-Cookie": "kapa_session=; Max-Age=0; "
+                                    f"HttpOnly;{secure} SameSite=Lax; Path=/"})
             elif self.path == "/api/refresh":
                 if not self._require("admin"):
                     return
@@ -2313,6 +2388,9 @@ def main():
                     help="AD-Domäne für Benutzernamen ohne @, z. B. firma.local")
     ap.add_argument("--ad-insecure", action="store_true",
                     help="LDAPS-Zertifikat nicht prüfen (Self-Signed)")
+    ap.add_argument("--cookie-insecure", action="store_true",
+                    help="Session-Cookie ohne Secure-Flag setzen (nur für lokalen "
+                         "HTTP-Test ohne HTTPS-Proxy; im Betrieb NICHT verwenden)")
     ap.add_argument("--admin-user", default="",
                     help="Immer-Admin(s), kommagetrennt, z. B. admin@firma.local "
                          "(Bootstrap für die Rollenverwaltung)")

@@ -180,6 +180,24 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
   über das Netz (`--ad-insecure` für Self-Signed-Zertifikate).
 - Ohne `--ad-url` läuft alles wie bisher ohne Anmeldung (Vollzugriff).
 
+### Härtung
+
+- **Session-Cookie** mit `HttpOnly`, `SameSite=Lax` und `Secure`. Da das
+  Dashboard hinter dem HTTPS-nginx läuft, ist `Secure` Standard; nur für
+  einen lokalen HTTP-Test ohne Proxy lässt es sich mit `--cookie-insecure`
+  abschalten.
+- **Sicherheits-Header** auf jeder Antwort: `Content-Security-Policy`,
+  `X-Frame-Options: DENY` (kein Clickjacking), `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`.
+- **Ausgabe-Escaping**: aus Aria stammende Namen (Cluster, Hosts, VMs) werden
+  script-tag-sicher eingebettet, sodass sie kein JavaScript einschleusen können.
+- **Login-Bremse**: nach 5 Fehlversuchen je Benutzer/IP wird die Anmeldung für
+  einige Minuten mit `429` gesperrt (Schutz vor Password-Spraying). Eine
+  einheitliche Fehlermeldung verrät nicht, welche Konten berechtigt sind.
+  AD-Ausfälle zählen dabei bewusst nicht als Fehlversuch.
+- **Request-Größe** ist begrenzt (2 MiB), damit ein großer Body den Dienst
+  nicht überlasten kann.
+
 ## Konfigurationsdatei und SFTP-Backup
 
 Statt vieler Parameter kann alles in einer INI-Datei stehen
@@ -223,6 +241,7 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--ad-url ldaps://dc01…` | AD-Anmeldung aktivieren |
 | `--ad-domain firma.local` | Domäne für Benutzernamen ohne `@` |
 | `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |
+| `--cookie-insecure` | Session-Cookie ohne `Secure` (nur lokaler HTTP-Test) |
 | `--admin-user a@…,b@…` | Immer-Admins (Bootstrap) |
 | `--roles-file data/kapa_rollen.json` | Rollendatei |
 | `--smtp-server mail.firma.local:25` | Mailserver für Reports |

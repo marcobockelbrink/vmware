@@ -37,6 +37,8 @@ ad-url = ldaps://dc01.firma.local
 ad-domain = firma.local
 admin-user = vorname.nachname@firma.local
 #ad-insecure = true
+# Session-Cookie ohne Secure-Flag – nur für lokalen HTTP-Test ohne HTTPS-Proxy:
+#cookie-insecure = true
 #roles-file = data/kapa_rollen.json
 
 # --- Mail-Reports ---------------------------------------------------------------
