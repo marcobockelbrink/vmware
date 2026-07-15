@@ -67,6 +67,10 @@ Entscheidungen und Backups:
   sehen (kein Doppeln geteilter LUNs). Wird keine Kapazität geliefert, zeigt die
   Spalte „–". Der Abruf protokolliert im Log, wie viele Datastores zugeordnet
   wurden und die Summe je Cluster – hilfreich zur Kontrolle.
+  - **LUN-Detail**: Ein Klick auf den Storage-Wert (oder auf den Clusternamen)
+    öffnet die Detailkarte mit **jedem einzelnen Datastore/LUN** – wahlweise
+    sortiert nach **Größe** oder nach **Belegung**, mit Größe, belegtem Platz,
+    Belegung in % und freiem Platz.
 - **Ausfallreserve (N+1)**: pro Cluster wird der größte Host (Cores und RAM)
   von der Gesamtkapazität abgezogen (`--failover-hosts`, Standard: 1, `0` = aus);
   Storage bleibt davon unberührt.

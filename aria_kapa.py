@@ -476,7 +476,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
     data = {}
     for c in clusters:
         data[name_of(c)] = {"hosts": [], "vms": [],
-                            "storage": {"cap_gb": 0.0, "used_gb": 0.0}}
+                            "storage": {"cap_gb": 0.0, "used_gb": 0.0, "luns": []}}
 
     for h in hosts:
         rid = h["identifier"]
@@ -542,6 +542,10 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
                 data[cl]["storage"]["cap_gb"] += float(cap)
             if used:
                 data[cl]["storage"]["used_gb"] += float(used)
+            data[cl]["storage"]["luns"].append({
+                "name": name_of(ds),
+                "cap_gb": float(cap or 0),
+                "used_gb": float(used or 0)})
         if idx % 25 == 0:
             log(f"Datastore-Zuordnung: {idx} / {len(datastores)}")
     if datastores:
@@ -585,6 +589,12 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "storageCap": stor_cap,
             "storageUsed": stor_used,
             "storageFree": round(stor_cap - stor_used, 1),
+            "datastores": sorted(
+                [{"name": l.get("name"),
+                  "cap_gb": round(float(l.get("cap_gb") or 0), 1),
+                  "used_gb": round(float(l.get("used_gb") or 0), 1)}
+                 for l in (storage.get("luns") or [])],
+                key=lambda l: l["cap_gb"], reverse=True),
             "vmCount": len(d["vms"]),
             "vmOff": sum(1 for v in d["vms"] if not v["on"]),
             "hosts": d["hosts"],
@@ -609,10 +619,20 @@ def sample_data():
                 "ram_gb": random.choice([8, 16, 16, 32, 64]),
                 "on": random.random() > 0.1}
                for vi in range(1, random.randint(40, 120))]
-        cap_gb = len(hosts) * random.choice([8000, 12000, 20000])
-        used_gb = round(cap_gb * random.uniform(0.45, 0.85))
+        # Beispiel-LUNs: ein großer vSAN-Datastore + mehrere FC-LUNs
+        luns = [{"name": f"vsan-cl{ci}",
+                 "cap_gb": random.choice([20000, 40000]),
+                 "used_gb": 0}]
+        for li in range(1, random.randint(3, 7)):
+            luns.append({"name": f"FC-LUN-{ci}{li:02d}",
+                         "cap_gb": random.choice([2000, 4000, 8000]),
+                         "used_gb": 0})
+        for l in luns:
+            l["used_gb"] = round(l["cap_gb"] * random.uniform(0.35, 0.9))
+        cap_gb = sum(l["cap_gb"] for l in luns)
+        used_gb = sum(l["used_gb"] for l in luns)
         data[cl] = {"hosts": hosts, "vms": vms,
-                    "storage": {"cap_gb": cap_gb, "used_gb": used_gb}}
+                    "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
 
 # ------------------------------------------------------------------ Dashboard --
@@ -1241,6 +1261,23 @@ function card(c, idx, isTotal) {
      <td class="num">${v.vcpu}</td><td class="num">${fmt(v.ram_gb)}</td></tr>`).join("");
   const hostRows = (c.hosts || []).map(h =>
     `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
+  const ds = (c.datastores || []).slice().sort(DS_SORT === "util"
+    ? (a, b) => (b.used_gb / (b.cap_gb || 1)) - (a.used_gb / (a.cap_gb || 1))
+    : (a, b) => b.cap_gb - a.cap_gb);
+  const dsRows = ds.map(d => {
+    const p = d.cap_gb ? Math.round(d.used_gb / d.cap_gb * 100) : 0;
+    return `<tr><td>${esc(d.name)}</td><td class="num">${fmt(Math.round(d.cap_gb))}</td>
+      <td class="num">${fmt(Math.round(d.used_gb))}</td>
+      <td class="num" style="color:${color(p)}">${p}%</td>
+      <td class="num">${fmt(Math.round((d.cap_gb - d.used_gb) * 10) / 10)}</td></tr>`;
+  }).join("");
+  const dsLink = m => `<a href="#" onclick="setDsSort('${m}');return false"${DS_SORT === m ? ' style="font-weight:600;color:var(--text)"' : ""}>${m === "size" ? "Größe" : "Belegung"}</a>`;
+  const dsBlock = ds.length ? `
+    <details ${DS_OPEN ? "open" : ""} ontoggle="DS_OPEN=this.open">
+      <summary>Storage im Detail: ${ds.length} Datastores / LUNs</summary>
+      <div style="margin:6px 0;font-size:12px;color:var(--muted)">Sortierung: ${dsLink("size")} · ${dsLink("util")}</div>
+      <table><tr><th>Datastore / LUN</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>
+    </details>` : "";
   const resRows = clRes.map(r =>
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
@@ -1262,6 +1299,7 @@ function card(c, idx, isTotal) {
       <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB${hasStor || rvStor ? " / " + fmt(rvStor) + " GB Storage" : ""}</b></div>
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
     </div>
+    ${dsBlock}
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
       ${resTable}
@@ -1284,6 +1322,15 @@ function card(c, idx, isTotal) {
       <table><tr><th>VM</th><th class="num">vCPU</th><th class="num">RAM (GB)</th></tr>${vmRows}</table>
     </details>`}
   </div>`;
+}
+
+// ---- Storage-Detail (LUN-Liste) in der Karte ----
+let DS_SORT = "size", DS_OPEN = false;
+function setDsSort(m) { DS_SORT = m; DS_OPEN = true; rerenderCard(); }
+function rerenderCard() {
+  if (hoverIdx !== null && hc.style.display === "block")
+    hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
+                   card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
 }
 
 // ---- Tabellenansicht mit Hover-Details ----
@@ -1320,7 +1367,7 @@ function row(c, idx, isTotal) {
     <td class="barcol">${miniBar(c.vcpuUsed, rvCpu, c.vcpuCap)}</td>
     <td class="num free" style="color:${cRam}">${fmt(fRam)}</td>
     <td class="barcol">${miniBar(c.ramUsed, rvRam, c.ramCap)}</td>
-    <td class="num free" style="color:${hasStor ? cStor : 'var(--muted)'}" title="${hasStor ? '' : 'keine Storage-Daten aus Aria'}">${hasStor ? fmt(fStor) : '–'}</td>
+    <td class="num free ${hasStor ? 'cl' : ''}" style="color:${hasStor ? cStor : 'var(--muted)'}" title="${hasStor ? 'Datastores/LUNs anzeigen' : 'keine Storage-Daten aus Aria'}" ${hasStor ? `onclick="openStorage(${idx},this)"` : ''}>${hasStor ? fmt(fStor) : '–'}</td>
     <td class="barcol">${hasStor ? miniBar(c.storageUsed || 0, rvStor, c.storageCap) : ''}</td>
     <td class="num">${rv.length || "–"}${pend ? ` <span class="st pend">+${pend}</span>` : ""}</td></tr>`;
 }
@@ -1715,6 +1762,7 @@ function render() {
     vmOff: vis.reduce((s,c)=>s+c.vmOff,0),
     spareCores: vis.reduce((s,c)=>s+(c.spareCores||0),0),
     spareRamGb: Math.round(vis.reduce((s,c)=>s+(c.spareRamGb||0),0)*10)/10,
+    datastores: vis.reduce((s,c)=>s.concat(c.datastores||[]),[]),
     _names: new Set(vis.map(c => c.name)),
   };
   TOTAL.vcpuFree = TOTAL.vcpuCap - TOTAL.vcpuUsed;
@@ -1749,6 +1797,10 @@ function showCard(idx, rowEl) {
 function toggleCard(idx, cell) {
   if (hoverIdx === idx && hc.style.display === "block") hideCard();
   else showCard(idx, cell.parentElement);
+}
+function openStorage(idx, cell) {
+  DS_OPEN = true;                 // LUN-Liste direkt aufgeklappt zeigen
+  showCard(idx, cell.parentElement);
 }
 function hideCard() { hc.style.display = "none"; hoverIdx = null; }
 document.addEventListener("click", e => {
