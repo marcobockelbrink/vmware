@@ -429,12 +429,21 @@ def migrate_data_files(*paths):
 # ---------------------------------------------------------- SFTP-Backup -----
 
 def _ssh_cmd(args, prog):
-    """Basis-Kommando + Umgebung für scp/sftp mit Key- oder Passwort-Auth."""
+    """Basis-Kommando + Umgebung für scp/sftp mit Key- oder Passwort-Auth.
+
+    Wichtig für den systemd-Betrieb: der Dienst läuft gehärtet (ProtectHome,
+    ProtectSystem=strict), das Home-Verzeichnis ist also nicht nutzbar. Deshalb
+    liegt die known_hosts-Datei im beschreibbaren Datenordner und der Key wird
+    ausschließlich über --backup-key angegeben (IdentitiesOnly)."""
+    known = args.backup_known_hosts or os.path.join(
+        os.path.dirname(args.res_file) or ".", "known_hosts")
     base = [prog, "-q", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"UserKnownHostsFile={known}",
             "-o", "ConnectTimeout=15", "-o", f"Port={args.backup_port}"]
     env = os.environ.copy()
     if args.backup_key:
-        base += ["-i", args.backup_key, "-o", "BatchMode=yes"]
+        base += ["-i", args.backup_key, "-o", "IdentitiesOnly=yes",
+                 "-o", "BatchMode=yes"]
     elif args.backup_password:
         env["SSHPASS"] = args.backup_password
         base = ["sshpass", "-e"] + base
@@ -3585,7 +3594,14 @@ def main():
                          "(ohne Angabe: kein Backup)")
     ap.add_argument("--backup-port", type=int_or(22), default=22, help="SSH-Port (Standard: 22)")
     ap.add_argument("--backup-key", default="",
-                    help="SSH-Private-Key für das Backup (empfohlen)")
+                    help="SSH-Private-Key für das Backup (empfohlen). Muss vom "
+                         "Dienst-Benutzer lesbar sein und AUSSERHALB des Home-"
+                         "Verzeichnisses liegen (z. B. /etc/kapa/), weil die "
+                         "systemd-Härtung ProtectHome=true Home-Verzeichnisse "
+                         "ausblendet.")
+    ap.add_argument("--backup-known-hosts", default="",
+                    help="known_hosts-Datei für das Backup (Standard: "
+                         "known_hosts im Datenordner – muss beschreibbar sein)")
     ap.add_argument("--backup-password", default="",
                     help="SSH-Passwort (alternativ BACKUP_PASSWORD; erfordert sshpass)")
     ap.add_argument("--backup-interval", type=int_or(43200), default=43200,
