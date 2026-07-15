@@ -44,10 +44,13 @@ LoadCredential=aria-password:/etc/kapa/aria.pass
 ExecStart=/usr/bin/python3 /opt/kapa/aria_kapa.py --serve \
     --bind 127.0.0.1 --port 8080 \
     --data-dir /var/lib/kapa \
+    --exclude-tag ${EXCLUDE_TAG} \
     --url ${ARIA_URL} --user ${ARIA_USER} --auth-source ${ARIA_AUTH_SOURCE} \
     --password-file ${CREDENTIALS_DIRECTORY}/aria-password \
     --ad-url ${AD_URL} --ad-domain ${AD_DOMAIN} --admin-user ${ADMIN_USER} \
+    --ad-bind-dn ${AD_BIND_DN} --ad-base-dn ${AD_BASE_DN} \
     --smtp-server ${SMTP_SERVER} --smtp-from ${SMTP_FROM} --smtp-to ${SMTP_TO} \
+    --backup-target ${BACKUP_TARGET} --backup-port ${BACKUP_PORT} --backup-key ${BACKUP_KEY} \
     $KAPA_EXTRA_ARGS
 
 Restart=on-failure

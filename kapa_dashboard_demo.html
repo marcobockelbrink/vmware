@@ -107,8 +107,20 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">15.07.2026 18:02</span><br>
-Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
+<div class="sub">
+  <button class="btn" onclick="showInfo('infoCalc','Info Kapa-Berechnung')">ℹ Info Kapa-Berechnung</button>
+  <button class="btn" onclick="showInfo('infoHelp','Hilfe')">? Hilfe</button>
+  <span style="color:var(--muted);font-size:12px;margin-left:8px">Stand: <span id="stand">15.07.2026 18:42</span></span>
+</div>
+<div id="infoCalc" style="display:none">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen</div>
+<div id="infoHelp" style="display:none">Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
+<div class="modal-bg" id="infoBg" onclick="if(event.target===this)closeInfo()">
+  <div class="modal">
+    <h2 id="infoTitle"></h2>
+    <div id="infoBody" style="font-size:13px;line-height:1.6;color:var(--text)"></div>
+    <div class="actions"><button class="btn primary" onclick="closeInfo()">Schließen</button></div>
+  </div>
+</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
   <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
@@ -196,7 +208,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung / Team</th><th class="nosort">Aktion</th></tr></thead>
+  <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Abteilung / Team</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -244,7 +256,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 </table>
 </div>
 <div class="hovercard" id="hovercard"></div>
-<div class="foot">VMware Kapazitätsplanung · Version 1.3</div>
+<div class="foot">VMware Kapazitätsplanung · Version 1.4</div>
 <script>
 let CLUSTERS = [{"name": "Cluster-01", "hostCount": 3, "cores": 64, "spareCores": 48, "spareRamGb": 1024, "vcpuCap": 384, "vcpuUsed": 370, "vcpuFree": 14, "ramCap": 1024, "ramUsed": 1504, "ramFree": -480, "storageCap": 42000.0, "storageUsed": 24056.0, "storageFree": 17944.0, "datastores": [{"name": "vsan-cl1", "cap_gb": 20000.0, "used_gb": 12228.0}, {"name": "FC-LUN-102", "cap_gb": 8000.0, "used_gb": 3966.0}, {"name": "FC-LUN-105", "cap_gb": 8000.0, "used_gb": 3732.0}, {"name": "FC-LUN-101", "cap_gb": 2000.0, "used_gb": 1305.0}, {"name": "FC-LUN-103", "cap_gb": 2000.0, "used_gb": 1660.0}, {"name": "FC-LUN-104", "cap_gb": 2000.0, "used_gb": 1165.0}], "vmCount": 52, "vmOff": 5, "hosts": [{"name": "esx101.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx102.firma.local", "cores": 48, "ram_gb": 512}, {"name": "esx103.firma.local", "cores": 32, "ram_gb": 512}], "vms": [{"name": "vm-1001", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-1002", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-1003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1004", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-1005", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1006", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1007", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1008", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1009", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-1010", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1011", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1012", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1013", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1014", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1015", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1016", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1017", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1018", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-1019", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1021", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-1022", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1023", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-1024", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1025", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1026", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1027", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1029", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-1030", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1031", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1032", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1033", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1034", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1035", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1036", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1037", "vcpu": 8, "ram_gb": 64, "on": false}, {"name": "vm-1038", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1040", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1041", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1042", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1043", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-1044", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1045", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1046", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1047", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1048", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1049", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1050", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1051", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1052", "vcpu": 4, "ram_gb": 64, "on": true}]}, {"name": "Cluster-02", "hostCount": 4, "cores": 160, "spareCores": 64, "spareRamGb": 1024, "vcpuCap": 960, "vcpuUsed": 606, "vcpuFree": 354, "ramCap": 2560, "ramUsed": 2672, "ramFree": -112, "storageCap": 48000.0, "storageUsed": 30776.0, "storageFree": 17224.0, "datastores": [{"name": "vsan-cl2", "cap_gb": 20000.0, "used_gb": 12670.0}, {"name": "FC-LUN-202", "cap_gb": 8000.0, "used_gb": 4275.0}, {"name": "FC-LUN-204", "cap_gb": 8000.0, "used_gb": 6105.0}, {"name": "FC-LUN-201", "cap_gb": 4000.0, "used_gb": 2792.0}, {"name": "FC-LUN-206", "cap_gb": 4000.0, "used_gb": 1894.0}, {"name": "FC-LUN-203", "cap_gb": 2000.0, "used_gb": 1600.0}, {"name": "FC-LUN-205", "cap_gb": 2000.0, "used_gb": 1440.0}], "vmCount": 96, "vmOff": 12, "hosts": [{"name": "esx201.firma.local", "cores": 64, "ram_gb": 768}, {"name": "esx202.firma.local", "cores": 48, "ram_gb": 1024}, {"name": "esx203.firma.local", "cores": 64, "ram_gb": 768}, {"name": "esx204.firma.local", "cores": 48, "ram_gb": 1024}], "vms": [{"name": "vm-2001", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2002", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2003", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2004", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2005", "vcpu": 2, "ram_gb": 16, "on": false}, {"name": "vm-2006", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2007", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2008", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2009", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2010", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2011", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2012", "vcpu": 2, "ram_gb": 8, "on": false}, {"name": "vm-2013", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2014", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2015", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2016", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2017", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2018", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2019", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2021", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2022", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2023", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2024", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2025", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2026", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2027", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2028", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2029", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2030", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2031", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2032", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2033", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2034", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2035", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2036", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2037", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2038", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2040", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2041", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2042", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2043", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2044", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2045", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2046", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2047", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-2048", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2049", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2050", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-2051", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2052", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2053", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2054", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2055", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-2056", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2057", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2058", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2059", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2060", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2061", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-2062", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2063", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2064", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2065", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2066", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2067", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-2068", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2069", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2070", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2071", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2072", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2073", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-2074", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2075", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2076", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2077", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2078", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2079", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2080", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2081", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2082", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2083", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2084", "vcpu": 16, "ram_gb": 32, "on": false}, {"name": "vm-2085", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2086", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2087", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2088", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2089", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2090", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2091", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2092", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2093", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2094", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2095", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2096", "vcpu": 8, "ram_gb": 32, "on": true}]}, {"name": "Cluster-03", "hostCount": 4, "cores": 96, "spareCores": 48, "spareRamGb": 1024, "vcpuCap": 576, "vcpuUsed": 718, "vcpuFree": -142, "ramCap": 1792, "ramUsed": 2368, "ramFree": -576, "storageCap": 50000.0, "storageUsed": 25781.0, "storageFree": 24219.0, "datastores": [{"name": "vsan-cl3", "cap_gb": 40000.0, "used_gb": 20255.0}, {"name": "FC-LUN-302", "cap_gb": 8000.0, "used_gb": 4299.0}, {"name": "FC-LUN-301", "cap_gb": 2000.0, "used_gb": 1227.0}], "vmCount": 92, "vmOff": 7, "hosts": [{"name": "esx301.firma.local", "cores": 32, "ram_gb": 512}, {"name": "esx302.firma.local", "cores": 32, "ram_gb": 512}, {"name": "esx303.firma.local", "cores": 48, "ram_gb": 1024}, {"name": "esx304.firma.local", "cores": 32, "ram_gb": 768}], "vms": [{"name": "vm-3001", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3002", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3004", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3005", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3006", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3007", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3008", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3009", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3010", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3011", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3012", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3013", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3014", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3015", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3016", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3017", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-3018", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3019", "vcpu": 4, "ram_gb": 64, "on": false}, {"name": "vm-3020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3021", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3022", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3023", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3024", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3025", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3026", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3027", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3028", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3029", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3030", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3031", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3032", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3033", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3034", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3035", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3036", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3037", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3038", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3039", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3040", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3041", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3042", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3043", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3044", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3045", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3046", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3047", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3048", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3049", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3050", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-3051", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3052", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3053", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3054", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-3055", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-3056", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3057", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3058", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3059", "vcpu": 16, "ram_gb": 16, "on": false}, {"name": "vm-3060", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3061", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3062", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3063", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-3064", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3065", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3066", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-3067", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3068", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3069", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-3070", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3071", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3072", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3073", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3074", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3075", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3076", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3077", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3078", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-3079", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3080", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3081", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3082", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3083", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3084", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3085", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3086", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3087", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3088", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3089", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3090", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3091", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3092", "vcpu": 16, "ram_gb": 16, "on": true}]}];
 const FACTOR = 6;
@@ -422,6 +434,14 @@ function cmtClose(val) {
 function cmtConfirm() { cmtClose(document.getElementById("cmtInput").value.trim().slice(0, 64)); }
 function cmtCancel() { cmtClose(null); }
 
+// ---- Info-/Hilfe-Popup ----
+function showInfo(srcId, title) {
+  document.getElementById("infoTitle").textContent = title;
+  document.getElementById("infoBody").innerHTML = document.getElementById(srcId).innerHTML;
+  document.getElementById("infoBg").classList.add("open");
+}
+function closeInfo() { document.getElementById("infoBg").classList.remove("open"); }
+
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
   askComment({ title: "Antrag ablehnen", okLabel: "✕ Ablehnen", okClass: "danger",
@@ -516,7 +536,7 @@ function submitModal() {
   if (ok) closeModal();
 }
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { closeModal(); cmtCancel(); hideCard(); }
+  if (e.key === "Escape") { closeModal(); cmtCancel(); closeInfo(); hideCard(); }
   else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) &&
            document.getElementById("cmtBg").classList.contains("open")) cmtConfirm();
 });
@@ -797,13 +817,14 @@ function loadRoles() {
                  .catch(() => {});
 }
 function addRole() {
-  const u = document.getElementById("admUser").value.trim().toLowerCase();
+  const kind = document.getElementById("admKind").value;
+  let u = document.getElementById("admUser").value.trim();
+  if (kind === "user") u = u.toLowerCase();
   const rl = document.getElementById("admRole").value;
   const ab = document.getElementById("admDept").value.trim();
   if (!u) return;
-  apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
-    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = "";
-                 document.getElementById("admDept").value = ""; })
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab, kind: kind })
+    .then(d => { ROLES = d; render(); })
     .catch(() => alert("Speichern fehlgeschlagen."));
 }
 function delRole(u) {
@@ -951,31 +972,41 @@ function renderAdmTable() {
   const users = Object.keys(ROLES).sort().filter(u =>
     !q || u.includes(q) || (ROLES[u].abteilung || "").toLowerCase().includes(q));
   const rows = users.map(u => {
+    const r = ROLES[u];
+    const isGroup = r && r.kind === "group";
+    const typ = isGroup ? "AD-Gruppe" : "Benutzer";
     if (u === EDIT_USER) {
       const cur = ROLES[u] || {};
-      return `<tr><td>${esc(u)}</td>
+      return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td>
         <td>${roleSelect("editRole", cur.role, "syncRoleField('edit','" + esc(u) + "')")}</td>
         <td id="editFieldCell">${roleField("editDept", cur.role, cur.abteilung || "", u)}</td>
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
     }
-    const r = ROLES[u];
     const label = r.role === "reviewer" && r.abteilung ? "Team: " + r.abteilung
                 : r.abteilung || "–";
-    return `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
+    return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
      <td>${esc(label)}</td>
      <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
   const firstRole = ROLE_ORDER[0];
   document.getElementById("mtbody").innerHTML =
-    `<tr><td><input class="filterbox" style="width:100%" id="admUser"
+    `<tr><td><select id="admKind" class="filterbox" style="width:100%" onchange="admKindSync()">
+         <option value="user">Benutzer</option><option value="group">AD-Gruppe</option></select></td>
+     <td><input class="filterbox" style="width:100%" id="admUser"
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
      <td>${roleSelect("admRole", firstRole, "syncRoleField('adm')")}</td>
      <td id="admFieldCell">${roleField("admDept", firstRole, "", null)}</td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="5" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
   reSort("mtable");
+}
+function admKindSync() {
+  const g = document.getElementById("admKind").value === "group";
+  document.getElementById("admUser").placeholder = g
+    ? "AD-Gruppenname (CN), z. B. Kapa-Admins"
+    : "benutzer@firma.local oder vorname.nachname";
 }
 
 function filterRes(list) {
@@ -1077,7 +1108,6 @@ function render() {
   TOTAL.ramFree = Math.round((TOTAL.ramCap - TOTAL.ramUsed)*10)/10;
   TOTAL.storageFree = Math.round((TOTAL.storageCap - TOTAL.storageUsed)*10)/10;
   document.getElementById("ktbody").innerHTML =
-    row(TOTAL, -1, true) +
     (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
                  : '<tr><td colspan="10" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
   reSort("ktable");
@@ -1133,7 +1163,7 @@ if (ROLE === "anforderer") {
 }
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
-const SORT_CFG = { ktable:{pin:1}, rtable:{pin:1}, atable:{pin:0},
+const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0},
                    ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1} };
 const sortState = {};
 function cellVal(td) {

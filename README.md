@@ -76,6 +76,10 @@ Entscheidungen und Backups:
   Storage bleibt davon unberührt.
 - **Belegt** = provisionierte vCPUs / RAM aller VMs bzw. belegter Datastore-Platz (inkl. powered-off)
 - **Frei** = Kapazität − belegt − genehmigte Reservierungen (für vCPU, RAM und Storage)
+- **Ausschluss per Tag**: Mit `--exclude-tag Kapa_Filter:Ja` werden VMs mit dem
+  angegebenen vROps-Tag (Kategorie:Wert) aus der Belegung herausgerechnet.
+- Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
+  Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 
 ## Verwendung
 
@@ -217,6 +221,13 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
   explizite Zuweisung gilt automatisch als **Anforderer** — er kann Anfragen
   stellen, aber nichts freigeben. Reviewer-, Admin- und Auditor-Rechte gibt es
   nur über eine ausdrückliche Zuweisung.
+- **AD-Gruppen berechtigen**: In der Verwaltung lässt sich (Typ „AD-Gruppe")
+  auch einer ganzen **AD-Gruppe** eine Rolle (und ein Team) zuweisen — genau wie
+  einem Benutzer. Jedes Mitglied der Gruppe erhält dann diese Rolle. Dafür ist
+  ein **Service-Konto** nötig (`--ad-bind-dn`/`--ad-bind-password`/`--ad-base-dn`),
+  mit dem das System nach der Anmeldung die AD-Gruppen (`memberOf`) des Benutzers
+  sucht. Direkt zugewiesene Benutzerrollen haben Vorrang; bei mehreren Gruppen
+  gewinnt die höchste Berechtigung.
 - **Rollen-Bezeichnungen umbenennen**: Die angezeigten Namen der vier Rollen
   sind im Tab „Verwaltung" (Abschnitt „Rollen-Bezeichnungen") **frei wählbar**
   (z. B. „Anforderer" → „Antragsteller"), gespeichert in
@@ -295,6 +306,8 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--cache kapa_cache.json` | Datei-Cache der letzten Abfrage |
 | `--res-file data/kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
+| `--exclude-tag Kapa_Filter:Ja` | VMs mit diesem vROps-Tag (Kategorie:Wert) aus der Auswertung ausschließen |
+| `--ad-bind-dn`, `--ad-bind-password`, `--ad-base-dn` | Service-Konto für die AD-Gruppen-Berechtigung (memberOf-Suche) |
 | `--approval-teams "A,B,C"` | **Erstbefüllung** der Genehmigungs-Teams (nur wenn `--teams-file` noch fehlt); danach Pflege im Tab „Verwaltung" |
 | `--teams-file data/kapa_teams.json` | Datei mit den Genehmigungs-Teams (Pflege über die Verwaltungsseite) |
 | `--rolenames-file data/kapa_rollennamen.json` | Datei mit den frei wählbaren Rollen-Bezeichnungen (Pflege über die Verwaltungsseite) |

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.3"
+VERSION = "1.4"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -172,6 +172,25 @@ class AriaOps:
                 out.append(r.get("identifier"))
         return out
 
+    def resources_by_tag(self, category, name, resource_kind=None,
+                         adapter_kind="VMWARE"):
+        """Ressourcen mit dem Tag category:name (paginiert). Best effort."""
+        body = {"resourceTag": [{"category": category, "name": name}]}
+        if resource_kind:
+            body["resourceKind"] = [resource_kind]
+        if adapter_kind:
+            body["adapterKind"] = [adapter_kind]
+        out, page = [], 0
+        while True:
+            resp = self._request("POST", "/resources/query", body=body,
+                                 params={"pageSize": 1000, "page": page})
+            items = resp.get("resourceList", [])
+            out.extend(items)
+            total = resp.get("pageInfo", {}).get("totalCount", len(out))
+            page += 1
+            if len(out) >= total or not items:
+                return out
+
 # -------------------------------------------------- Active Directory (LDAP) --
 
 def ldap_bind(url, username, password, timeout=10, insecure=False):
@@ -232,6 +251,151 @@ def ldap_bind(url, username, password, timeout=10, insecure=False):
         raise RuntimeError("Unerwartete LDAP-Antwort")
     result_code = data[j + 2]
     return result_code == 0
+
+
+def _ber_len(n):
+    if n < 0x80:
+        return bytes([n])
+    b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return bytes([0x80 | len(b)]) + b
+
+
+def _tlv(tag, payload):
+    return bytes([tag]) + _ber_len(len(payload)) + payload
+
+
+def _read_tlv(sock, buf):
+    """Ein vollständiges BER-Element aus dem Socket lesen. Gibt (tag, value,
+    restpuffer) zurück."""
+    while len(buf) < 2:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise RuntimeError("LDAP-Verbindung vorzeitig beendet")
+        buf += chunk
+    tag = buf[0]
+    lb = buf[1]
+    idx = 2
+    if lb & 0x80:
+        num = lb & 0x7F
+        while len(buf) < 2 + num:
+            buf += sock.recv(4096)
+        length = int.from_bytes(buf[2:2 + num], "big")
+        idx = 2 + num
+    else:
+        length = lb
+    while len(buf) < idx + length:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise RuntimeError("LDAP-Verbindung vorzeitig beendet")
+        buf += chunk
+    return tag, buf[idx:idx + length], buf[idx + length:]
+
+
+def _iter_tlv(data):
+    """Untergeordnete BER-Elemente einer SEQUENCE/SET durchlaufen."""
+    i = 0
+    while i + 1 < len(data):
+        tag = data[i]
+        lb = data[i + 1]
+        i += 2
+        if lb & 0x80:
+            num = lb & 0x7F
+            length = int.from_bytes(data[i:i + num], "big")
+            i += num
+        else:
+            length = lb
+        yield tag, data[i:i + length]
+        i += length
+
+
+def _dn_to_cn(dn):
+    """CN aus einem DN ziehen: 'CN=KapaAdmins,OU=..' -> 'KapaAdmins'."""
+    first = dn.split(",")[0].strip()
+    if first[:3].upper() == "CN=":
+        return first[3:]
+    return first
+
+
+def ldap_member_of(url, bind_dn, bind_pw, base_dn, user_upn,
+                   timeout=10, insecure=False):
+    """Über ein Service-Konto die AD-Gruppen (CNs) des Benutzers ermitteln.
+    Bindet als bind_dn, sucht (userPrincipalName=user_upn) und liest memberOf.
+    Gibt die Liste der Gruppen-CNs zurück (leer bei Fehler/keine Gruppen)."""
+    import socket
+    if not (bind_dn and bind_pw and base_dn and user_upn):
+        return []
+    u = urllib.parse.urlparse(url if "//" in url else "ldap://" + url)
+    host, port = u.hostname, u.port or (636 if u.scheme == "ldaps" else 389)
+    sock = socket.create_connection((host, port), timeout=timeout)
+    try:
+        if u.scheme == "ldaps":
+            ctx = ssl.create_default_context()
+            if insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+        # 1) Bind als Service-Konto
+        bind_req = _tlv(0x60, _tlv(0x02, b"\x03")
+                        + _tlv(0x04, bind_dn.encode())
+                        + _tlv(0x80, bind_pw.encode()))
+        sock.sendall(_tlv(0x30, _tlv(0x02, b"\x01") + bind_req))
+        buf = b""
+        tag, val, buf = _read_tlv(sock, buf)       # LDAPMessage (BindResponse)
+        # resultCode im BindResponse prüfen
+        ok = False
+        for t, v in _iter_tlv(val):
+            if t == 0x61:                          # BindResponse
+                for t2, v2 in _iter_tlv(v):
+                    if t2 == 0x0A:
+                        ok = (v2[:1] == b"\x00")
+                        break
+                break
+        if not ok:
+            return []
+        # 2) SearchRequest (messageID 2)
+        filt = _tlv(0xA3, _tlv(0x04, b"userPrincipalName")
+                    + _tlv(0x04, user_upn.encode()))
+        attrs = _tlv(0x30, _tlv(0x04, b"memberOf"))
+        search = _tlv(0x63,
+                      _tlv(0x04, base_dn.encode())   # baseObject
+                      + _tlv(0x0A, b"\x02")          # scope: subtree
+                      + _tlv(0x0A, b"\x00")          # derefAliases: never
+                      + _tlv(0x02, b"\x00")          # sizeLimit: 0
+                      + _tlv(0x02, bytes([timeLimit := 30]))  # timeLimit
+                      + _tlv(0x01, b"\x00")          # typesOnly: false
+                      + filt + attrs)
+        sock.sendall(_tlv(0x30, _tlv(0x02, b"\x02") + search))
+        # 3) Antworten lesen bis SearchResultDone (0x65)
+        cns = []
+        for _ in range(1000):
+            tag, val, buf = _read_tlv(sock, buf)    # LDAPMessage
+            op = None
+            for t, v in _iter_tlv(val):
+                if t in (0x64, 0x65):
+                    op = (t, v)
+                    break
+            if not op:
+                continue
+            if op[0] == 0x65:                        # SearchResultDone
+                break
+            # SearchResultEntry: objectName, PartialAttributeList
+            parts = list(_iter_tlv(op[1]))
+            for t, v in parts:
+                if t == 0x30:                        # PartialAttributeList
+                    for _t, attr in _iter_tlv(v):    # je Attribut
+                        sub = list(_iter_tlv(attr))
+                        if not sub:
+                            continue
+                        name = sub[0][1].decode(errors="replace")
+                        if name.lower() != "memberof":
+                            continue
+                        for st, sv in sub[1:]:
+                            if st == 0x31:            # SET OF values
+                                for vt, vv in _iter_tlv(sv):
+                                    cns.append(_dn_to_cn(vv.decode(errors="replace")))
+        return cns
+    finally:
+        sock.close()
 
 # ----------------------------------------------------------- Datendateien ----
 
@@ -428,7 +592,7 @@ def name_of(res):
     return res.get("resourceKey", {}).get("name", "?")
 
 
-def collect(api, cpu_factor, progress=None, failover_hosts=1):
+def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag=""):
     log = progress or (lambda m: print(m, file=sys.stderr))
 
     log("Lese Cluster ...")
@@ -438,6 +602,21 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
     log(f"Lese VMs ... ({len(hosts)} Hosts gefunden)")
     vms = api.resources("VirtualMachine")
     log(f"{len(vms)} VMs gefunden")
+
+    # Systeme mit dem Ausschluss-Tag (z. B. Kapa_Filter:Ja) aus der Auswertung
+    # nehmen – best effort, bei Fehler wird nichts ausgeschlossen.
+    exclude_vms = set()
+    if exclude_tag and ":" in exclude_tag:
+        cat, _, val = exclude_tag.partition(":")
+        cat, val = cat.strip(), val.strip()
+        if cat and val:
+            try:
+                log(f"Lese Systeme mit Tag {cat}={val} (werden ausgeschlossen) ...")
+                tagged = api.resources_by_tag(cat, val, "VirtualMachine")
+                exclude_vms = {t["identifier"] for t in tagged}
+                log(f"{len(exclude_vms)} Systeme per Tag {cat}={val} ausgeschlossen")
+            except Exception as e:
+                log(f"Tag-Filter nicht anwendbar: {e}")
 
     host_ids = [h["identifier"] for h in hosts]
     vm_ids = [v["identifier"] for v in vms]
@@ -494,6 +673,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
 
     for v in vms:
         rid = v["identifier"]
+        if rid in exclude_vms:
+            continue  # per Tag ausgeschlossen (z. B. Kapa_Filter:Ja)
         p = vm_props.get(rid) or {}
         cl = p.get("summary|parentCluster")
         if cl not in data:
@@ -799,8 +980,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen__FAILNOTE__ · Stand: <span id="stand">__DATE__</span><br>
-Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
+<div class="sub">
+  <button class="btn" onclick="showInfo('infoCalc','Info Kapa-Berechnung')">ℹ Info Kapa-Berechnung</button>
+  <button class="btn" onclick="showInfo('infoHelp','Hilfe')">? Hilfe</button>
+  <span style="color:var(--muted);font-size:12px;margin-left:8px">Stand: <span id="stand">__DATE__</span></span>
+</div>
+<div id="infoCalc" style="display:none">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen__FAILNOTE__</div>
+<div id="infoHelp" style="display:none">Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
+<div class="modal-bg" id="infoBg" onclick="if(event.target===this)closeInfo()">
+  <div class="modal">
+    <h2 id="infoTitle"></h2>
+    <div id="infoBody" style="font-size:13px;line-height:1.6;color:var(--text)"></div>
+    <div class="actions"><button class="btn primary" onclick="closeInfo()">Schließen</button></div>
+  </div>
+</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
   <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
@@ -888,7 +1081,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung / Team</th><th class="nosort">Aktion</th></tr></thead>
+  <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Abteilung / Team</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -1114,6 +1307,14 @@ function cmtClose(val) {
 function cmtConfirm() { cmtClose(document.getElementById("cmtInput").value.trim().slice(0, 64)); }
 function cmtCancel() { cmtClose(null); }
 
+// ---- Info-/Hilfe-Popup ----
+function showInfo(srcId, title) {
+  document.getElementById("infoTitle").textContent = title;
+  document.getElementById("infoBody").innerHTML = document.getElementById(srcId).innerHTML;
+  document.getElementById("infoBg").classList.add("open");
+}
+function closeInfo() { document.getElementById("infoBg").classList.remove("open"); }
+
 function rejectRes(id) {
   const r = RES.find(x => x.id === id);
   askComment({ title: "Antrag ablehnen", okLabel: "✕ Ablehnen", okClass: "danger",
@@ -1208,7 +1409,7 @@ function submitModal() {
   if (ok) closeModal();
 }
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { closeModal(); cmtCancel(); hideCard(); }
+  if (e.key === "Escape") { closeModal(); cmtCancel(); closeInfo(); hideCard(); }
   else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) &&
            document.getElementById("cmtBg").classList.contains("open")) cmtConfirm();
 });
@@ -1489,13 +1690,14 @@ function loadRoles() {
                  .catch(() => {});
 }
 function addRole() {
-  const u = document.getElementById("admUser").value.trim().toLowerCase();
+  const kind = document.getElementById("admKind").value;
+  let u = document.getElementById("admUser").value.trim();
+  if (kind === "user") u = u.toLowerCase();
   const rl = document.getElementById("admRole").value;
   const ab = document.getElementById("admDept").value.trim();
   if (!u) return;
-  apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
-    .then(d => { ROLES = d; render(); document.getElementById("admUser").value = "";
-                 document.getElementById("admDept").value = ""; })
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab, kind: kind })
+    .then(d => { ROLES = d; render(); })
     .catch(() => alert("Speichern fehlgeschlagen."));
 }
 function delRole(u) {
@@ -1643,31 +1845,41 @@ function renderAdmTable() {
   const users = Object.keys(ROLES).sort().filter(u =>
     !q || u.includes(q) || (ROLES[u].abteilung || "").toLowerCase().includes(q));
   const rows = users.map(u => {
+    const r = ROLES[u];
+    const isGroup = r && r.kind === "group";
+    const typ = isGroup ? "AD-Gruppe" : "Benutzer";
     if (u === EDIT_USER) {
       const cur = ROLES[u] || {};
-      return `<tr><td>${esc(u)}</td>
+      return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td>
         <td>${roleSelect("editRole", cur.role, "syncRoleField('edit','" + esc(u) + "')")}</td>
         <td id="editFieldCell">${roleField("editDept", cur.role, cur.abteilung || "", u)}</td>
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
     }
-    const r = ROLES[u];
     const label = r.role === "reviewer" && r.abteilung ? "Team: " + r.abteilung
                 : r.abteilung || "–";
-    return `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
+    return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
      <td>${esc(label)}</td>
      <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
   const firstRole = ROLE_ORDER[0];
   document.getElementById("mtbody").innerHTML =
-    `<tr><td><input class="filterbox" style="width:100%" id="admUser"
+    `<tr><td><select id="admKind" class="filterbox" style="width:100%" onchange="admKindSync()">
+         <option value="user">Benutzer</option><option value="group">AD-Gruppe</option></select></td>
+     <td><input class="filterbox" style="width:100%" id="admUser"
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
      <td>${roleSelect("admRole", firstRole, "syncRoleField('adm')")}</td>
      <td id="admFieldCell">${roleField("admDept", firstRole, "", null)}</td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="5" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
   reSort("mtable");
+}
+function admKindSync() {
+  const g = document.getElementById("admKind").value === "group";
+  document.getElementById("admUser").placeholder = g
+    ? "AD-Gruppenname (CN), z. B. Kapa-Admins"
+    : "benutzer@firma.local oder vorname.nachname";
 }
 
 function filterRes(list) {
@@ -1769,7 +1981,6 @@ function render() {
   TOTAL.ramFree = Math.round((TOTAL.ramCap - TOTAL.ramUsed)*10)/10;
   TOTAL.storageFree = Math.round((TOTAL.storageCap - TOTAL.storageUsed)*10)/10;
   document.getElementById("ktbody").innerHTML =
-    row(TOTAL, -1, true) +
     (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
                  : '<tr><td colspan="10" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
   reSort("ktable");
@@ -1825,7 +2036,7 @@ if (ROLE === "anforderer") {
 }
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
-const SORT_CFG = { ktable:{pin:1}, rtable:{pin:1}, atable:{pin:0},
+const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0},
                    ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1} };
 const sortState = {};
 function cellVal(td) {
@@ -2153,11 +2364,14 @@ def serve(args, password):
                     out = {}
                     for k, v in d.items():
                         if isinstance(v, str) and v in VALID_ROLES:
-                            out[str(k).lower()] = {"role": v, "abteilung": ""}
+                            out[str(k).lower()] = {"role": v, "abteilung": "",
+                                                   "kind": "user"}
                         elif isinstance(v, dict) and v.get("role") in VALID_ROLES:
-                            out[str(k).lower()] = {
-                                "role": v["role"],
-                                "abteilung": str(v.get("abteilung") or "")}
+                            kind = "group" if v.get("kind") == "group" else "user"
+                            key = str(k) if kind == "group" else str(k).lower()
+                            out[key] = {"role": v["role"],
+                                        "abteilung": str(v.get("abteilung") or ""),
+                                        "kind": kind}
                     return out
             except Exception as e:
                 print(f"Rollendatei unlesbar, starte leer: {e}", file=sys.stderr)
@@ -2176,10 +2390,33 @@ def serve(args, password):
             name = name + "@" + args.ad_domain
         return name
 
+    ROLE_RANK = {"admin": 3, "reviewer": 2, "auditor": 1, "anforderer": 0}
+
     def role_entry(user):
+        """Direkt zugewiesene Benutzerrolle (keine Gruppen)."""
         if user in admin_seed:
             return {"role": "admin", "abteilung": ""}
-        return roles.get(user)
+        e = roles.get(user)
+        if e and e.get("kind", "user") != "group":
+            return {"role": e["role"], "abteilung": e.get("abteilung", "")}
+        return None
+
+    def group_role(cns):
+        """Beste Rolle aus den AD-Gruppen des Benutzers (höchste Berechtigung)."""
+        cnset = {c.strip().lower() for c in cns if c and c.strip()}
+        best = None
+        with roles_lock:
+            for key, e in roles.items():
+                if e.get("kind") == "group" and key.strip().lower() in cnset:
+                    if best is None or ROLE_RANK.get(e["role"], 0) > ROLE_RANK.get(best["role"], 0):
+                        best = e
+        if best:
+            return {"role": best["role"], "abteilung": best.get("abteilung", "")}
+        return None
+
+    def has_group_entries():
+        with roles_lock:
+            return any(e.get("kind") == "group" for e in roles.values())
 
     if auth_enabled:
         if not args.ad_url.startswith("ldaps://"):
@@ -2405,7 +2642,8 @@ def serve(args, password):
                               verify_tls=not args.insecure)
                 clusters = collect(api, args.cpu_factor,
                                    progress=lambda m: state.update(progress=m),
-                                   failover_hosts=args.failover_hosts)
+                                   failover_hosts=args.failover_hosts,
+                                   exclude_tag=args.exclude_tag)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
             ensure_dir(args.cache)
@@ -2675,14 +2913,26 @@ def serve(args, password):
                     self._json(bad, 401)
                     return
                 login_reset(user)
-                # Rolle: explizit zugewiesen (Verwaltung), sonst Standard =
-                # Anforderer. Ohne eigene Rolle darf man nur beantragen, nichts
-                # freigeben.
+                # Rolle: 1) direkt zugewiesen (Verwaltung), 2) über AD-Gruppe,
+                # 3) Standard = Anforderer. Ohne Rolle darf man nur beantragen.
                 explicit = role_entry(user)
-                entry = explicit or {"role": "anforderer", "abteilung": ""}
-                audit(user, "Anmeldung", f"Rolle: {entry['role']}"
-                      + ("" if explicit else " (Standard)")
-                      + (f", Abteilung: {entry.get('abteilung')}"
+                source = ""
+                if explicit:
+                    entry = explicit
+                else:
+                    grp = None
+                    if args.ad_bind_dn and has_group_entries():
+                        try:
+                            cns = ldap_member_of(args.ad_url, args.ad_bind_dn,
+                                                 args.ad_bind_password, args.ad_base_dn,
+                                                 user, insecure=args.ad_insecure)
+                            grp = group_role(cns)
+                        except Exception as e:
+                            print(f"AD-Gruppensuche fehlgeschlagen: {e}", file=sys.stderr)
+                    entry = grp or {"role": "anforderer", "abteilung": ""}
+                    source = " (AD-Gruppe)" if grp else " (Standard)"
+                audit(user, "Anmeldung", f"Rolle: {entry['role']}{source}"
+                      + (f", Abteilung/Team: {entry.get('abteilung')}"
                          if entry.get("abteilung") else ""))
                 token = secrets.token_urlsafe(32)
                 sessions[token] = {"user": user, "role": entry["role"],
@@ -2938,18 +3188,22 @@ def serve(args, password):
                 if not self._require("admin"):
                     return
                 body = self._body() or {}
-                user = normalize_user(body.get("user"))
+                kind = "group" if body.get("kind") == "group" else "user"
+                # Gruppennamen NICHT als UPN normalisieren
+                key = (str(body.get("user") or "").strip() if kind == "group"
+                       else normalize_user(body.get("user")))
                 role = body.get("role")
                 dept = str(body.get("abteilung") or "").strip()
-                if not user or role not in VALID_ROLES:
-                    self._json({"error": "Benutzer und gültige Rolle erforderlich"}, 400)
+                if not key or role not in VALID_ROLES:
+                    self._json({"error": "Name/Gruppe und gültige Rolle erforderlich"}, 400)
                     return
                 with roles_lock:
-                    roles[user] = {"role": role, "abteilung": dept}
+                    roles[key] = {"role": role, "abteilung": dept, "kind": kind}
                     save_roles()
                     self._json(dict(roles))
-                audit(self._session()["user"], "Rolle zugewiesen",
-                      f"{user} -> {role}" + (f" ({dept})" if dept else ""))
+                audit(self._session()["user"],
+                      "AD-Gruppe zugewiesen" if kind == "group" else "Rolle zugewiesen",
+                      f"{key} -> {role}" + (f" ({dept})" if dept else ""))
             elif self.path == "/api/teams/rename":
                 s = self._require("admin")
                 if not s:
@@ -3148,6 +3402,9 @@ def main():
     ap.add_argument("--failover-hosts", type=int, default=1,
                     help="Ausfall-Hosts pro Cluster (N+1): die größten N Hosts werden "
                          "von der Kapazität abgezogen (Standard: 1, 0 = aus)")
+    ap.add_argument("--exclude-tag", default="",
+                    help="VMs mit diesem vROps-Tag aus der Auswertung ausschließen, "
+                         "Format Kategorie:Wert, z. B. Kapa_Filter:Ja (leer = aus)")
     ap.add_argument("--insecure", action="store_true", help="TLS-Zertifikat nicht prüfen (Self-Signed)")
     ap.add_argument("--output", default="kapa_dashboard.html", help="Ausgabedatei")
     ap.add_argument("--json", help="Rohdaten zusätzlich als JSON speichern")
@@ -3187,6 +3444,18 @@ def main():
                     help="AD-Domäne für Benutzernamen ohne @, z. B. firma.local")
     ap.add_argument("--ad-insecure", action="store_true",
                     help="LDAPS-Zertifikat nicht prüfen (Self-Signed)")
+    ap.add_argument("--ad-bind-dn", default="",
+                    help="Service-Konto (DN oder UPN) für die AD-Gruppensuche; "
+                         "ohne Angabe werden nur direkt zugewiesene Benutzer "
+                         "berechtigt (keine AD-Gruppen)")
+    ap.add_argument("--ad-bind-password", default="",
+                    help="Passwort des Service-Kontos (alternativ "
+                         "--ad-bind-password-file oder AD_BIND_PASSWORD)")
+    ap.add_argument("--ad-bind-password-file", default="",
+                    help="Datei mit dem Service-Konto-Passwort")
+    ap.add_argument("--ad-base-dn", default="",
+                    help="Basis-DN für die Gruppensuche, z. B. DC=firma,DC=local "
+                         "(ohne Angabe aus --ad-domain abgeleitet)")
     ap.add_argument("--cookie-insecure", action="store_true",
                     help="Session-Cookie ohne Secure-Flag setzen (nur für lokalen "
                          "HTTP-Test ohne HTTPS-Proxy; im Betrieb NICHT verwenden)")
@@ -3269,6 +3538,11 @@ def main():
                                 "SMTP_PASSWORD")
     args.backup_password = secret(args.backup_password, args.backup_password_file,
                                   "BACKUP_PASSWORD")
+    args.ad_bind_password = secret(args.ad_bind_password, args.ad_bind_password_file,
+                                   "AD_BIND_PASSWORD")
+    # Basis-DN aus der Domäne ableiten, falls nicht gesetzt (firma.local -> DC=firma,DC=local)
+    if not args.ad_base_dn and args.ad_domain:
+        args.ad_base_dn = ",".join("DC=" + p for p in args.ad_domain.split("."))
 
     if args.serve:
         pw = None
@@ -3287,7 +3561,8 @@ def main():
         pw = args.password or getpass.getpass("Passwort: ")
         api = AriaOps(args.url, args.user, pw, args.auth_source,
                       verify_tls=not args.insecure)
-        clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts)
+        clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
+                           exclude_tag=args.exclude_tag)
 
     if args.json:
         ensure_dir(args.json)
