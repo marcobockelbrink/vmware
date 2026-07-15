@@ -51,7 +51,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/reservations?format=csv" -o reservierungen.csv
 ```
 
-CSV-Spalten: `name;change;cluster;vcpu;ram_gb;von;abteilung;gilt_ab;`
+CSV-Spalten: `id;name;change;cluster;vcpu;ram_gb;von;abteilung;gilt_ab;`
 `gueltig_bis;status;entschieden_von;kommentar`
 
 ### GET /api/v1/data

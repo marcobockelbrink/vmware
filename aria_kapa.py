@@ -376,6 +376,7 @@ def reservation_mail_body(r, action, admin, res_ttl):
             pass
     return (f"Kapazitätsreservierung {action}\n"
             f"\n"
+            f"ID:          {r.get('id') or '–'}\n"
             f"Anfrage:     {r.get('name', '?')}\n"
             f"Change:      {r.get('change') or '–'}\n"
             f"Cluster:     {r.get('cluster', '?')}\n"
@@ -636,6 +637,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .st.ok { background:rgba(34,197,94,.15); color:var(--ok); }
   .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
   .st.rej { background:rgba(239,68,68,.15); color:var(--crit); }
+  .rid { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
+         color:var(--muted); white-space:nowrap; }
   .btn.approve { border-color:var(--ok); color:var(--ok); }
   .btn.approve:hover { background:rgba(34,197,94,.15); }
   .hc-close { position:absolute; top:10px; right:12px; z-index:1;
@@ -725,14 +728,14 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 </div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
-  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
+  <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
-  <thead><tr><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
+  <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
@@ -1261,9 +1264,10 @@ function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
   const showDec = ROLE !== "anforderer";
-  const nCols = showDec ? 13 : 12;
+  const nCols = showDec ? 14 : 13;
   const rows = list.map(r =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
+    `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
+     <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
@@ -1271,9 +1275,9 @@ function renderResTable() {
      <td>${esc(r.comment || "–")}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
-    `<tr class="trtotal"><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
+    `<tr class="trtotal"><td></td><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td colspan="${nCols - 5}"></td></tr>` +
+     <td colspan="${nCols - 6}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
@@ -1295,14 +1299,15 @@ function renderAppTable() {
     return cell(f.cpu, cpuOk) + cell(f.ram, ramOk);
   };
   const rows = list.map(r =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
+    `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
+     <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
      ${freeCells(r)}
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="12" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="13" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
@@ -1586,6 +1591,9 @@ def serve(args, password):
                 with open(args.res_file, encoding="utf-8") as f:
                     lst = json.load(f)
                 if isinstance(lst, list):
+                    for r in lst:
+                        if isinstance(r, dict):
+                            r.setdefault("id", uuid.uuid4().hex[:12])
                     print(f"Reservierungen geladen: {args.res_file} ({len(lst)})",
                           file=sys.stderr)
                     return prune_res(lst)
@@ -1648,11 +1656,11 @@ def serve(args, password):
         import io
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=";")
-        w.writerow(["name", "change", "cluster", "vcpu", "ram_gb", "von",
+        w.writerow(["id", "name", "change", "cluster", "vcpu", "ram_gb", "von",
                     "abteilung", "gilt_ab", "gueltig_bis", "status",
                     "entschieden_von", "kommentar"])
         for r in rows:
-            w.writerow([r.get("name", ""), r.get("change", ""),
+            w.writerow([r.get("id", ""), r.get("name", ""), r.get("change", ""),
                         r.get("cluster", ""), r.get("vcpu", 0),
                         r.get("ram_gb", 0), r.get("von", ""),
                         r.get("abteilung", ""), r.get("created", ""),
@@ -1690,7 +1698,8 @@ def serve(args, password):
         return list(reversed(out))   # neueste zuerst
 
     def res_detail(r):
-        return (f"{r.get('name', '?')} ({r.get('change') or 'ohne Change'}, "
+        return (f"{r.get('name', '?')} [{r.get('id') or '?'}] "
+                f"({r.get('change') or 'ohne Change'}, "
                 f"{r.get('cluster', '?')}, {r.get('vcpu', 0)} vCPU / "
                 f"{r.get('ram_gb', 0)} GB)")
 

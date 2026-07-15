@@ -60,6 +60,12 @@ python3 aria_kapa.py --sample --serve        # Server-Modus
 Anlegen per Dialog („+ Neue Kapazitätsanfrage") oder direkt in der
 Detailkarte eines Clusters; Export/Import als JSON.
 
+- **Eindeutige ID**: Jede Anfrage erhält beim Anlegen automatisch eine
+  eindeutige ID (12 Zeichen). Sie wird in den Tabellen „Reservierungen" und
+  „Genehmigungen" als erste Spalte angezeigt und steht auch in der
+  Report-Mail, im CSV-Export (`/api/v1/reservations?format=csv`) und im
+  Audit-Log — so lässt sich jede Anfrage zweifelsfrei referenzieren.
+
 - **Change-Nummer (Pflichtfeld)**: Jede Anfrage benötigt eine Change-Nummer,
   beginnend mit `CHB` oder `CHI` (z. B. `CHB0012345`); Eingaben werden
   normalisiert (Großschreibung, ohne Leerzeichen) und client- wie
