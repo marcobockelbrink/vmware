@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "0.9"
+VERSION = "1.0"
 
 import argparse
 import getpass
@@ -374,6 +374,15 @@ def reservation_mail_body(r, action, admin, res_ttl):
             valid = d.strftime("%d.%m.%Y")
         except ValueError:
             pass
+    approvals = r.get("approvals") or []
+    if approvals:
+        freigaben = "\n".join(
+            f"             - {a.get('team') or '?'}: {a.get('by') or '?'} "
+            f"am {a.get('on') or '?'}" for a in approvals)
+        freigaben = "\n" + freigaben
+    else:
+        freigaben = " –"
+    stor = r.get("storage_gb") or 0
     return (f"Kapazitätsreservierung {action}\n"
             f"\n"
             f"ID:          {r.get('id') or '–'}\n"
@@ -382,9 +391,11 @@ def reservation_mail_body(r, action, admin, res_ttl):
             f"Cluster:     {r.get('cluster', '?')}\n"
             f"vCPU:        {r.get('vcpu', 0)}\n"
             f"RAM:         {r.get('ram_gb', 0)} GB\n"
+            f"Storage:     {stor} GB\n"
             f"Abteilung:   {r.get('abteilung') or '–'}\n"
             f"Beantragt:   von {r.get('von') or '–'} am {r.get('created') or '–'}\n"
             f"Gültig bis:  {valid or '–'}\n"
+            f"Freigaben:  {freigaben}\n"
             f"Kommentar:   {r.get('comment') or '–'}\n"
             f"\n"
             f"{action} von {admin} am {datetime.now().strftime('%d.%m.%Y %H:%M')}\n")
@@ -636,6 +647,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
   .st.ok { background:rgba(34,197,94,.15); color:var(--ok); }
   .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
+  .st.prog { background:rgba(56,189,248,.15); color:#38bdf8; cursor:help; }
   .st.rej { background:rgba(239,68,68,.15); color:var(--crit); }
   .rid { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
          color:var(--muted); white-space:nowrap; }
@@ -701,6 +713,8 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
     <input id="mCpu" type="number" min="0" placeholder="0">
     <label>RAM (GB)</label>
     <input id="mRam" type="number" min="0" placeholder="0">
+    <label>Storage (GB)</label>
+    <input id="mStorage" type="number" min="0" placeholder="0">
     <div class="hint" id="mHint"></div>
     <div class="hint" id="mValid" style="color:var(--muted)"></div>
     <div class="err" id="mErr"></div>
@@ -729,17 +743,17 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
-    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>Fortschritt</th><th>Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
 </div>
@@ -747,7 +761,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung</th><th>Aktion</th></tr></thead>
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung / Team</th><th>Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -781,17 +795,33 @@ const FACTOR = __FACTOR__;
 const SERVE = __SERVE__;
 const TTL = __TTL__;
 const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
+const TEAMS = __TEAMS__;    // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig)
 const LS_KEY = "aria_kapa_reservierungen";
 
 // ---- Rollen ----
 const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
 const IS_ADMIN = ROLE === "admin";
+const IS_REVIEWER = ROLE === "reviewer";
 const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
+                     reviewer: "Reviewer (Genehmigungsteam)",
                      auditor: "Technische Prüfung (nur lesen)" };
 function canDel(r) {
   return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user
                       && !r.approved && !r.rejected);
+}
+// ---- Mehrstufiger Genehmigungsprozess ----
+function stageOf(r) { return (r.approvals || []).length; }
+function currentTeam(r) {
+  if (!TEAMS.length) return null;
+  const n = stageOf(r);
+  return n < TEAMS.length ? TEAMS[n] : null;
+}
+// Darf der/die Angemeldete den Antrag in seiner aktuellen Stufe entscheiden?
+function canDecide(r) {
+  if (IS_ADMIN) return true;
+  if (IS_REVIEWER && TEAMS.length && ME) return ME.abteilung === currentTeam(r);
+  return false;
 }
 async function logout() {
   try { await fetch("api/logout", { method: "POST" }); } catch (e) {}
@@ -831,13 +861,28 @@ function validUntil(r) {
   d.setDate(d.getDate() + (TTL > 0 ? TTL - 1 : 30));
   return d.toISOString().slice(0, 10);
 }
+function approvalsText(r) {
+  // Liste der bisherigen Freigaben; ohne Namen, falls serverseitig gestrippt
+  return (r.approvals || []).map(a =>
+    a.team + (a.by ? " – " + a.by : "") + " (" + fmtDate(a.on) + ")").join("\n");
+}
 function stBadge(r) {
   const cmt = r.comment ? " · Kommentar: " + esc(r.comment) : "";
-  if (r.rejected)
-    return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
+  if (r.rejected) {
+    const stufe = r.rejected_team ? " in Stufe „" + esc(r.rejected_team) + "“" : "";
+    return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""}${stufe} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
+  }
   if (r.approved)
     return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt</span>`;
-  return '<span class="st pend">beantragt</span>';
+  if (TEAMS.length && stageOf(r) > 0) {
+    // teilweise freigegeben -> in Prüfung; Mouseover zeigt, wer schon freigab
+    const done = approvalsText(r);
+    const wartet = currentTeam(r) ? "\nwartet auf: " + currentTeam(r) : "";
+    const tip = "Bereits freigegeben:\n" + esc(done) + esc(wartet);
+    return `<span class="st prog" title="${tip}">in Prüfung (${stageOf(r)}/${TEAMS.length})</span>`;
+  }
+  const wartet = TEAMS.length ? ' title="wartet auf: ' + esc(TEAMS[0]) + '"' : "";
+  return `<span class="st pend"${wartet}>beantragt</span>`;
 }
 function isPend(r) { return !r.approved && !r.rejected; }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
@@ -849,10 +894,10 @@ function freeAfter(c) {
            ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
 }
 
-function createRes(c, name, change, vcpu, ram, errEl) {
+function createRes(c, name, change, vcpu, ram, storage, errEl) {
   errEl.style.display = "none";
-  if (!name || (vcpu <= 0 && ram <= 0)) {
-    errEl.textContent = "Bitte Bezeichnung sowie vCPU und/oder RAM angeben.";
+  if (!name || (vcpu <= 0 && ram <= 0 && storage <= 0)) {
+    errEl.textContent = "Bitte Bezeichnung sowie vCPU, RAM und/oder Storage angeben.";
     errEl.style.display = "block"; return false;
   }
   const ch = String(change || "").toUpperCase().replace(/\s+/g, "");
@@ -864,12 +909,14 @@ function createRes(c, name, change, vcpu, ram, errEl) {
   if ((vcpu > f.cpu || ram > f.ram) &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
                "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem beantragen?")) return false;
-  const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu, ram_gb: ram };
+  const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu,
+                 ram_gb: ram, storage_gb: storage };
   if (SERVE) {
     apiRes("POST", "", item).then(setRes).catch(resFail);
   } else {
     item.id = Date.now() + "-" + Math.random().toString(36).slice(2,7);
     item.created = new Date().toISOString().slice(0,10);
+    item.approvals = [];
     item.approved = false;
     RES.push(item); saveLocal(); render();
   }
@@ -910,7 +957,7 @@ function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
   createRes(c, g("n").value.trim(), g("ch").value, parseInt(g("c").value) || 0,
-            parseFloat(g("r").value) || 0, g("e"));
+            parseFloat(g("r").value) || 0, parseFloat(g("s").value) || 0, g("e"));
 }
 function delRes(id) {
   if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
@@ -922,7 +969,7 @@ function openModal(prefIdx) {
   const sel = document.getElementById("mCluster");
   sel.innerHTML = CLUSTERS.map((c, i) =>
     `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
-  ["mName", "mChange", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
+  ["mName", "mChange", "mCpu", "mRam", "mStorage"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("mErr").style.display = "none";
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById("mValid").textContent =
@@ -945,6 +992,7 @@ function submitModal() {
   const v = id => document.getElementById(id).value;
   const ok = createRes(c, v("mName").trim(), v("mChange"),
                        parseInt(v("mCpu")) || 0, parseFloat(v("mRam")) || 0,
+                       parseFloat(v("mStorage")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -999,11 +1047,11 @@ function card(c, idx, isTotal) {
     `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
   const resRows = clRes.map(r =>
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
-     <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
+     <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   const resTable = clRes.length ?
-    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
+    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
   const spare = (c.spareCores || c.spareRamGb) ?
     ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
@@ -1026,6 +1074,7 @@ function card(c, idx, isTotal) {
         <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
         <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
+        <input id="f${idx}s" type="number" min="0" placeholder="Storage GB">
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
@@ -1223,11 +1272,11 @@ function renderAdmTable() {
       const cur = ROLES[u] || {};
       return `<tr><td>${esc(u)}</td>
         <td><select id="editRole" class="filterbox" style="width:100%">
-          ${["anforderer", "admin", "auditor"].map(x =>
+          ${["anforderer", "reviewer", "admin", "auditor"].map(x =>
             `<option value="${x}" ${cur.role === x ? "selected" : ""}>${esc(ROLE_NAMES[x])}</option>`).join("")}
         </select></td>
-        <td><input id="editDept" class="filterbox" style="width:100%"
-             value="${esc(cur.abteilung || "")}" placeholder="Abteilung"
+        <td><input id="editDept" class="filterbox" style="width:100%" list="teamList"
+             value="${esc(cur.abteilung || "")}" placeholder="Abteilung / Team"
              onkeydown="if(event.key==='Enter')saveEditRole('${esc(u)}')"></td>
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
@@ -1242,13 +1291,15 @@ function renderAdmTable() {
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
      <td><select id="admRole" class="filterbox" style="width:100%">
        <option value="anforderer">Anforderer</option>
+       <option value="reviewer">Reviewer (Genehmigungsteam)</option>
        <option value="admin">Administrator</option>
        <option value="auditor">Technische Prüfung (nur lesen)</option>
      </select></td>
-     <td><input class="filterbox" style="width:100%" id="admDept"
-         placeholder="Abteilung (für Anforderer)"></td>
+     <td><input class="filterbox" style="width:100%" id="admDept" list="teamList"
+         placeholder="Abteilung (Anforderer) / Team (Reviewer)"></td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`) +
+    `<datalist id="teamList">${TEAMS.map(t => `<option value="${esc(t)}">`).join("")}</datalist>`;
 }
 
 function filterRes(list) {
@@ -1260,15 +1311,17 @@ function filterRes(list) {
                             (a.created || "").localeCompare(b.created || ""));
 }
 
+function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0),0)*10)/10; }
+
 function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
   const showDec = ROLE !== "anforderer";
-  const nCols = showDec ? 14 : 13;
+  const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
      <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
-     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      ${showDec ? `<td>${esc(r.approved_by || r.rejected_by || "–")}</td>` : ""}
@@ -1276,18 +1329,24 @@ function renderResTable() {
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td></td><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
-     <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td colspan="${nCols - 6}"></td></tr>` +
+     <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td><td class="num">${fmt(sumStorage(appr))}</td>
+     <td colspan="${nCols - 7}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
   const list = filterRes(RES.filter(isPend));
-  const action = r => IS_ADMIN
-    ? `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
-       <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
-               onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`
-    : '<span class="st pend">wartet auf Genehmigung</span>';
+  const action = r => {
+    if (canDecide(r)) {
+      const team = currentTeam(r);
+      const lbl = team ? "✓ Freigeben (" + esc(team) + ")" : "✓ Genehmigen";
+      return `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">${lbl}</button>
+       <button class="btn" style="color:var(--crit)" title="Ablehnen"
+               onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`;
+    }
+    const team = currentTeam(r);
+    return '<span class="st pend">wartet auf ' + (team ? esc(team) : "Genehmigung") + '</span>';
+  };
   const freeCells = r => {
     const c = CLUSTERS.find(x => x.name === r.cluster);
     if (!c) return '<td class="num" colspan="2" style="color:var(--muted)">Cluster unbekannt</td>';
@@ -1301,13 +1360,13 @@ function renderAppTable() {
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
      <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
-     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      ${freeCells(r)}
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
-     <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
+     <td>${fmtDate(r.created)}</td><td>${stBadge(r)}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="13" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="14" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {
@@ -1467,7 +1526,7 @@ def json_for_html(obj):
 
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
-                failover_hosts=1, userinfo=None):
+                failover_hosts=1, userinfo=None, teams=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -1475,6 +1534,9 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
                   else "nicht automatisch entfernt. "))
     resnote += ("Speicherung zentral auf dem Server." if serve_mode
                 else "Speicherung lokal im Browser.")
+    if teams:
+        resnote += (" Genehmigung mehrstufig: " + " → ".join(teams)
+                    + " (erst wenn alle freigegeben haben, ist der Antrag genehmigt).")
     if failover_hosts == 1:
         failnote = " · Ausfallreserve (N+1): größter Host je Cluster abgezogen"
     elif failover_hosts > 1:
@@ -1488,6 +1550,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__SERVE__", "true" if serve_mode else "false")
             .replace("__TTL__", str(res_ttl))
             .replace("__USERINFO__", json_for_html(userinfo))
+            .replace("__TEAMS__", json_for_html(teams or []))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -1519,7 +1582,20 @@ def serve(args, password):
     sessions = {}                    # token -> {"user", "role", "exp"}
     session_ttl = 12 * 3600
     roles_lock = threading.Lock()
-    VALID_ROLES = ("admin", "anforderer", "auditor")
+    VALID_ROLES = ("admin", "anforderer", "auditor", "reviewer")
+
+    # Mehrstufiger Genehmigungsprozess: Team-Namen (in Prüfreihenfolge) aus der
+    # Konfiguration, NICHT im Code. Leer = einstufig (Admin genehmigt direkt).
+    approval_teams = [t.strip() for t in (args.approval_teams or "").split(",")
+                      if t.strip()]
+
+    def current_team(r):
+        """Team, das als Nächstes freigeben muss – None, wenn keine Teams
+        konfiguriert sind oder alle Stufen bereits freigegeben haben."""
+        if not approval_teams:
+            return None
+        n = len(r.get("approvals") or [])
+        return approval_teams[n] if n < len(approval_teams) else None
 
     # ---- Brute-Force-Bremse für den Login ----
     # Pro Schlüssel (Benutzer bzw. Absender-IP) werden Fehlversuche gezählt;
@@ -1682,7 +1758,9 @@ def serve(args, password):
     def res_status(r):
         if r.get("rejected"):
             return "abgelehnt"
-        return "genehmigt" if r.get("approved") else "beantragt"
+        if r.get("approved"):
+            return "genehmigt"
+        return "in Prüfung" if r.get("approvals") else "beantragt"
 
     def valid_until(r):
         if not r.get("created"):
@@ -1700,17 +1778,21 @@ def serve(args, password):
         import io
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=";")
-        w.writerow(["id", "name", "change", "cluster", "vcpu", "ram_gb", "von",
-                    "abteilung", "gilt_ab", "gueltig_bis", "status",
-                    "entschieden_von", "kommentar"])
+        w.writerow(["id", "name", "change", "cluster", "vcpu", "ram_gb",
+                    "storage_gb", "von", "abteilung", "gilt_ab", "gueltig_bis",
+                    "status", "entschieden_von", "freigaben", "kommentar"])
         for r in rows:
+            freigaben = "; ".join(
+                f"{a.get('team') or '?'}: {a.get('by') or '?'}"
+                for a in (r.get("approvals") or []))
             w.writerow([r.get("id", ""), r.get("name", ""), r.get("change", ""),
                         r.get("cluster", ""), r.get("vcpu", 0),
-                        r.get("ram_gb", 0), r.get("von", ""),
+                        r.get("ram_gb", 0), r.get("storage_gb", 0),
+                        r.get("von", ""),
                         r.get("abteilung", ""), r.get("created", ""),
                         valid_until(r), res_status(r),
                         r.get("approved_by") or r.get("rejected_by") or "",
-                        r.get("comment", "")])
+                        freigaben, r.get("comment", "")])
         return buf.getvalue()
 
     # ---- Audit-Log (JSONL, nur für Admins einsehbar) ----
@@ -1742,10 +1824,12 @@ def serve(args, password):
         return list(reversed(out))   # neueste zuerst
 
     def res_detail(r):
+        stor = r.get("storage_gb") or 0
         return (f"{r.get('name', '?')} [{r.get('id') or '?'}] "
                 f"({r.get('change') or 'ohne Change'}, "
                 f"{r.get('cluster', '?')}, {r.get('vcpu', 0)} vCPU / "
-                f"{r.get('ram_gb', 0)} GB)")
+                f"{r.get('ram_gb', 0)} GB RAM"
+                + (f" / {stor} GB Storage" if stor else "") + ")")
 
     def notify_mail(r, action, admin):
         """Report-Mail zu Genehmigung/Ablehnung im Hintergrund verschicken."""
@@ -1767,21 +1851,29 @@ def serve(args, password):
         """Sichtbare Reservierungen je Rolle: Admin/Prüfung alles; Anforderer nur
         die eigene Abteilung – fremde genehmigte bleiben anonymisiert enthalten,
         damit die freie Kapazität stimmt."""
-        if s["role"] in ("admin", "auditor"):
+        if s["role"] in ("admin", "auditor", "reviewer"):
             return list(reservations)
         dept = s.get("abteilung") or ""
         out = []
         for r in reservations:
             mine = (dept and r.get("abteilung") == dept) or r.get("von") == s["user"]
             if mine:
-                # Anforderer sehen nicht, welcher Admin entschieden hat
-                out.append({k: v for k, v in r.items()
-                            if k not in ("approved_by", "rejected_by")})
+                # Anforderer sehen nicht, WER entschieden hat – der Fortschritt
+                # (welches Team schon freigegeben hat) bleibt jedoch sichtbar,
+                # nur ohne Namen.
+                d = {k: v for k, v in r.items()
+                     if k not in ("approved_by", "rejected_by")}
+                if isinstance(d.get("approvals"), list):
+                    d["approvals"] = [{"team": a.get("team"), "on": a.get("on")}
+                                      for a in d["approvals"]]
+                out.append(d)
             elif r.get("approved"):
                 # bewusst ohne Name, von, Change, Kommentar
                 out.append({"id": r.get("id"), "cluster": r.get("cluster"),
                             "name": "(andere Abteilung)", "vcpu": r.get("vcpu"),
-                            "ram_gb": r.get("ram_gb"), "created": r.get("created"),
+                            "ram_gb": r.get("ram_gb"),
+                            "storage_gb": r.get("storage_gb"),
+                            "created": r.get("created"),
                             "approved": True, "foreign": True})
         return out
 
@@ -1950,7 +2042,7 @@ def serve(args, password):
                                        "noch keine Daten – erster Abruf läuft ...",
                                        res_ttl=args.res_ttl_days,
                                        failover_hosts=args.failover_hosts,
-                                       userinfo=userinfo),
+                                       userinfo=userinfo, teams=approval_teams),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 if not self._require():
@@ -2104,9 +2196,11 @@ def serve(args, password):
                              "change": change,
                              "vcpu": int(item.get("vcpu") or 0),
                              "ram_gb": float(item.get("ram_gb") or 0),
+                             "storage_gb": float(item.get("storage_gb") or 0),
                              "von": s["user"] or "",
                              "abteilung": s.get("abteilung") or "",
                              "created": datetime.now().date().isoformat(),
+                             "approvals": [],
                              "approved": False}
                 except (TypeError, ValueError):
                     self._json({"error": "Ungültige Zahlenwerte"}, 400)
@@ -2119,50 +2213,107 @@ def serve(args, password):
                 audit(s["user"], "Antrag erstellt", res_detail(entry))
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/approve")):
-                s = self._require("admin")
+                s = self._require("admin", "reviewer")
                 if not s:
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/approve")])
                 comment = str((self._body() or {}).get("comment") or "").strip()[:500]
                 notify = None
+                action = None
+                err = None
                 with res_lock:
-                    for r in reservations:
-                        if r.get("id") == rid and not r.get("rejected"):
-                            r["approved"] = True
-                            r["approved_on"] = datetime.now().date().isoformat()
-                            r["approved_by"] = s["user"] or ""
-                            if comment:
-                                r["comment"] = comment
+                    r = next((x for x in reservations
+                              if x.get("id") == rid and not x.get("rejected")
+                              and not x.get("approved")), None)
+                    if r is None:
+                        err = ("Antrag nicht gefunden oder bereits entschieden.", 404)
+                    else:
+                        team = current_team(r)
+                        # Reviewer dürfen nur freigeben, wenn ihr Team an der Reihe ist
+                        if s["role"] == "reviewer" and (
+                                not approval_teams
+                                or (s.get("abteilung") or "") != (team or "")):
+                            err = ("Ihr Team ist für diesen Antrag gerade nicht "
+                                   "an der Reihe.", 403)
+                        else:
+                            today = datetime.now().date().isoformat()
+                            if approval_teams:
+                                r.setdefault("approvals", []).append(
+                                    {"team": team, "by": s["user"] or "",
+                                     "on": today, "comment": comment})
+                                if len(r["approvals"]) >= len(approval_teams):
+                                    r["approved"] = True
+                                    r["approved_on"] = today
+                                    r["approved_by"] = s["user"] or ""
+                                    if comment:
+                                        r["comment"] = comment
+                                    action = "genehmigt"
+                                else:
+                                    action = f"von {team} freigegeben"
+                            else:
+                                # einstufig (keine Teams konfiguriert)
+                                r["approved"] = True
+                                r["approved_on"] = today
+                                r["approved_by"] = s["user"] or ""
+                                if comment:
+                                    r["comment"] = comment
+                                action = "genehmigt"
                             notify = dict(r)
-                    save_res()
-                    self._json(list(reservations))
+                            save_res()
+                    resp = None if err else visible_res(s)
+                if err:
+                    self._json({"error": err[0]}, err[1])
+                    return
+                self._json(resp)
                 if notify:
-                    audit(s["user"], "Antrag genehmigt", res_detail(notify)
-                          + (f" – Kommentar: {comment}" if comment else ""))
-                    notify_mail(notify, "genehmigt", s["user"] or "unbekannt")
+                    verb = ("Antrag genehmigt" if action == "genehmigt"
+                            else "Antrag freigegeben")
+                    audit(s["user"], verb, res_detail(notify) + f" – {action}"
+                          + (f", Kommentar: {comment}" if comment else ""))
+                    notify_mail(notify, action, s["user"] or "unbekannt")
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/reject")):
-                s = self._require("admin")
+                s = self._require("admin", "reviewer")
                 if not s:
                     return
                 rid = urllib.parse.unquote(
                     self.path[len("/api/reservations/"):-len("/reject")])
                 comment = str((self._body() or {}).get("comment") or "").strip()[:500]
                 notify = None
+                err = None
                 with res_lock:
-                    for r in reservations:
-                        if r.get("id") == rid and not r.get("approved"):
+                    r = next((x for x in reservations
+                              if x.get("id") == rid and not x.get("approved")
+                              and not x.get("rejected")), None)
+                    if r is None:
+                        err = ("Antrag nicht gefunden oder bereits entschieden.", 404)
+                    else:
+                        team = current_team(r)
+                        if s["role"] == "reviewer" and (
+                                not approval_teams
+                                or (s.get("abteilung") or "") != (team or "")):
+                            err = ("Ihr Team ist für diesen Antrag gerade nicht "
+                                   "an der Reihe.", 403)
+                        else:
                             r["rejected"] = True
                             r["rejected_on"] = datetime.now().date().isoformat()
                             r["rejected_by"] = s["user"] or ""
+                            if team:
+                                r["rejected_team"] = team
                             if comment:
                                 r["comment"] = comment
                             notify = dict(r)
-                    save_res()
-                    self._json(list(reservations))
+                            save_res()
+                    resp = None if err else visible_res(s)
+                if err:
+                    self._json({"error": err[0]}, err[1])
+                    return
+                self._json(resp)
                 if notify:
                     audit(s["user"], "Antrag abgelehnt", res_detail(notify)
+                          + (f" (Stufe {notify.get('rejected_team')})"
+                             if notify.get("rejected_team") else "")
                           + (f" – Kommentar: {comment}" if comment else ""))
                     notify_mail(notify, "abgelehnt", s["user"] or "unbekannt")
             elif self.path == "/api/backup":
@@ -2381,6 +2532,13 @@ def main():
     ap.add_argument("--res-ttl-days", type=int, default=31,
                     help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
                          "(0 = nie, Standard: 31)")
+    ap.add_argument("--approval-teams", default="",
+                    help="Komma-getrennte Team-Namen für den mehrstufigen "
+                         "Genehmigungsprozess in Prüfreihenfolge, z. B. "
+                         "'Team Netzwerk,Team Security,Team Betrieb'. Jeder Antrag "
+                         "durchläuft die Teams der Reihe nach; erst wenn alle "
+                         "freigegeben haben, ist er genehmigt. Leer = einstufig "
+                         "(Admin genehmigt direkt).")
     ap.add_argument("--ad-url", default="",
                     help="Active Directory für die Anmeldung, z. B. "
                          "ldaps://dc01.firma.local (ohne Angabe: kein Login nötig)")

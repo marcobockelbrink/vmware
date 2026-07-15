@@ -60,6 +60,7 @@
   .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
   .st.ok { background:rgba(34,197,94,.15); color:var(--ok); }
   .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
+  .st.prog { background:rgba(56,189,248,.15); color:#38bdf8; cursor:help; }
   .st.rej { background:rgba(239,68,68,.15); color:var(--crit); }
   .rid { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
          color:var(--muted); white-space:nowrap; }
@@ -99,7 +100,7 @@
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
-<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">15.07.2026 09:04</span><br>
+<div class="sub">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen · Stand: <span id="stand">15.07.2026 14:28</span><br>
 Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
@@ -125,6 +126,8 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
     <input id="mCpu" type="number" min="0" placeholder="0">
     <label>RAM (GB)</label>
     <input id="mRam" type="number" min="0" placeholder="0">
+    <label>Storage (GB)</label>
+    <input id="mStorage" type="number" min="0" placeholder="0">
     <div class="hint" id="mHint"></div>
     <div class="hint" id="mValid" style="color:var(--muted)"></div>
     <div class="err" id="mErr"></div>
@@ -153,17 +156,17 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Abteilung</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
-    <th class="num">RAM (GB)</th>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei vCPU</th>
     <th class="num" title="Frei im Ziel-Cluster nach genehmigten Reservierungen">Cluster frei RAM</th>
-    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>gültig bis</th><th>Aktion</th></tr></thead>
+    <th>von</th><th>Abteilung</th><th>beantragt am</th><th>Fortschritt</th><th>Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
 </div>
@@ -171,7 +174,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung</th><th>Aktion</th></tr></thead>
+  <thead><tr><th>AD-Benutzer</th><th>Rolle</th><th>Abteilung / Team</th><th>Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -198,24 +201,40 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen
 </table>
 </div>
 <div class="hovercard" id="hovercard"></div>
-<div class="foot">VMware Kapazitätsplanung · Version 0.9</div>
+<div class="foot">VMware Kapazitätsplanung · Version 1.0</div>
 <script>
 let CLUSTERS = [{"name": "Cluster-01", "hostCount": 3, "cores": 64, "spareCores": 48, "spareRamGb": 1024, "vcpuCap": 384, "vcpuUsed": 370, "vcpuFree": 14, "ramCap": 1024, "ramUsed": 1504, "ramFree": -480, "vmCount": 52, "vmOff": 5, "hosts": [{"name": "esx101.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx102.firma.local", "cores": 48, "ram_gb": 512}, {"name": "esx103.firma.local", "cores": 32, "ram_gb": 512}], "vms": [{"name": "vm-1001", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-1002", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-1003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1004", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-1005", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1006", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1007", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1008", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1009", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-1010", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1011", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1012", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1013", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1014", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1015", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1016", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1017", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1018", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-1019", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1021", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-1022", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1023", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-1024", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1025", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1026", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1027", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1029", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-1030", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1031", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1032", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1033", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1034", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1035", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1036", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1037", "vcpu": 8, "ram_gb": 64, "on": false}, {"name": "vm-1038", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1040", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1041", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1042", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1043", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-1044", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1045", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1046", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1047", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1048", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1049", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1050", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1051", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1052", "vcpu": 4, "ram_gb": 64, "on": true}]}, {"name": "Cluster-02", "hostCount": 3, "cores": 64, "spareCores": 64, "spareRamGb": 1024, "vcpuCap": 384, "vcpuUsed": 650, "vcpuFree": -266, "ramCap": 1280, "ramUsed": 2680, "ramFree": -1400, "vmCount": 99, "vmOff": 13, "hosts": [{"name": "esx201.firma.local", "cores": 64, "ram_gb": 768}, {"name": "esx202.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx203.firma.local", "cores": 32, "ram_gb": 512}], "vms": [{"name": "vm-2001", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2002", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2003", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2004", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2005", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2006", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2007", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2008", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-2009", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2010", "vcpu": 2, "ram_gb": 16, "on": false}, {"name": "vm-2011", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2012", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2013", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2014", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2015", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2016", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2017", "vcpu": 2, "ram_gb": 8, "on": false}, {"name": "vm-2018", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2019", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2020", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2021", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2022", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2023", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2024", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2025", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2026", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2027", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2029", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2030", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2031", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2032", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2033", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2034", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2035", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2036", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2037", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2038", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2040", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2041", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2042", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2043", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2044", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2045", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2046", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2047", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2048", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2049", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2050", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2051", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2052", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-2053", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2054", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2055", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-2056", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2057", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2058", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2059", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2060", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-2061", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2062", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2063", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2064", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2065", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2066", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-2067", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2068", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2069", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2070", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2071", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2072", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-2073", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2074", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2075", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2076", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2077", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2078", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-2079", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2080", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2081", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2082", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2083", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2084", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2085", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2086", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2087", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2088", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2089", "vcpu": 16, "ram_gb": 32, "on": false}, {"name": "vm-2090", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2091", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2092", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-2093", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2094", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2095", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2096", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2097", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2098", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2099", "vcpu": 4, "ram_gb": 16, "on": true}]}, {"name": "Cluster-03", "hostCount": 5, "cores": 160, "spareCores": 48, "spareRamGb": 1024, "vcpuCap": 960, "vcpuUsed": 346, "vcpuFree": 614, "ramCap": 3840, "ramUsed": 1376, "ramFree": 2464, "vmCount": 49, "vmOff": 6, "hosts": [{"name": "esx301.firma.local", "cores": 48, "ram_gb": 768}, {"name": "esx302.firma.local", "cores": 48, "ram_gb": 1024}, {"name": "esx303.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx304.firma.local", "cores": 48, "ram_gb": 1024}, {"name": "esx305.firma.local", "cores": 32, "ram_gb": 1024}], "vms": [{"name": "vm-3001", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3002", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3004", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3005", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3006", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3007", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3008", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3009", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3010", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3011", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3012", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3013", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3014", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3015", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3016", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3017", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3018", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3019", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3020", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3021", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3022", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3023", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-3024", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3025", "vcpu": 4, "ram_gb": 64, "on": false}, {"name": "vm-3026", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3027", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3029", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3030", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3031", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3032", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3033", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3034", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3035", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3036", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3037", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3038", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3040", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3041", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3042", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3043", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3044", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3045", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3046", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3047", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3048", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3049", "vcpu": 2, "ram_gb": 16, "on": true}]}];
 const FACTOR = 6;
 const SERVE = false;
 const TTL = 31;
 const ME = null;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
+const TEAMS = [];    // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig)
 const LS_KEY = "aria_kapa_reservierungen";
 
 // ---- Rollen ----
 const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
 const IS_ADMIN = ROLE === "admin";
+const IS_REVIEWER = ROLE === "reviewer";
 const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
+                     reviewer: "Reviewer (Genehmigungsteam)",
                      auditor: "Technische Prüfung (nur lesen)" };
 function canDel(r) {
   return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user
                       && !r.approved && !r.rejected);
+}
+// ---- Mehrstufiger Genehmigungsprozess ----
+function stageOf(r) { return (r.approvals || []).length; }
+function currentTeam(r) {
+  if (!TEAMS.length) return null;
+  const n = stageOf(r);
+  return n < TEAMS.length ? TEAMS[n] : null;
+}
+// Darf der/die Angemeldete den Antrag in seiner aktuellen Stufe entscheiden?
+function canDecide(r) {
+  if (IS_ADMIN) return true;
+  if (IS_REVIEWER && TEAMS.length && ME) return ME.abteilung === currentTeam(r);
+  return false;
 }
 async function logout() {
   try { await fetch("api/logout", { method: "POST" }); } catch (e) {}
@@ -255,13 +274,28 @@ function validUntil(r) {
   d.setDate(d.getDate() + (TTL > 0 ? TTL - 1 : 30));
   return d.toISOString().slice(0, 10);
 }
+function approvalsText(r) {
+  // Liste der bisherigen Freigaben; ohne Namen, falls serverseitig gestrippt
+  return (r.approvals || []).map(a =>
+    a.team + (a.by ? " – " + a.by : "") + " (" + fmtDate(a.on) + ")").join("\n");
+}
 function stBadge(r) {
   const cmt = r.comment ? " · Kommentar: " + esc(r.comment) : "";
-  if (r.rejected)
-    return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
+  if (r.rejected) {
+    const stufe = r.rejected_team ? " in Stufe „" + esc(r.rejected_team) + "“" : "";
+    return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""}${stufe} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
+  }
   if (r.approved)
     return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt</span>`;
-  return '<span class="st pend">beantragt</span>';
+  if (TEAMS.length && stageOf(r) > 0) {
+    // teilweise freigegeben -> in Prüfung; Mouseover zeigt, wer schon freigab
+    const done = approvalsText(r);
+    const wartet = currentTeam(r) ? "\nwartet auf: " + currentTeam(r) : "";
+    const tip = "Bereits freigegeben:\n" + esc(done) + esc(wartet);
+    return `<span class="st prog" title="${tip}">in Prüfung (${stageOf(r)}/${TEAMS.length})</span>`;
+  }
+  const wartet = TEAMS.length ? ' title="wartet auf: ' + esc(TEAMS[0]) + '"' : "";
+  return `<span class="st pend"${wartet}>beantragt</span>`;
 }
 function isPend(r) { return !r.approved && !r.rejected; }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
@@ -273,10 +307,10 @@ function freeAfter(c) {
            ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
 }
 
-function createRes(c, name, change, vcpu, ram, errEl) {
+function createRes(c, name, change, vcpu, ram, storage, errEl) {
   errEl.style.display = "none";
-  if (!name || (vcpu <= 0 && ram <= 0)) {
-    errEl.textContent = "Bitte Bezeichnung sowie vCPU und/oder RAM angeben.";
+  if (!name || (vcpu <= 0 && ram <= 0 && storage <= 0)) {
+    errEl.textContent = "Bitte Bezeichnung sowie vCPU, RAM und/oder Storage angeben.";
     errEl.style.display = "block"; return false;
   }
   const ch = String(change || "").toUpperCase().replace(/\s+/g, "");
@@ -288,12 +322,14 @@ function createRes(c, name, change, vcpu, ram, errEl) {
   if ((vcpu > f.cpu || ram > f.ram) &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
                "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem beantragen?")) return false;
-  const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu, ram_gb: ram };
+  const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu,
+                 ram_gb: ram, storage_gb: storage };
   if (SERVE) {
     apiRes("POST", "", item).then(setRes).catch(resFail);
   } else {
     item.id = Date.now() + "-" + Math.random().toString(36).slice(2,7);
     item.created = new Date().toISOString().slice(0,10);
+    item.approvals = [];
     item.approved = false;
     RES.push(item); saveLocal(); render();
   }
@@ -334,7 +370,7 @@ function addRes(idx) {
   const c = CLUSTERS[idx];
   const g = s => document.getElementById("f" + idx + s);
   createRes(c, g("n").value.trim(), g("ch").value, parseInt(g("c").value) || 0,
-            parseFloat(g("r").value) || 0, g("e"));
+            parseFloat(g("r").value) || 0, parseFloat(g("s").value) || 0, g("e"));
 }
 function delRes(id) {
   if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
@@ -346,7 +382,7 @@ function openModal(prefIdx) {
   const sel = document.getElementById("mCluster");
   sel.innerHTML = CLUSTERS.map((c, i) =>
     `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
-  ["mName", "mChange", "mCpu", "mRam"].forEach(id => document.getElementById(id).value = "");
+  ["mName", "mChange", "mCpu", "mRam", "mStorage"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("mErr").style.display = "none";
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById("mValid").textContent =
@@ -369,6 +405,7 @@ function submitModal() {
   const v = id => document.getElementById(id).value;
   const ok = createRes(c, v("mName").trim(), v("mChange"),
                        parseInt(v("mCpu")) || 0, parseFloat(v("mRam")) || 0,
+                       parseFloat(v("mStorage")) || 0,
                        document.getElementById("mErr"));
   if (ok) closeModal();
 }
@@ -423,11 +460,11 @@ function card(c, idx, isTotal) {
     `<tr><td>${esc(h.name)}</td><td class="num">${h.cores}</td><td class="num">${fmt(h.ram_gb)}</td></tr>`).join("");
   const resRows = clRes.map(r =>
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
-     <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td>
+     <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   const resTable = clRes.length ?
-    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
+    `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
   const spare = (c.spareCores || c.spareRamGb) ?
     ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
@@ -450,6 +487,7 @@ function card(c, idx, isTotal) {
         <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
         <input id="f${idx}c" type="number" min="0" placeholder="vCPU">
         <input id="f${idx}r" type="number" min="0" placeholder="RAM GB">
+        <input id="f${idx}s" type="number" min="0" placeholder="Storage GB">
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
@@ -647,11 +685,11 @@ function renderAdmTable() {
       const cur = ROLES[u] || {};
       return `<tr><td>${esc(u)}</td>
         <td><select id="editRole" class="filterbox" style="width:100%">
-          ${["anforderer", "admin", "auditor"].map(x =>
+          ${["anforderer", "reviewer", "admin", "auditor"].map(x =>
             `<option value="${x}" ${cur.role === x ? "selected" : ""}>${esc(ROLE_NAMES[x])}</option>`).join("")}
         </select></td>
-        <td><input id="editDept" class="filterbox" style="width:100%"
-             value="${esc(cur.abteilung || "")}" placeholder="Abteilung"
+        <td><input id="editDept" class="filterbox" style="width:100%" list="teamList"
+             value="${esc(cur.abteilung || "")}" placeholder="Abteilung / Team"
              onkeydown="if(event.key==='Enter')saveEditRole('${esc(u)}')"></td>
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
@@ -666,13 +704,15 @@ function renderAdmTable() {
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
      <td><select id="admRole" class="filterbox" style="width:100%">
        <option value="anforderer">Anforderer</option>
+       <option value="reviewer">Reviewer (Genehmigungsteam)</option>
        <option value="admin">Administrator</option>
        <option value="auditor">Technische Prüfung (nur lesen)</option>
      </select></td>
-     <td><input class="filterbox" style="width:100%" id="admDept"
-         placeholder="Abteilung (für Anforderer)"></td>
+     <td><input class="filterbox" style="width:100%" id="admDept" list="teamList"
+         placeholder="Abteilung (Anforderer) / Team (Reviewer)"></td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`) +
+    `<datalist id="teamList">${TEAMS.map(t => `<option value="${esc(t)}">`).join("")}</datalist>`;
 }
 
 function filterRes(list) {
@@ -684,15 +724,17 @@ function filterRes(list) {
                             (a.created || "").localeCompare(b.created || ""));
 }
 
+function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0),0)*10)/10; }
+
 function renderResTable() {
   const list = filterRes(RES);
   const appr = list.filter(r => r.approved);
   const showDec = ROLE !== "anforderer";
-  const nCols = showDec ? 14 : 13;
+  const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
      <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
-     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      ${showDec ? `<td>${esc(r.approved_by || r.rejected_by || "–")}</td>` : ""}
@@ -700,18 +742,24 @@ function renderResTable() {
      <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td></td><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
-     <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td>
-     <td colspan="${nCols - 6}"></td></tr>` +
+     <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td><td class="num">${fmt(sumStorage(appr))}</td>
+     <td colspan="${nCols - 7}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
 }
 
 function renderAppTable() {
   const list = filterRes(RES.filter(isPend));
-  const action = r => IS_ADMIN
-    ? `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">✓ Genehmigen</button>
-       <button class="btn" style="color:var(--crit)" title="Ablehnen und löschen"
-               onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`
-    : '<span class="st pend">wartet auf Genehmigung</span>';
+  const action = r => {
+    if (canDecide(r)) {
+      const team = currentTeam(r);
+      const lbl = team ? "✓ Freigeben (" + esc(team) + ")" : "✓ Genehmigen";
+      return `<button class="btn approve" onclick="approveRes('${esc(r.id)}')">${lbl}</button>
+       <button class="btn" style="color:var(--crit)" title="Ablehnen"
+               onclick="rejectRes('${esc(r.id)}')">✕ Ablehnen</button>`;
+    }
+    const team = currentTeam(r);
+    return '<span class="st pend">wartet auf ' + (team ? esc(team) : "Genehmigung") + '</span>';
+  };
   const freeCells = r => {
     const c = CLUSTERS.find(x => x.name === r.cluster);
     if (!c) return '<td class="num" colspan="2" style="color:var(--muted)">Cluster unbekannt</td>';
@@ -725,13 +773,13 @@ function renderAppTable() {
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
      <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
-     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      ${freeCells(r)}
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
-     <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td>
+     <td>${fmtDate(r.created)}</td><td>${stBadge(r)}</td>
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
-    rows || `<tr><td colspan="13" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
+    rows || `<tr><td colspan="14" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
 }
 
 function render() {

@@ -32,6 +32,13 @@ res-ttl-days = 31
 #res-file = data/kapa_reservierungen.json
 #cache = data/kapa_cache.json
 
+# --- Mehrstufiger Genehmigungsprozess -----------------------------------------
+# Team-Namen in Prüfreihenfolge (komma-getrennt). Jeder Antrag durchläuft die
+# Teams nacheinander: nach der ersten Freigabe wird der Status „in Prüfung",
+# erst wenn ALLE Teams freigegeben haben, ist er „genehmigt". Reviewer werden
+# in der Verwaltung ihrem Team zugewiesen. Leer/auskommentiert = einstufig.
+#approval-teams = Team Netzwerk, Team Security, Team Betrieb
+
 # --- Active-Directory-Anmeldung ------------------------------------------------
 ad-url = ldaps://dc01.firma.local
 ad-domain = firma.local

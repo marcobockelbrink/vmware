@@ -26,12 +26,17 @@ Alle Reservierungen (ungefiltert, wie die Admin-Sicht). Felder je Eintrag:
 | `name` | Bezeichnung / Projekt |
 | `change` | Change-Nummer (CHB…/CHI…) |
 | `cluster` | Ziel-Cluster |
-| `vcpu`, `ram_gb` | Angefragte Kapazität |
+| `vcpu`, `ram_gb`, `storage_gb` | Angefragte Kapazität (Storage nur informativ) |
 | `von`, `abteilung` | Anforderer und Abteilung |
 | `created` | Gilt ab (Anlagetag, ISO-Datum) |
-| `approved`, `approved_on`, `approved_by` | Genehmigungsstatus |
-| `rejected`, `rejected_on`, `rejected_by` | Ablehnungsstatus |
-| `comment` | Kommentar des Admins |
+| `approvals` | Liste der bisherigen Team-Freigaben: `[{team, by, on, comment}]` (Reihenfolge = Prüfreihenfolge) |
+| `approved`, `approved_on`, `approved_by` | vollständig genehmigt (alle Stufen), Datum + letzter Freigebender |
+| `rejected`, `rejected_on`, `rejected_by`, `rejected_team` | Ablehnungsstatus inkl. Stufe |
+| `comment` | letzter Kommentar |
+
+Der abgeleitete Status ergibt sich als: `abgelehnt` (rejected), sonst
+`genehmigt` (approved), sonst `in Prüfung` (mindestens eine, aber nicht alle
+Freigaben), sonst `beantragt`.
 
 **Filter** (kombinierbar):
 
@@ -41,7 +46,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 ```
 
 - `cluster=<Name>` — nur ein Cluster
-- `status=beantragt|genehmigt|abgelehnt`
+- `status=beantragt|in Prüfung|genehmigt|abgelehnt`
 - `abteilung=<Name>`
 
 **CSV-Export** (Semikolon-getrennt, für Excel):
