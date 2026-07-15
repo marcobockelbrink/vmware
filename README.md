@@ -56,10 +56,15 @@ Entscheidungen und Backups:
 
 - **CPU-Kapazität** = Summe physischer Cores aller ESXi-Hosts im Cluster × Überprovisionierungsfaktor (Standard: 6)
 - **RAM-Kapazität** = Summe physischer RAM aller Hosts (1:1)
+- **Storage-Kapazität** = Summe der Datastore-Kapazität je Cluster aus Aria
+  (Zuordnung über `summary|parentCluster`; sauber bei vSAN/cluster-lokalen
+  Datastores). Wird die Kapazität nicht geliefert, zeigt die Spalte „–" und
+  der Rest funktioniert normal weiter.
 - **Ausfallreserve (N+1)**: pro Cluster wird der größte Host (Cores und RAM)
-  von der Gesamtkapazität abgezogen (`--failover-hosts`, Standard: 1, `0` = aus)
-- **Belegt** = provisionierte vCPUs / RAM aller VMs im Cluster (inkl. powered-off)
-- **Frei** = Kapazität − belegt − genehmigte Reservierungen
+  von der Gesamtkapazität abgezogen (`--failover-hosts`, Standard: 1, `0` = aus);
+  Storage bleibt davon unberührt.
+- **Belegt** = provisionierte vCPUs / RAM aller VMs bzw. belegter Datastore-Platz (inkl. powered-off)
+- **Frei** = Kapazität − belegt − genehmigte Reservierungen (für vCPU, RAM und Storage)
 
 ## Verwendung
 
@@ -130,9 +135,14 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Freigabe-/Ablehnen-Schaltflächen.
 - **Ablehnungen** bleiben 31 Tage (ab Ablehnung) als Historie sichtbar
   (Status „abgelehnt"; im Mouseover steht, in welcher Stufe abgelehnt wurde).
-- **Kommentar**: Beim Freigeben/Ablehnen kann ein Kommentar (z. B. Begründung)
-  erfasst werden; er erscheint in der Reservierungsübersicht und in der
-  Report-Mail.
+- **Storno**: Anfragen lassen sich nicht löschen, sondern **stornieren**. Das
+  darf ein Admin, der Anforderer selbst oder **jemand aus derselben Abteilung**
+  (Button „⦸ Storno" in der Reservierungsliste). Eine stornierte Anfrage bekommt
+  den Status „storniert", bleibt als Historie erhalten und zählt nicht mehr
+  gegen die Kapazität.
+- **Kommentar**: Beim Freigeben/Ablehnen/Stornieren kann ein Kommentar
+  (z. B. Begründung) erfasst werden; er erscheint in der Reservierungsübersicht
+  und in der Report-Mail.
 - **Entschieden von**: Die Übersicht zeigt, welcher Admin genehmigt bzw.
   abgelehnt hat — für Anforderer ist diese Information verborgen (Spalte und
   Datenfeld werden serverseitig entfernt); Admins und technische Prüfung
@@ -185,8 +195,12 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
   eintragen, Rolle wählen und im Feld „Abteilung / Team" bei **Anforderern** die
   Abteilung, bei **Reviewern** das Team (eines der im selben Tab gepflegten
   Genehmigungs-Teams, per Auswahlliste) angeben; gespeichert in
-  `data/kapa_rollen.json`. Benutzer ohne zugewiesene Rolle können sich nicht
-  anmelden.
+  `data/kapa_rollen.json`. Bestehende Zuweisungen lassen sich per Klick
+  bearbeiten (Rolle und Team/Abteilung) oder entfernen.
+- **Standardrolle**: Jeder erfolgreich am AD angemeldete Benutzer **ohne**
+  explizite Zuweisung gilt automatisch als **Anforderer** — er kann Anfragen
+  stellen, aber nichts freigeben. Reviewer-, Admin- und Auditor-Rechte gibt es
+  nur über eine ausdrückliche Zuweisung.
 - **Abteilungssicht**: Anforderer sehen nur Anfragen ihrer Abteilung.
   Fremde *genehmigte* Reservierungen bleiben anonymisiert als
   „(andere Abteilung)" sichtbar, damit die freie Kapazität stimmt;
@@ -256,7 +270,8 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--serve --port 8080` | Webserver-Modus |
 | `--bind 0.0.0.0` | Bind-Adresse für `--serve` |
 | `--refresh-interval 1800` | Auto-Aktualisierung in Sekunden (`0` = aus) |
-| `--cache data/kapa_cache.json` | Datei-Cache der letzten Abfrage |
+| `--data-dir /var/lib/kapa` | Basisordner aller Laufzeitdaten (Standard `data/`); bei CI/CD außerhalb des Deploy-Verzeichnisses wählen |
+| `--cache kapa_cache.json` | Datei-Cache der letzten Abfrage |
 | `--res-file data/kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
 | `--approval-teams "A,B,C"` | **Erstbefüllung** der Genehmigungs-Teams (nur wenn `--teams-file` noch fehlt); danach Pflege im Tab „Verwaltung" |
@@ -280,11 +295,20 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
 | `--json datei.json` | Rohdaten zusätzlich als JSON |
 
-Alle JSON-Datendateien (Cache, Reservierungen, Rollen, `--json`-Export)
-liegen im Ordner `data/`, der komplett per `.gitignore` vom Repository
-ausgeschlossen ist. Auch per Parameter angegebene Dateinamen ohne
-Pfadangabe landen automatisch unter `data/`; explizite Pfade
-(z. B. `/var/lib/kapa/cache.json`) werden respektiert.
+Alle JSON-Datendateien (Cache, Reservierungen, Rollen, Teams, Log, Tokens,
+`--json`-Export) liegen standardmäßig im Ordner `data/`, der komplett per
+`.gitignore` vom Repository ausgeschlossen ist. Der Basisordner ist über
+`--data-dir` frei wählbar; explizite Pfade (z. B. `--cache /pfad/cache.json`)
+werden respektiert.
+
+> **Wichtig bei CI/CD (GitLab-Pipeline o. Ä.):** Legt die Laufzeitdaten mit
+> `--data-dir` **außerhalb** des Deploy-Verzeichnisses ab (z. B.
+> `/var/lib/kapa`). `data/` ist gitignored, also im Repository/Artefakt nicht
+> enthalten. Deployt die Pipeline den Code über das Zielverzeichnis (per
+> `git clean -fdx`, `rsync --delete` oder „Verzeichnis leeren und neu
+> befüllen"), löscht sie damit den mitliegenden `data/`-Ordner bei **jedem**
+> Deploy. Liegen die Daten unter `/var/lib/kapa`, bleiben sie unberührt. Die
+> mitgelieferte systemd-Unit ist bereits so konfiguriert.
 
 ## Betrieb auf einem Linux-Host (systemd + nginx)
 

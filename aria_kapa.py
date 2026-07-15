@@ -222,11 +222,13 @@ def ensure_dir(path):
         os.makedirs(d, exist_ok=True)
 
 
-def data_path(path):
-    """JSON-Datendateien ohne Verzeichnisangabe landen immer im Ordner data/;
-    explizite Pfade (relativ mit Ordner oder absolut) bleiben unverändert."""
+def data_path(path, base="data"):
+    """JSON-Datendateien ohne Verzeichnisangabe landen im Datenordner (Standard
+    data/, per --data-dir änderbar, z. B. /var/lib/kapa außerhalb des
+    Deploy-Verzeichnisses); explizite Pfade (relativ mit Ordner oder absolut)
+    bleiben unverändert."""
     if path and not os.path.dirname(path):
-        return os.path.join("data", path)
+        return os.path.join(base, path)
     return path
 
 
@@ -438,9 +440,27 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
          "config|hardware|numCpu", "config|hardware|memoryKB"],
         progress=lambda m: log(f"VM-Eigenschaften: {m}"))
 
+    # Storage-Kapazität aus den Datastores (best effort – fehlt sie, bleibt die
+    # Anzeige leer, der Rest funktioniert weiter). Zuordnung zum Cluster über
+    # summary|parentCluster: sauber bei vSAN/cluster-lokalen Datastores; geteilte
+    # Datastores ohne Cluster-Bezug werden übersprungen.
+    datastores, ds_stats, ds_props = [], {}, {}
+    try:
+        log("Lese Datastores (Storage-Kapazität) ...")
+        datastores = api.resources("Datastore")
+        ds_ids = [d["identifier"] for d in datastores]
+        ds_stats = api.latest_stats(ds_ids,
+            ["capacity|total_capacity", "capacity|used_space"],
+            progress=lambda m: log(f"Datastore-Metriken: {m}"))
+        ds_props = api.properties(ds_ids, ["summary|parentCluster"],
+            progress=lambda m: log(f"Datastore-Eigenschaften: {m}"))
+    except Exception as e:
+        log(f"Storage-Kapazität nicht verfügbar: {e}")
+
     data = {}
     for c in clusters:
-        data[name_of(c)] = {"hosts": [], "vms": []}
+        data[name_of(c)] = {"hosts": [], "vms": [],
+                            "storage": {"cap_gb": 0.0, "used_gb": 0.0}}
 
     for h in hosts:
         rid = h["identifier"]
@@ -473,6 +493,19 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1):
             "on": "on" in power.lower().replace(" ", ""),
         })
 
+    for ds in datastores:
+        rid = ds["identifier"]
+        cl = (ds_props.get(rid) or {}).get("summary|parentCluster")
+        if cl not in data:
+            continue  # geteilter Datastore ohne eindeutigen Cluster-Bezug
+        st = ds_stats.get(rid) or {}
+        cap = st.get("capacity|total_capacity")
+        used = st.get("capacity|used_space")
+        if cap:
+            data[cl]["storage"]["cap_gb"] += float(cap)
+        if used:
+            data[cl]["storage"]["used_gb"] += float(used)
+
     return build_summary(data, cpu_factor, failover_hosts)
 
 
@@ -491,6 +524,9 @@ def build_summary(data, cpu_factor, failover_hosts=1):
         vcpu_cap = cores * cpu_factor
         vcpu_used = sum(v["vcpu"] for v in d["vms"])
         ram_used = round(sum(v["ram_gb"] for v in d["vms"]), 1)
+        storage = d.get("storage") or {}
+        stor_cap = round(float(storage.get("cap_gb") or 0), 1)
+        stor_used = round(float(storage.get("used_gb") or 0), 1)
         clusters.append({
             "name": cl,
             "hostCount": len(d["hosts"]),
@@ -503,6 +539,9 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "ramCap": host_ram,
             "ramUsed": ram_used,
             "ramFree": round(host_ram - ram_used, 1),
+            "storageCap": stor_cap,
+            "storageUsed": stor_used,
+            "storageFree": round(stor_cap - stor_used, 1),
             "vmCount": len(d["vms"]),
             "vmOff": sum(1 for v in d["vms"] if not v["on"]),
             "hosts": d["hosts"],
@@ -527,7 +566,10 @@ def sample_data():
                 "ram_gb": random.choice([8, 16, 16, 32, 64]),
                 "on": random.random() > 0.1}
                for vi in range(1, random.randint(40, 120))]
-        data[cl] = {"hosts": hosts, "vms": vms}
+        cap_gb = len(hosts) * random.choice([8000, 12000, 20000])
+        used_gb = round(cap_gb * random.uniform(0.45, 0.85))
+        data[cl] = {"hosts": hosts, "vms": vms,
+                    "storage": {"cap_gb": cap_gb, "used_gb": used_gb}}
     return data
 
 # ------------------------------------------------------------------ Dashboard --
@@ -649,6 +691,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .st.pend { background:rgba(245,158,11,.15); color:var(--warn); }
   .st.prog { background:rgba(56,189,248,.15); color:#38bdf8; cursor:help; }
   .st.rej { background:rgba(239,68,68,.15); color:var(--crit); }
+  .st.canc { background:rgba(148,163,184,.18); color:var(--muted); cursor:help; }
   .rid { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
          color:var(--muted); white-space:nowrap; }
   .btn.approve { border-color:var(--ok); color:var(--ok); }
@@ -736,6 +779,7 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <thead><tr><th>Cluster</th><th class="num">Hosts</th><th class="num">VMs</th>
     <th class="num">vCPU frei</th><th class="barcol">vCPU-Auslastung</th>
     <th class="num">RAM frei (GB)</th><th class="barcol">RAM-Auslastung</th>
+    <th class="num">Storage frei (GB)</th><th class="barcol">Storage-Auslastung</th>
     <th class="num">Res.</th></tr></thead>
   <tbody id="ktbody"></tbody>
 </table>
@@ -817,9 +861,16 @@ const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
                      reviewer: "Reviewer (Genehmigungsteam)",
                      auditor: "Technische Prüfung (nur lesen)" };
-function canDel(r) {
-  return IS_ADMIN || (ROLE === "anforderer" && ME && r.von === ME.user
-                      && !r.approved && !r.rejected);
+// Löschen von Reservierungsanfragen ist deaktiviert – stattdessen Storno.
+function canDel(r) { return false; }
+// Storno: Admin, jemand aus derselben Abteilung oder der Anforderer selbst
+// darf eine noch offene/genehmigte Anfrage zurückziehen (bleibt als „storniert“
+// in der Historie). Bereits abgelehnte/stornierte lassen sich nicht stornieren.
+function canCancel(r) {
+  if (r.rejected || r.cancelled || r.foreign) return false;
+  if (IS_ADMIN) return true;
+  const dept = ME && ME.abteilung;
+  return !!(dept && r.abteilung === dept) || !!(ME && r.von === ME.user);
 }
 // ---- Mehrstufiger Genehmigungsprozess ----
 function stageOf(r) { return (r.approvals || []).length; }
@@ -859,7 +910,7 @@ async function apiRes(method, path, body) {
 function setRes(list) { if (Array.isArray(list)) { RES = list; render(); } }
 function resFail() { alert("Reservierungen konnten nicht auf dem Server gespeichert werden."); }
 // Nur genehmigte Reservierungen zählen gegen die Kapazität
-function resFor(cl) { return RES.filter(r => r.cluster === cl && r.approved); }
+function resFor(cl) { return RES.filter(r => r.cluster === cl && r.approved && !r.cancelled); }
 function allFor(cl) { return RES.filter(r => r.cluster === cl); }
 function fmtDate(iso) {
   if (!iso) return "–";
@@ -883,6 +934,8 @@ function stBadge(r) {
     const stufe = r.rejected_team ? " in Stufe „" + esc(r.rejected_team) + "“" : "";
     return `<span class="st rej" title="abgelehnt${r.rejected_by ? " von " + esc(r.rejected_by) : ""}${stufe} am ${fmtDate(r.rejected_on)}${cmt}">abgelehnt</span>`;
   }
+  if (r.cancelled)
+    return `<span class="st canc" title="storniert${r.cancelled_by ? " von " + esc(r.cancelled_by) : ""} am ${fmtDate(r.cancelled_on)}${cmt}">storniert</span>`;
   if (r.approved)
     return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt</span>`;
   if (TEAMS.length && stageOf(r) > 0) {
@@ -895,14 +948,16 @@ function stBadge(r) {
   const wartet = TEAMS.length ? ' title="wartet auf: ' + esc(TEAMS[0]) + '"' : "";
   return `<span class="st pend"${wartet}>beantragt</span>`;
 }
-function isPend(r) { return !r.approved && !r.rejected; }
+function isPend(r) { return !r.approved && !r.rejected && !r.cancelled; }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
 function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
 
 function freeAfter(c) {
   const rv = resFor(c.name);
   return { cpu: c.vcpuFree - sumCpu(rv),
-           ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10 };
+           ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10,
+           stor: Math.round(((c.storageFree || 0) - sumStorage(rv)) * 10) / 10,
+           hasStor: (c.storageCap || 0) > 0 };
 }
 
 function createRes(c, name, change, vcpu, ram, storage, errEl) {
@@ -917,9 +972,12 @@ function createRes(c, name, change, vcpu, ram, storage, errEl) {
     errEl.style.display = "block"; return false;
   }
   const f = freeAfter(c);
-  if ((vcpu > f.cpu || ram > f.ram) &&
+  const over = vcpu > f.cpu || ram > f.ram || (f.hasStor && storage > f.stor);
+  if (over &&
       !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
-               "(frei: " + f.cpu + " vCPU / " + f.ram + " GB). Trotzdem beantragen?")) return false;
+               "(frei: " + f.cpu + " vCPU / " + f.ram + " GB RAM" +
+               (f.hasStor ? " / " + f.stor + " GB Storage" : "") +
+               "). Trotzdem beantragen?")) return false;
   const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu,
                  ram_gb: ram, storage_gb: storage };
   if (SERVE) {
@@ -974,6 +1032,21 @@ function delRes(id) {
   if (SERVE) apiRes("DELETE", "/" + encodeURIComponent(id)).then(setRes).catch(resFail);
   else { RES = RES.filter(r => r.id !== id); saveLocal(); render(); }
 }
+function cancelRes(id) {
+  const r = RES.find(x => x.id === id);
+  const c = prompt("Anfrage „" + ((r && r.name) || "?") + "“ stornieren?\n" +
+                   "Sie bleibt als „storniert“ in der Historie und zählt nicht " +
+                   "mehr gegen die Kapazität.\nKommentar / Grund (optional):", "");
+  if (c === null) return;   // Abbrechen
+  if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/cancel",
+                    { comment: c.trim() }).then(setRes).catch(resFail);
+  else if (r) {
+    r.cancelled = true;
+    r.cancelled_on = new Date().toISOString().slice(0, 10);
+    if (c.trim()) r.comment = c.trim();
+    saveLocal(); render();
+  }
+}
 
 // ---- Dialog "Neue Kapazitätsanfrage" ----
 function openModal(prefIdx) {
@@ -996,7 +1069,8 @@ function modalHint() {
   if (!c) return;
   const f = freeAfter(c);
   document.getElementById("mHint").textContent =
-    "Frei nach bestehenden Reservierungen: " + fmt(f.cpu) + " vCPU / " + fmt(f.ram) + " GB RAM";
+    "Frei nach bestehenden Reservierungen: " + fmt(f.cpu) + " vCPU / " + fmt(f.ram) + " GB RAM"
+    + (f.hasStor ? " / " + fmt(f.stor) + " GB Storage" : "");
 }
 function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
@@ -1049,8 +1123,9 @@ function metric(label, used, resv, cap, unit) {
 
 function card(c, idx, isTotal) {
   const clRes = isTotal ? RES.filter(r => !TOTAL || TOTAL._names.has(r.cluster)) : allFor(c.name);
-  const rv = clRes.filter(r => r.approved);
-  const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
+  const rv = clRes.filter(r => r.approved && !r.cancelled);
+  const rvCpu = sumCpu(rv), rvRam = sumRam(rv), rvStor = sumStorage(rv);
+  const hasStor = (c.storageCap || 0) > 0;
   const vmRows = (c.vms || []).sort((a,b)=>b.vcpu-a.vcpu).map(v =>
     `<tr class="${v.on?'':'off'}"><td>${esc(v.name)}${v.on?'':' (aus)'}</td>
      <td class="num">${v.vcpu}</td><td class="num">${fmt(v.ram_gb)}</td></tr>`).join("");
@@ -1060,7 +1135,7 @@ function card(c, idx, isTotal) {
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
-     <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
+     <td>${canCancel(r) ? `<button class="del" title="Anfrage stornieren" onclick="cancelRes('${esc(r.id)}')">⦸ Storno</button>` : ""}</td></tr>`).join("");
   const resTable = clRes.length ?
     `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
@@ -1071,9 +1146,10 @@ function card(c, idx, isTotal) {
     <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
     ${metric("vCPU (Cores × " + FACTOR + ")", c.vcpuUsed, rvCpu, c.vcpuCap, "vCPU")}
     ${metric("RAM", c.ramUsed, rvRam, c.ramCap, "GB")}
+    ${hasStor ? metric("Storage", c.storageUsed, rvStor, c.storageCap, "GB") : ""}
     <div class="kpis">
-      <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB</b></div>
-      <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
+      <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB${hasStor ? " / " + fmt(Math.round(((c.storageFree||0) - rvStor)*10)/10) + " GB Storage" : ""}</b></div>
+      <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB${hasStor || rvStor ? " / " + fmt(rvStor) + " GB Storage" : ""}</b></div>
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
     </div>
     <div class="resbox">
@@ -1116,13 +1192,16 @@ function miniBar(used, resv, cap) {
 
 function row(c, idx, isTotal) {
   const clRes = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : allFor(c.name);
-  const rv = clRes.filter(r => r.approved);
+  const rv = clRes.filter(r => r.approved && !r.cancelled);
   const pend = clRes.filter(isPend).length;
-  const rvCpu = sumCpu(rv), rvRam = sumRam(rv);
+  const rvCpu = sumCpu(rv), rvRam = sumRam(rv), rvStor = sumStorage(rv);
   const fCpu = c.vcpuFree - rvCpu;
   const fRam = Math.round((c.ramFree - rvRam) * 10) / 10;
   const cCpu = color(pct(c.vcpuUsed + rvCpu, c.vcpuCap));
   const cRam = color(pct(c.ramUsed + rvRam, c.ramCap));
+  const hasStor = (c.storageCap || 0) > 0;
+  const fStor = Math.round(((c.storageFree || 0) - rvStor) * 10) / 10;
+  const cStor = color(pct((c.storageUsed || 0) + rvStor, c.storageCap || 0));
   return `<tr class="${isTotal ? 'trtotal' : ''}">
     <td class="cl" title="Details anzeigen" onclick="toggleCard(${idx},this)">${esc(c.name)}</td>
     <td class="num">${fmt(c.hostCount)}</td>
@@ -1131,6 +1210,8 @@ function row(c, idx, isTotal) {
     <td class="barcol">${miniBar(c.vcpuUsed, rvCpu, c.vcpuCap)}</td>
     <td class="num free" style="color:${cRam}">${fmt(fRam)}</td>
     <td class="barcol">${miniBar(c.ramUsed, rvRam, c.ramCap)}</td>
+    <td class="num free" style="color:${hasStor ? cStor : 'var(--muted)'}" title="${hasStor ? '' : 'keine Storage-Daten aus Aria'}">${hasStor ? fmt(fStor) : '–'}</td>
+    <td class="barcol">${hasStor ? miniBar(c.storageUsed || 0, rvStor, c.storageCap) : ''}</td>
     <td class="num">${rv.length || "–"}${pend ? ` <span class="st pend">+${pend}</span>` : ""}</td></tr>`;
 }
 
@@ -1375,7 +1456,7 @@ function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0)
 
 function renderResTable() {
   const list = filterRes(RES);
-  const appr = list.filter(r => r.approved);
+  const appr = list.filter(r => r.approved && !r.cancelled);
   const showDec = ROLE !== "anforderer";
   const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
@@ -1384,9 +1465,9 @@ function renderResTable() {
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
-     ${showDec ? `<td>${esc(r.approved_by || r.rejected_by || "–")}</td>` : ""}
+     ${showDec ? `<td>${esc(r.approved_by || r.rejected_by || r.cancelled_by || "–")}</td>` : ""}
      <td>${esc(r.comment || "–")}</td>
-     <td>${canDel(r) ? `<button class="del" title="Reservierung löschen" onclick="delRes('${esc(r.id)}')">✕</button>` : ""}</td></tr>`).join("");
+     <td>${canCancel(r) ? `<button class="del" title="Anfrage stornieren" onclick="cancelRes('${esc(r.id)}')">⦸ Storno</button>` : ""}</td></tr>`).join("");
   document.getElementById("rtbody").innerHTML =
     `<tr class="trtotal"><td></td><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td><td class="num">${fmt(sumStorage(appr))}</td>
@@ -1446,6 +1527,8 @@ function render() {
     vcpuUsed: vis.reduce((s,c)=>s+c.vcpuUsed,0),
     ramCap: Math.round(vis.reduce((s,c)=>s+c.ramCap,0)*10)/10,
     ramUsed: Math.round(vis.reduce((s,c)=>s+c.ramUsed,0)*10)/10,
+    storageCap: Math.round(vis.reduce((s,c)=>s+(c.storageCap||0),0)*10)/10,
+    storageUsed: Math.round(vis.reduce((s,c)=>s+(c.storageUsed||0),0)*10)/10,
     vmCount: vis.reduce((s,c)=>s+c.vmCount,0),
     vmOff: vis.reduce((s,c)=>s+c.vmOff,0),
     spareCores: vis.reduce((s,c)=>s+(c.spareCores||0),0),
@@ -1454,10 +1537,11 @@ function render() {
   };
   TOTAL.vcpuFree = TOTAL.vcpuCap - TOTAL.vcpuUsed;
   TOTAL.ramFree = Math.round((TOTAL.ramCap - TOTAL.ramUsed)*10)/10;
+  TOTAL.storageFree = Math.round((TOTAL.storageCap - TOTAL.storageUsed)*10)/10;
   document.getElementById("ktbody").innerHTML =
     row(TOTAL, -1, true) +
     (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
-                 : '<tr><td colspan="8" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
+                 : '<tr><td colspan="10" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
   if (hoverIdx !== null && hc.style.display === "block")
     hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
                    card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
@@ -1773,8 +1857,9 @@ def serve(args, password):
             print("WARNUNG: --ad-url ohne ldaps:// – Passwörter gehen unverschlüsselt "
                   "über das Netz.", file=sys.stderr)
         if not admin_seed and not roles:
-            print("WARNUNG: Keine Admins definiert (--admin-user) und Rollendatei leer – "
-                  "niemand kann sich anmelden.", file=sys.stderr)
+            print("WARNUNG: Kein Admin definiert (--admin-user) und Rollendatei leer – "
+                  "alle AD-Nutzer melden sich als Anforderer an, niemand kann "
+                  "genehmigen oder die Verwaltung öffnen.", file=sys.stderr)
 
     # Zwischen-Cache der letzten Abfrage von Platte laden
     if os.path.exists(args.cache):
@@ -1798,9 +1883,11 @@ def serve(args, password):
         cutoff = (datetime.now() - timedelta(days=args.res_ttl_days)).date().isoformat()
 
         def ref_date(r):
-            # Abgelehnte bleiben ab Ablehnungsdatum in der Historie
+            # Abgelehnte/stornierte bleiben ab dem Ereignisdatum in der Historie
             if r.get("rejected"):
                 return str(r.get("rejected_on") or r.get("created") or "9999")
+            if r.get("cancelled"):
+                return str(r.get("cancelled_on") or r.get("created") or "9999")
             return str(r.get("created") or "9999")
         return [r for r in lst if ref_date(r) >= cutoff]
 
@@ -1857,6 +1944,8 @@ def serve(args, password):
     def res_status(r):
         if r.get("rejected"):
             return "abgelehnt"
+        if r.get("cancelled"):
+            return "storniert"
         if r.get("approved"):
             return "genehmigt"
         return "in Prüfung" if r.get("approvals") else "beantragt"
@@ -1966,8 +2055,8 @@ def serve(args, password):
                     d["approvals"] = [{"team": a.get("team"), "on": a.get("on")}
                                       for a in d["approvals"]]
                 out.append(d)
-            elif r.get("approved"):
-                # bewusst ohne Name, von, Change, Kommentar
+            elif r.get("approved") and not r.get("cancelled"):
+                # bewusst ohne Name, von, Change, Kommentar; storniert zählt nicht
                 out.append({"id": r.get("id"), "cluster": r.get("cluster"),
                             "name": "(andere Abteilung)", "vcpu": r.get("vcpu"),
                             "ram_gb": r.get("ram_gb"),
@@ -2236,10 +2325,8 @@ def serve(args, password):
                     self._json({"error": "Zu viele Fehlversuche – bitte einige "
                                          "Minuten warten und erneut versuchen."}, 429)
                     return
-                entry = role_entry(user)
-                if not user or not entry:
+                if not user:
                     login_note_fail(user)
-                    audit(user, "Anmeldung abgewiesen", "keine Rolle zugewiesen")
                     self._json(bad, 401)
                     return
                 try:
@@ -2253,7 +2340,13 @@ def serve(args, password):
                     self._json(bad, 401)
                     return
                 login_reset(user)
+                # Rolle: explizit zugewiesen (Verwaltung), sonst Standard =
+                # Anforderer. Ohne eigene Rolle darf man nur beantragen, nichts
+                # freigeben.
+                explicit = role_entry(user)
+                entry = explicit or {"role": "anforderer", "abteilung": ""}
                 audit(user, "Anmeldung", f"Rolle: {entry['role']}"
+                      + ("" if explicit else " (Standard)")
                       + (f", Abteilung: {entry.get('abteilung')}"
                          if entry.get("abteilung") else ""))
                 token = secrets.token_urlsafe(32)
@@ -2420,6 +2513,51 @@ def serve(args, password):
                              if notify.get("rejected_team") else "")
                           + (f" – Kommentar: {comment}" if comment else ""))
                     notify_mail(notify, "abgelehnt", s["user"] or "unbekannt")
+            elif (self.path.startswith("/api/reservations/")
+                    and self.path.endswith("/cancel")):
+                # Storno: jemand aus derselben Abteilung (oder der Anforderer
+                # selbst bzw. ein Admin) zieht die Anfrage zurück. Sie bleibt als
+                # „storniert" in der Historie und zählt nicht mehr gegen die
+                # Kapazität.
+                s = self._require("admin", "anforderer", "reviewer")
+                if not s:
+                    return
+                rid = urllib.parse.unquote(
+                    self.path[len("/api/reservations/"):-len("/cancel")])
+                comment = str((self._body() or {}).get("comment") or "").strip()[:500]
+                notify = None
+                err = None
+                with res_lock:
+                    r = next((x for x in reservations
+                              if x.get("id") == rid and not x.get("rejected")
+                              and not x.get("cancelled")), None)
+                    if r is None:
+                        err = ("Antrag nicht gefunden oder bereits "
+                               "abgeschlossen.", 404)
+                    else:
+                        dept = s.get("abteilung") or ""
+                        same_dept = bool(dept) and r.get("abteilung") == dept
+                        if not (s["role"] == "admin" or same_dept
+                                or r.get("von") == s["user"]):
+                            err = ("Nur die eigene Abteilung (oder ein Admin) "
+                                   "darf diese Anfrage stornieren.", 403)
+                        else:
+                            r["cancelled"] = True
+                            r["cancelled_on"] = datetime.now().date().isoformat()
+                            r["cancelled_by"] = s["user"] or ""
+                            if comment:
+                                r["comment"] = comment
+                            notify = dict(r)
+                            save_res()
+                    resp = None if err else visible_res(s)
+                if err:
+                    self._json({"error": err[0]}, err[1])
+                    return
+                self._json(resp)
+                if notify:
+                    audit(s["user"], "Antrag storniert", res_detail(notify)
+                          + (f" – Kommentar: {comment}" if comment else ""))
+                    notify_mail(notify, "storniert", s["user"] or "unbekannt")
             elif self.path == "/api/backup":
                 if not self._require("admin"):
                     return
@@ -2523,23 +2661,10 @@ def serve(args, password):
 
         def do_DELETE(self):
             if self.path.startswith("/api/reservations/"):
-                s = self._require("admin", "anforderer")
-                if not s:
-                    return
-                rid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
-                with res_lock:
-                    target = next((r for r in reservations if r.get("id") == rid), None)
-                    if (target and s["role"] == "anforderer"
-                            and (target.get("von") != s["user"] or target.get("approved")
-                                 or target.get("rejected"))):
-                        self._json({"error": "Anforderer dürfen nur eigene, noch offene "
-                                             "Anträge zurückziehen."}, 403)
-                        return
-                    reservations[:] = [r for r in reservations if r.get("id") != rid]
-                    save_res()
-                    self._json(visible_res(s))
-                if target:
-                    audit(s["user"], "Reservierung gelöscht", res_detail(target))
+                # Löschen von Reservierungsanfragen ist deaktiviert – Anträge
+                # laufen über Genehmigung/Ablehnung und den automatischen Ablauf.
+                self._json({"error": "Das Löschen von Reservierungen ist "
+                                     "deaktiviert."}, 403)
             elif self.path.startswith("/api/tokens/"):
                 s = self._require("admin")
                 if not s:
@@ -2640,12 +2765,19 @@ def main():
                     help="Als lokaler Webserver laufen (Live-Abruf per Knopf, Disk-Cache)")
     ap.add_argument("--port", type=int, default=8080, help="Port für --serve (Standard: 8080)")
     ap.add_argument("--bind", default="0.0.0.0", help="Bind-Adresse für --serve")
-    ap.add_argument("--cache", default="data/kapa_cache.json",
-                    help="Cache-Datei der letzten Abfrage (Standard: data/kapa_cache.json)")
+    ap.add_argument("--data-dir", default="data",
+                    help="Basisordner für alle Laufzeitdaten (Cache, Reservierungen, "
+                         "Rollen, Teams, Log, Tokens). Standard: data/ neben dem "
+                         "Skript. WICHTIG bei CI/CD: auf einen Pfad AUSSERHALB des "
+                         "Deploy-Verzeichnisses legen (z. B. /var/lib/kapa), sonst "
+                         "löscht die Pipeline die Daten bei jedem Deploy. Gilt für "
+                         "alle *-file-Optionen ohne eigene Pfadangabe.")
+    ap.add_argument("--cache", default="kapa_cache.json",
+                    help="Cache-Datei der letzten Abfrage (Standard: <data-dir>/kapa_cache.json)")
     ap.add_argument("--refresh-interval", type=int, default=1800,
                     help="Automatische Aktualisierung im Serve-Modus in Sekunden "
                          "(0 = aus, Standard: 1800 = 30 min)")
-    ap.add_argument("--res-file", default="data/kapa_reservierungen.json",
+    ap.add_argument("--res-file", default="kapa_reservierungen.json",
                     help="Reservierungsdatei im Serve-Modus "
                          "(Standard: data/kapa_reservierungen.json)")
     ap.add_argument("--res-ttl-days", type=int, default=31,
@@ -2670,7 +2802,7 @@ def main():
     ap.add_argument("--admin-user", default="",
                     help="Immer-Admin(s), kommagetrennt, z. B. admin@firma.local "
                          "(Bootstrap für die Rollenverwaltung)")
-    ap.add_argument("--roles-file", default="data/kapa_rollen.json",
+    ap.add_argument("--roles-file", default="kapa_rollen.json",
                     help="Rollendatei (Standard: data/kapa_rollen.json)")
     ap.add_argument("--smtp-server", default="",
                     help="Mailserver für Reports, z. B. mail.firma.local:25 "
@@ -2700,11 +2832,11 @@ def main():
     ap.add_argument("--backup-keep-days", type=int, default=30,
                     help="Backups auf dem Ziel nach N Tagen löschen "
                          "(Standard: 30, 0 = nie aufräumen)")
-    ap.add_argument("--log-file", default="data/kapa_log.jsonl",
+    ap.add_argument("--log-file", default="kapa_log.jsonl",
                     help="Audit-Log-Datei (Standard: data/kapa_log.jsonl)")
-    ap.add_argument("--tokens-file", default="data/kapa_tokens.json",
+    ap.add_argument("--tokens-file", default="kapa_tokens.json",
                     help="API-Token-Datei (Standard: data/kapa_tokens.json)")
-    ap.add_argument("--teams-file", default="data/kapa_teams.json",
+    ap.add_argument("--teams-file", default="kapa_teams.json",
                     help="Datei mit den Genehmigungs-Teams (Standard: "
                          "data/kapa_teams.json); Pflege über die Verwaltungsseite")
     # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
@@ -2713,15 +2845,16 @@ def main():
         apply_config_file(ap, pre.config)
     args = ap.parse_args()
 
-    # JSON-Datendateien ohne Pfadangabe immer unter data/ ablegen
-    args.cache = data_path(args.cache)
-    args.res_file = data_path(args.res_file)
-    args.roles_file = data_path(args.roles_file)
-    args.log_file = data_path(args.log_file)
-    args.tokens_file = data_path(args.tokens_file)
-    args.teams_file = data_path(args.teams_file)
+    # JSON-Datendateien ohne Pfadangabe unter --data-dir ablegen (Standard data/)
+    base = args.data_dir or "data"
+    args.cache = data_path(args.cache, base)
+    args.res_file = data_path(args.res_file, base)
+    args.roles_file = data_path(args.roles_file, base)
+    args.log_file = data_path(args.log_file, base)
+    args.tokens_file = data_path(args.tokens_file, base)
+    args.teams_file = data_path(args.teams_file, base)
     if args.json:
-        args.json = data_path(args.json)
+        args.json = data_path(args.json, base)
 
     # Zugangsdaten: Parameter > Passwort-Datei > Umgebungsvariable
     def secret(value, path, env_key):

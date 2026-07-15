@@ -32,11 +32,12 @@ Alle Reservierungen (ungefiltert, wie die Admin-Sicht). Felder je Eintrag:
 | `approvals` | Liste der bisherigen Team-Freigaben: `[{team, by, on, comment}]` (Reihenfolge = Prüfreihenfolge) |
 | `approved`, `approved_on`, `approved_by` | vollständig genehmigt (alle Stufen), Datum + letzter Freigebender |
 | `rejected`, `rejected_on`, `rejected_by`, `rejected_team` | Ablehnungsstatus inkl. Stufe |
+| `cancelled`, `cancelled_on`, `cancelled_by` | Storno (durch Abteilung/Anforderer/Admin) |
 | `comment` | letzter Kommentar |
 
 Der abgeleitete Status ergibt sich als: `abgelehnt` (rejected), sonst
-`genehmigt` (approved), sonst `in Prüfung` (mindestens eine, aber nicht alle
-Freigaben), sonst `beantragt`.
+`storniert` (cancelled), sonst `genehmigt` (approved), sonst `in Prüfung`
+(mindestens eine, aber nicht alle Freigaben), sonst `beantragt`.
 
 **Filter** (kombinierbar):
 
@@ -46,7 +47,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 ```
 
 - `cluster=<Name>` — nur ein Cluster
-- `status=beantragt|in Prüfung|genehmigt|abgelehnt`
+- `status=beantragt|in Prüfung|genehmigt|abgelehnt|storniert`
 - `abteilung=<Name>`
 
 **CSV-Export** (Semikolon-getrennt, für Excel):
@@ -56,8 +57,8 @@ curl -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/reservations?format=csv" -o reservierungen.csv
 ```
 
-CSV-Spalten: `id;name;change;cluster;vcpu;ram_gb;von;abteilung;gilt_ab;`
-`gueltig_bis;status;entschieden_von;kommentar`
+CSV-Spalten: `id;name;change;cluster;vcpu;ram_gb;storage_gb;von;abteilung;`
+`gilt_ab;gueltig_bis;status;entschieden_von;freigaben;kommentar`
 
 ### GET /api/v1/data
 
@@ -69,6 +70,7 @@ Cluster-Kapazitäten aus dem letzten Aria-Abruf:
                "spareCores": 48, "spareRamGb": 1024.0,
                "vcpuCap": 384, "vcpuUsed": 370, "vcpuFree": 14,
                "ramCap": 1024.0, "ramUsed": 1504.0, "ramFree": -480.0,
+               "storageCap": 24000.0, "storageUsed": 17826.0, "storageFree": 6174.0,
                "vmCount": 93, "vmOff": 8, "hosts": [...], "vms": [...]}]}
 ```
 

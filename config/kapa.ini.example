@@ -27,10 +27,16 @@ bind = 127.0.0.1
 port = 8080
 refresh-interval = 1800
 
+# --- Datenablage --------------------------------------------------------------
+# Basisordner aller Laufzeitdaten. Bei CI/CD-Deployments AUSSERHALB des
+# Deploy-Verzeichnisses wählen, sonst löscht die Pipeline die Daten bei jedem
+# Deploy (data/ ist gitignored, also nicht im Artefakt enthalten).
+data-dir = /var/lib/kapa
+
 # --- Reservierungen -----------------------------------------------------------
 res-ttl-days = 31
-#res-file = data/kapa_reservierungen.json
-#cache = data/kapa_cache.json
+#res-file = kapa_reservierungen.json
+#cache = kapa_cache.json
 
 # --- Mehrstufiger Genehmigungsprozess -----------------------------------------
 # Die Genehmigungs-Teams werden auf der VERWALTUNGSSEITE gepflegt und in
