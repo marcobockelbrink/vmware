@@ -1467,12 +1467,36 @@ function moveTeam(i, dir) {
   [t[i], t[j]] = [t[j], t[i]];
   putTeams(t);
 }
+let TEAM_EDIT = -1;   // Index des gerade umbenannten Teams
+function editTeam(i) { TEAM_EDIT = i; render(); const el = document.getElementById("teamEdit"); if (el) { el.focus(); el.select(); } }
+function cancelEditTeam() { TEAM_EDIT = -1; render(); }
+function saveTeamRename(i) {
+  const val = (document.getElementById("teamEdit").value || "").trim();
+  const old = TEAMS[i];
+  if (!val || val === old) { TEAM_EDIT = -1; render(); return; }
+  fetch("api/teams/rename", { method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ old: old, new: val }) })
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(d => { if (d && d.teams) TEAMS = d.teams;
+                 if (d && d.roles) ROLES = d.roles;
+                 TEAM_EDIT = -1; render(); })
+    .catch(() => alert("Umbenennen fehlgeschlagen (Name evtl. schon vergeben)."));
+}
 function renderTeams() {
-  const rows = TEAMS.map((t, i) =>
-    `<tr><td class="num">${i + 1}</td><td>${esc(t)}</td>
+  const rows = TEAMS.map((t, i) => {
+    if (i === TEAM_EDIT) {
+      return `<tr><td class="num">${i + 1}</td>
+        <td><input class="filterbox" style="width:100%" id="teamEdit" value="${esc(t)}"
+             onkeydown="if(event.key==='Enter')saveTeamRename(${i});if(event.key==='Escape')cancelEditTeam()"></td>
+        <td><button class="btn approve" onclick="saveTeamRename(${i})">✓ Speichern</button>
+            <button class="btn" onclick="cancelEditTeam()">Abbrechen</button></td></tr>`;
+    }
+    return `<tr><td class="num">${i + 1}</td><td>${esc(t)}</td>
      <td><button class="edit" title="nach oben" ${i === 0 ? "disabled" : ""} onclick="moveTeam(${i},-1)">↑</button>
          <button class="edit" title="nach unten" ${i === TEAMS.length - 1 ? "disabled" : ""} onclick="moveTeam(${i},1)">↓</button>
-         <button class="del" title="Team entfernen" onclick="delTeam(${i})">✕ Entfernen</button></td></tr>`).join("");
+         <button class="edit" title="Team umbenennen" onclick="editTeam(${i})">✎ Umbenennen</button>
+         <button class="del" title="Team entfernen" onclick="delTeam(${i})">✕ Entfernen</button></td></tr>`;
+  }).join("");
   document.getElementById("tmbody").innerHTML =
     `<tr><td></td><td><input class="filterbox" style="width:100%" id="newTeam"
          placeholder="Neues Team, z. B. Team Betrieb"
@@ -1508,6 +1532,30 @@ function renderRoleNames() {
     `<tr><td></td><td><button class="btn approve" onclick="saveRoleNames()">✓ Bezeichnungen speichern</button></td></tr>`;
 }
 
+// Rollen-Auswahl (Dropdown) und das rollenabhängige Feld (Team/Abteilung)
+function roleSelect(id, sel, onchange) {
+  return `<select id="${id}" class="filterbox" style="width:100%" onchange="${onchange}">
+    ${ROLE_ORDER.map(x => `<option value="${x}" ${sel === x ? "selected" : ""}>${esc(ROLE_NAMES[x] || x)}</option>`).join("")}
+  </select>`;
+}
+function roleField(id, role, val, u) {
+  if (role === "reviewer")
+    return `<select id="${id}" class="filterbox" style="width:100%">
+      <option value="">${TEAMS.length ? "– Team wählen –" : "(erst Teams anlegen)"}</option>
+      ${TEAMS.map(t => `<option value="${esc(t)}" ${val === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+    </select>`;
+  const enter = u ? ` onkeydown="if(event.key==='Enter')saveEditRole('${esc(u)}')"` : "";
+  if (role === "anforderer")
+    return `<input id="${id}" class="filterbox" style="width:100%" placeholder="Abteilung" value="${esc(val || "")}"${enter}>`;
+  return `<input id="${id}" class="filterbox" style="width:100%" placeholder="– für diese Rolle nicht nötig" value="${esc(val || "")}" disabled>`;
+}
+function syncRoleField(pfx, u) {
+  const roleEl = document.getElementById(pfx === "adm" ? "admRole" : "editRole");
+  const valEl = document.getElementById(pfx === "adm" ? "admDept" : "editDept");
+  const val = valEl ? valEl.value : "";
+  document.getElementById(pfx === "adm" ? "admFieldCell" : "editFieldCell").innerHTML =
+    roleField(pfx === "adm" ? "admDept" : "editDept", roleEl.value, val, pfx === "edit" ? u : null);
+}
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
@@ -1516,32 +1564,27 @@ function renderAdmTable() {
     if (u === EDIT_USER) {
       const cur = ROLES[u] || {};
       return `<tr><td>${esc(u)}</td>
-        <td><select id="editRole" class="filterbox" style="width:100%">
-          ${ROLE_ORDER.map(x =>
-            `<option value="${x}" ${cur.role === x ? "selected" : ""}>${esc(ROLE_NAMES[x] || x)}</option>`).join("")}
-        </select></td>
-        <td><input id="editDept" class="filterbox" style="width:100%" list="teamList"
-             value="${esc(cur.abteilung || "")}" placeholder="Abteilung / Team"
-             onkeydown="if(event.key==='Enter')saveEditRole('${esc(u)}')"></td>
+        <td>${roleSelect("editRole", cur.role, "syncRoleField('edit','" + esc(u) + "')")}</td>
+        <td id="editFieldCell">${roleField("editDept", cur.role, cur.abteilung || "", u)}</td>
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
     }
-    return `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[ROLES[u].role] || ROLES[u].role)}</td>
-     <td>${esc(ROLES[u].abteilung || "–")}</td>
-     <td><button class="edit" title="Rolle/Abteilung bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
+    const r = ROLES[u];
+    const label = r.role === "reviewer" && r.abteilung ? "Team: " + r.abteilung
+                : r.abteilung || "–";
+    return `<tr><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
+     <td>${esc(label)}</td>
+     <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
+  const firstRole = ROLE_ORDER[0];
   document.getElementById("mtbody").innerHTML =
     `<tr><td><input class="filterbox" style="width:100%" id="admUser"
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
-     <td><select id="admRole" class="filterbox" style="width:100%">
-       ${ROLE_ORDER.map(x => `<option value="${x}">${esc(ROLE_NAMES[x] || x)}</option>`).join("")}
-     </select></td>
-     <td><input class="filterbox" style="width:100%" id="admDept" list="teamList"
-         placeholder="Abteilung (Anforderer) / Team (Reviewer)"></td>
+     <td>${roleSelect("admRole", firstRole, "syncRoleField('adm')")}</td>
+     <td id="admFieldCell">${roleField("admDept", firstRole, "", null)}</td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`) +
-    `<datalist id="teamList">${TEAMS.map(t => `<option value="${esc(t)}">`).join("")}</datalist>`;
+    (rows || `<tr><td colspan="4" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
   reSort("mtable");
 }
 
@@ -2820,6 +2863,42 @@ def serve(args, password):
                     self._json(dict(roles))
                 audit(self._session()["user"], "Rolle zugewiesen",
                       f"{user} -> {role}" + (f" ({dept})" if dept else ""))
+            elif self.path == "/api/teams/rename":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body() or {}
+                old = str(body.get("old") or "").strip()
+                new = str(body.get("new") or "").strip()[:60]
+                if not old or not new:
+                    self._json({"error": "alter und neuer Name erforderlich"}, 400)
+                    return
+                with teams_lock, roles_lock:
+                    if old not in approval_teams:
+                        self._json({"error": "Team nicht gefunden"}, 404)
+                        return
+                    if new != old and new in approval_teams:
+                        self._json({"error": "Ein Team mit diesem Namen "
+                                             "existiert bereits."}, 400)
+                        return
+                    approval_teams[approval_teams.index(old)] = new
+                    save_teams()
+                    # Zugewiesene Reviewer auf den neuen Team-Namen umziehen
+                    moved = 0
+                    for entry in roles.values():
+                        if entry.get("role") == "reviewer" and entry.get("abteilung") == old:
+                            entry["abteilung"] = new
+                            moved += 1
+                    if moved:
+                        save_roles()
+                    # Auch aktive Sessions aktualisieren (kein Neu-Login nötig)
+                    for sess in sessions.values():
+                        if sess.get("role") == "reviewer" and sess.get("abteilung") == old:
+                            sess["abteilung"] = new
+                    result_roles = dict(roles)
+                audit(s["user"], "Team umbenannt",
+                      f"„{old}“ → „{new}“" + (f" ({moved} Reviewer übernommen)" if moved else ""))
+                self._json({"teams": list(approval_teams), "roles": result_roles})
             else:
                 self.send_error(404)
 

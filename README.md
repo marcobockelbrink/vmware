@@ -129,10 +129,15 @@ Detailkarte eines Clusters; Export/Import als JSON.
   der Reihe ist; jedes Team kann in seiner Stufe auch ablehnen. Ohne Teams
   bleibt es einstufig (Admin genehmigt direkt).
   - **Teams pflegen**: im Tab „Verwaltung" (Abschnitt „Genehmigungs-Teams")
-    – hinzufügen, per ↑/↓ in die richtige Prüfreihenfolge bringen und
-    entfernen. Gespeichert in `data/kapa_teams.json`. Der Parameter
-    `--approval-teams` dient nur noch zur **Erstbefüllung**, falls diese Datei
-    noch nicht existiert.
+    – hinzufügen, per ↑/↓ in die richtige Prüfreihenfolge bringen, **umbenennen**
+    (✎, die Reihenfolge bleibt erhalten und zugewiesene Reviewer werden
+    automatisch übernommen) und entfernen. Gespeichert in `data/kapa_teams.json`.
+    Der Parameter `--approval-teams` dient nur noch zur **Erstbefüllung**, falls
+    diese Datei noch nicht existiert.
+  - **Reviewer einem Team zuordnen**: Bei der Rollenzuweisung (Abschnitt
+    „Benutzer und Rollen") wird für die Rolle *Reviewer* das Team über eine
+    **Auswahlliste** der vorhandenen Teams gesetzt. Nur so zugeordnete Benutzer
+    dürfen in der jeweiligen Stufe freigeben (serverseitig erzwungen).
 - **Genehmigungsübersicht** (Tab „Genehmigungen"): zeigt je Antrag die freie
   Kapazität des Ziel-Clusters (⚠ wenn er nicht mehr hineinpasst), den
   Fortschritt und – für das gerade zuständige Team bzw. Admins – die
