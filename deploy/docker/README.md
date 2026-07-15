@@ -15,10 +15,14 @@ Dockerfile kopiert ausschließlich dieses Skript ins Image:
 
 ```bash
 # aus der Projektwurzel
-docker build -f deploy/docker/Dockerfile -t kapa-dashboard:0.9 .
+docker build -f deploy/docker/Dockerfile -t kapa-dashboard:latest .
 # identisch mit Podman:
-podman build -f deploy/docker/Dockerfile -t kapa-dashboard:0.9 .
+podman build -f deploy/docker/Dockerfile -t kapa-dashboard:latest .
 ```
+
+Optional zusätzlich eine feste Version taggen (für gezielte Rollbacks), z. B.
+`-t kapa-dashboard:latest -t kapa-dashboard:1.5`. Die App-Version steht immer im
+Footer/Login und unter `aria_kapa.py --version`.
 
 ## Starten
 
@@ -31,7 +35,7 @@ docker run -d --name kapa \
   -e ARIA_PASSWORD='DAS-ARIA-PASSWORT' \
   -v kapa-data:/opt/kapa/data \
   -v "$PWD/kapa.ini:/etc/kapa/kapa.ini:ro" \
-  kapa-dashboard:0.9
+  kapa-dashboard:latest
 ```
 
 Der Dienst lauscht im Container auf `0.0.0.0:8080`; nach außen wird er nur an

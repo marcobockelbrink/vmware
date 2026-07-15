@@ -7,7 +7,7 @@ services:
       # Context ist die Projektwurzel, damit aria_kapa.py kopiert werden kann.
       context: ../..
       dockerfile: deploy/docker/Dockerfile
-    image: kapa-dashboard:0.9
+    image: kapa-dashboard:latest
     # Nur an localhost binden – davor gehört ein Reverse Proxy mit TLS.
     ports:
       - "127.0.0.1:8080:8080"

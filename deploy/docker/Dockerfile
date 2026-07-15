@@ -2,9 +2,9 @@
 # Nur Python-Standardbibliothek, daher genügt python3 im Minimal-Image.
 #
 # Bauen (aus der Projektwurzel!):
-#   docker build -f deploy/docker/Dockerfile -t kapa-dashboard:0.9 .
+#   docker build -f deploy/docker/Dockerfile -t kapa-dashboard:latest .
 # Läuft unbändert auch mit Podman:
-#   podman build -f deploy/docker/Dockerfile -t kapa-dashboard:0.9 .
+#   podman build -f deploy/docker/Dockerfile -t kapa-dashboard:latest .
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 LABEL org.opencontainers.image.title="VMware Kapazitätsplanung" \
@@ -30,6 +30,6 @@ VOLUME ["/opt/kapa/data"]
 
 # Im Container an alle Interfaces binden (der Port wird vom Host/Proxy gemappt).
 # Zusätzliche Optionen kommen über CMD und lassen sich beim Start überschreiben,
-# z. B.:  docker run ... kapa-dashboard:0.9 --config /etc/kapa/kapa.ini
+# z. B.:  docker run ... kapa-dashboard:latest --config /etc/kapa/kapa.ini
 ENTRYPOINT ["python3", "/opt/kapa/aria_kapa.py", "--serve", "--bind", "0.0.0.0", "--port", "8080"]
 CMD ["--config", "/etc/kapa/kapa.ini"]
