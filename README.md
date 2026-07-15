@@ -201,6 +201,11 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
   explizite Zuweisung gilt automatisch als **Anforderer** — er kann Anfragen
   stellen, aber nichts freigeben. Reviewer-, Admin- und Auditor-Rechte gibt es
   nur über eine ausdrückliche Zuweisung.
+- **Rollen-Bezeichnungen umbenennen**: Die angezeigten Namen der vier Rollen
+  sind im Tab „Verwaltung" (Abschnitt „Rollen-Bezeichnungen") **frei wählbar**
+  (z. B. „Anforderer" → „Antragsteller"), gespeichert in
+  `data/kapa_rollennamen.json`. Die internen Rollen-Schlüssel und damit die
+  **Rechte bleiben unverändert** — nur die Anzeige ändert sich.
 - **Abteilungssicht**: Anforderer sehen nur Anfragen ihrer Abteilung.
   Fremde *genehmigte* Reservierungen bleiben anonymisiert als
   „(andere Abteilung)" sichtbar, damit die freie Kapazität stimmt;
@@ -276,6 +281,7 @@ mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
 | `--approval-teams "A,B,C"` | **Erstbefüllung** der Genehmigungs-Teams (nur wenn `--teams-file` noch fehlt); danach Pflege im Tab „Verwaltung" |
 | `--teams-file data/kapa_teams.json` | Datei mit den Genehmigungs-Teams (Pflege über die Verwaltungsseite) |
+| `--rolenames-file data/kapa_rollennamen.json` | Datei mit den frei wählbaren Rollen-Bezeichnungen (Pflege über die Verwaltungsseite) |
 | `--ad-url ldaps://dc01…` | AD-Anmeldung aktivieren |
 | `--ad-domain firma.local` | Domäne für Benutzernamen ohne `@` |
 | `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |

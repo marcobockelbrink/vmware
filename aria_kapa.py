@@ -18,7 +18,14 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.1"
+VERSION = "1.2"
+
+# Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
+# Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
+# frei umbenennen (data/kapa_rollennamen.json) – die Schlüssel bleiben gleich.
+ROLE_KEYS = ("admin", "anforderer", "reviewer", "auditor")
+DEFAULT_ROLE_NAMES = {"admin": "Administrator", "anforderer": "Anforderer",
+                      "reviewer": "Reviewer", "auditor": "Technische Prüfung"}
 
 import argparse
 import getpass
@@ -285,7 +292,8 @@ def sftp_backup(args):
     if not args.backup_target:
         raise RuntimeError("kein --backup-target konfiguriert")
     files = [p for p in (args.cache, args.res_file, args.roles_file,
-                         args.log_file, args.tokens_file, args.teams_file)
+                         args.log_file, args.tokens_file, args.teams_file,
+                         args.rolenames_file)
              if p and os.path.exists(p)]
     if not files:
         raise RuntimeError("keine Datendateien vorhanden")
@@ -809,6 +817,16 @@ Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
+<div class="sechead" style="margin-top:20px">Rollen-Bezeichnungen</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Die angezeigten Namen der Rollen sind frei wählbar. Die Rechte bleiben an der
+  internen Rolle (linke Spalte) gebunden und ändern sich dadurch nicht.</div>
+<div class="tablewrap">
+<table class="kt" id="rntable">
+  <thead><tr><th style="width:160px">Interne Rolle</th><th>Angezeigte Bezeichnung</th></tr></thead>
+  <tbody id="rnbody"></tbody>
+</table>
+</div>
 <div class="sechead" style="margin-top:20px">Genehmigungs-Teams (Prüfreihenfolge)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   Anträge durchlaufen die Teams von oben nach unten. Erst wenn alle Teams
@@ -858,9 +876,9 @@ const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
 const IS_ADMIN = ROLE === "admin";
 const IS_REVIEWER = ROLE === "reviewer";
 const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
-const ROLE_NAMES = { admin: "Administrator", anforderer: "Anforderer",
-                     reviewer: "Reviewer (Genehmigungsteam)",
-                     auditor: "Technische Prüfung (nur lesen)" };
+// Rollen-Bezeichnungen sind frei wählbar (Verwaltung); Schlüssel bleiben fest.
+let ROLE_NAMES = __ROLENAMES__;
+const ROLE_ORDER = ["anforderer", "reviewer", "admin", "auditor"];
 // Löschen von Reservierungsanfragen ist deaktiviert – stattdessen Storno.
 function canDel(r) { return false; }
 // Storno: Admin, jemand aus derselben Abteilung oder der Anforderer selbst
@@ -1242,7 +1260,7 @@ function setView(v) {
       : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadRoleNames(); }
   if (v === "log") loadLog();
   render();
 }
@@ -1404,6 +1422,33 @@ function renderTeams() {
     (rows || `<tr><td colspan="3" style="color:var(--muted)">Keine Teams – einstufig (Admin genehmigt direkt).</td></tr>`);
 }
 
+// ---- Rollen-Bezeichnungen frei umbenennen ----
+async function apiRoleNames(method, body) {
+  const r = await fetch("api/rolenames", {
+    method: method, headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadRoleNames() {
+  apiRoleNames("GET").then(d => { if (d && d.rolenames) ROLE_NAMES = d.rolenames;
+                                  if (VIEW === "adm") render(); }).catch(() => {});
+}
+function saveRoleNames() {
+  const body = {};
+  ROLE_ORDER.forEach(k => { body[k] = (document.getElementById("rn_" + k).value || "").trim(); });
+  apiRoleNames("PUT", body).then(d => { if (d && d.rolenames) ROLE_NAMES = d.rolenames;
+                                        render(); }).catch(() => alert("Speichern fehlgeschlagen."));
+}
+function renderRoleNames() {
+  const rows = ROLE_ORDER.map(k =>
+    `<tr><td style="color:var(--muted)">${esc(k)}</td>
+     <td><input class="filterbox" style="width:100%" id="rn_${k}" value="${esc(ROLE_NAMES[k] || k)}"
+          onkeydown="if(event.key==='Enter')saveRoleNames()"></td></tr>`).join("");
+  document.getElementById("rnbody").innerHTML = rows +
+    `<tr><td></td><td><button class="btn approve" onclick="saveRoleNames()">✓ Bezeichnungen speichern</button></td></tr>`;
+}
+
 function renderAdmTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
@@ -1413,8 +1458,8 @@ function renderAdmTable() {
       const cur = ROLES[u] || {};
       return `<tr><td>${esc(u)}</td>
         <td><select id="editRole" class="filterbox" style="width:100%">
-          ${["anforderer", "reviewer", "admin", "auditor"].map(x =>
-            `<option value="${x}" ${cur.role === x ? "selected" : ""}>${esc(ROLE_NAMES[x])}</option>`).join("")}
+          ${ROLE_ORDER.map(x =>
+            `<option value="${x}" ${cur.role === x ? "selected" : ""}>${esc(ROLE_NAMES[x] || x)}</option>`).join("")}
         </select></td>
         <td><input id="editDept" class="filterbox" style="width:100%" list="teamList"
              value="${esc(cur.abteilung || "")}" placeholder="Abteilung / Team"
@@ -1431,10 +1476,7 @@ function renderAdmTable() {
     `<tr><td><input class="filterbox" style="width:100%" id="admUser"
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
      <td><select id="admRole" class="filterbox" style="width:100%">
-       <option value="anforderer">Anforderer</option>
-       <option value="reviewer">Reviewer (Genehmigungsteam)</option>
-       <option value="admin">Administrator</option>
-       <option value="auditor">Technische Prüfung (nur lesen)</option>
+       ${ROLE_ORDER.map(x => `<option value="${x}">${esc(ROLE_NAMES[x] || x)}</option>`).join("")}
      </select></td>
      <td><input class="filterbox" style="width:100%" id="admDept" list="teamList"
          placeholder="Abteilung (Anforderer) / Team (Reviewer)"></td>
@@ -1515,7 +1557,7 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderTeams(); renderTokenTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
@@ -1670,7 +1712,7 @@ def json_for_html(obj):
 
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
-                failover_hosts=1, userinfo=None, teams=None):
+                failover_hosts=1, userinfo=None, teams=None, rolenames=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -1695,6 +1737,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__TTL__", str(res_ttl))
             .replace("__USERINFO__", json_for_html(userinfo))
             .replace("__TEAMS__", json_for_html(teams or []))
+            .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -1771,6 +1814,32 @@ def serve(args, password):
             json.dump(approval_teams, f, ensure_ascii=False, indent=2)
 
     approval_teams = load_teams()
+
+    # ---- Frei wählbare Rollen-Bezeichnungen (Schlüssel bleiben fest) ----
+    rolenames_lock = threading.Lock()
+
+    def load_rolenames():
+        d = dict(DEFAULT_ROLE_NAMES)
+        if os.path.exists(args.rolenames_file):
+            try:
+                with open(args.rolenames_file, encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    for k in ROLE_KEYS:
+                        v = raw.get(k)
+                        if isinstance(v, str) and v.strip():
+                            d[k] = v.strip()
+            except Exception as e:
+                print(f"Rollennamen-Datei unlesbar, nutze Standard: {e}",
+                      file=sys.stderr)
+        return d
+
+    def save_rolenames():
+        ensure_dir(args.rolenames_file)
+        with open(args.rolenames_file, "w", encoding="utf-8") as f:
+            json.dump(role_names, f, ensure_ascii=False, indent=2)
+
+    role_names = load_rolenames()
 
     def current_team(r):
         """Team, das als Nächstes freigeben muss – None, wenn keine Teams
@@ -2230,7 +2299,8 @@ def serve(args, password):
                                        "noch keine Daten – erster Abruf läuft ...",
                                        res_ttl=args.res_ttl_days,
                                        failover_hosts=args.failover_hosts,
-                                       userinfo=userinfo, teams=approval_teams),
+                                       userinfo=userinfo, teams=approval_teams,
+                                       rolenames=role_names),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 if not self._require():
@@ -2301,6 +2371,11 @@ def serve(args, password):
                     return
                 with teams_lock:
                     self._json({"teams": list(approval_teams)})
+            elif route == "/api/rolenames":
+                if not self._require("admin"):
+                    return
+                with rolenames_lock:
+                    self._json({"rolenames": dict(role_names)})
             elif route == "/api/log":
                 if not self._require("admin"):
                     return
@@ -2656,6 +2731,26 @@ def serve(args, password):
                 audit(s["user"], "Genehmigungs-Teams geändert",
                       " → ".join(new) if new else "(keine – einstufig)")
                 self._json({"teams": list(approval_teams)})
+            elif self.path == "/api/rolenames":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, dict):
+                    self._json({"error": "Objekt mit Rollen-Bezeichnungen erwartet"}, 400)
+                    return
+                with rolenames_lock:
+                    for k in ROLE_KEYS:
+                        v = body.get(k)
+                        if isinstance(v, str) and v.strip():
+                            role_names[k] = v.strip()[:60]
+                        else:
+                            role_names[k] = DEFAULT_ROLE_NAMES[k]
+                    save_rolenames()
+                    result = dict(role_names)
+                audit(s["user"], "Rollen-Bezeichnungen geändert",
+                      ", ".join(f"{k}={result[k]}" for k in ROLE_KEYS))
+                self._json({"rolenames": result})
             else:
                 self.send_error(404)
 
@@ -2839,6 +2934,10 @@ def main():
     ap.add_argument("--teams-file", default="kapa_teams.json",
                     help="Datei mit den Genehmigungs-Teams (Standard: "
                          "data/kapa_teams.json); Pflege über die Verwaltungsseite")
+    ap.add_argument("--rolenames-file", default="kapa_rollennamen.json",
+                    help="Datei mit den frei wählbaren Rollen-Bezeichnungen "
+                         "(Standard: data/kapa_rollennamen.json); Pflege über die "
+                         "Verwaltungsseite")
     # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
     pre, _ = ap.parse_known_args()
     if pre.config:
@@ -2853,6 +2952,7 @@ def main():
     args.log_file = data_path(args.log_file, base)
     args.tokens_file = data_path(args.tokens_file, base)
     args.teams_file = data_path(args.teams_file, base)
+    args.rolenames_file = data_path(args.rolenames_file, base)
     if args.json:
         args.json = data_path(args.json, base)
 
