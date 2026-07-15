@@ -24,6 +24,34 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 - **Auto-Aktualisierung** im Serve-Modus (Standard: alle 30 Minuten, sichtbarer
   Countdown) plus Knopf „⟳ Jetzt aktualisieren"
 
+## Screenshots
+
+Alle Aufnahmen mit Demo-Daten (`python3 aria_kapa.py --sample --serve`).
+
+**Reservierungen** — alle Anfragen mit ID, Change-Nummer, Status,
+Entscheider und Kommentar:
+
+![Reservierungen](docs/screenshot-reservierungen.png)
+
+**Genehmigungen** — offene Anträge mit freier Cluster-Kapazität;
+⚠ markiert Anträge, die nicht mehr passen:
+
+![Genehmigungen](docs/screenshot-genehmigungen.png)
+
+**Verwaltung** (nur Admins) — Rollen/Abteilungen aus dem Active Directory
+und API-Tokens für externe Anwendungen:
+
+![Verwaltung](docs/screenshot-verwaltung.png)
+
+**Log** (nur Admins) — Audit-Log mit Anmeldungen, Anträgen,
+Entscheidungen und Backups:
+
+![Audit-Log](docs/screenshot-log.png)
+
+**Anmeldung** mit Active-Directory-Konto:
+
+![Login](docs/screenshot-login.png)
+
 ## Berechnung
 
 - **CPU-Kapazität** = Summe physischer Cores aller ESXi-Hosts im Cluster × Überprovisionierungsfaktor (Standard: 6)
