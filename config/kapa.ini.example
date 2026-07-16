@@ -50,6 +50,16 @@ contact-info = IT-Betrieb Musterfirma · kapa-support@firma.local
 # Deploy (data/ ist gitignored, also nicht im Artefakt enthalten).
 data-dir = /var/lib/kapa
 
+# --- Datenspeicher ------------------------------------------------------------
+# json   = je Sammlung eine editierbare .json-Datei im data-dir (Standard).
+# sqlite = eine einzelne data/kapa.db (Python-Standardbibliothek, kein Server),
+#          Reservierungen mit inkrementellen Schreibzugriffen – lohnt sich erst
+#          bei sehr vielen (mehrere Tausend) aktiven Reservierungen.
+# Beim erstmaligen Umstellen auf sqlite werden vorhandene JSON-Daten EINMALIG
+# automatisch übernommen (die JSON-Dateien bleiben als Sicherung liegen).
+#storage = json
+#db-file = kapa.db
+
 # --- Reservierungen -----------------------------------------------------------
 res-ttl-days = 31
 #res-file = kapa_reservierungen.json

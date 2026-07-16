@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.10"
+VERSION = "1.11"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -35,6 +35,8 @@ import os
 import re
 import ssl
 import sys
+import tempfile
+import threading
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
@@ -414,6 +416,146 @@ def ensure_dir(path):
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
+
+
+def atomic_write(path, text):
+    """Datei atomar schreiben: erst in eine Temp-Datei im selben Verzeichnis,
+    dann per os.replace umbenennen. Ein Absturz mitten im Schreiben kann die
+    Zieldatei damit nicht mehr beschädigen (kein halb geschriebenes JSON)."""
+    ensure_dir(path)
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _dumps(obj):
+    return json.dumps(obj, ensure_ascii=False, indent=2)
+
+
+# ----------------------------------------------------------- Datenspeicher ----
+# Zwei Backends hinter derselben API:
+#   JSON   – je Sammlung eine atomar geschriebene .json-Datei (Standard,
+#            menschenlesbar/editierbar).
+#   SQLite – eine data/kapa.db (Standardbibliothek, kein Server): kleine
+#            Sammlungen als Key-Value-Blobs, Reservierungen als eigene Tabelle
+#            mit INKREMENTELLEN Schreibzugriffen (nur die geänderte Zeile).
+
+class JsonStore:
+    """Backend: je Sammlung eine JSON-Datei, atomar geschrieben."""
+    def __init__(self, paths):
+        self.paths = paths            # {name: dateipfad}
+
+    def load(self, name, default):
+        p = self.paths[name]
+        if os.path.exists(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"{p} unlesbar, nutze Standard: {e}", file=sys.stderr)
+        return default
+
+    def save(self, name, obj):
+        atomic_write(self.paths[name], _dumps(obj))
+
+    # Reservierungen: JSON kennt keine Einzelzeilen -> ganze Liste atomar sichern
+    def res_load(self):
+        return self.load("res", [])
+
+    def res_save_all(self, items):
+        self.save("res", items)
+
+    def res_put(self, entry, items):    # items = aktuelle In-Memory-Liste
+        self.save("res", items)
+
+    def res_delete(self, ids, items):
+        self.save("res", items)
+
+    def close(self):
+        pass
+
+
+class SqliteStore:
+    """Backend: eine SQLite-Datei. Reservierungen inkrementell, kleine
+    Sammlungen als JSON-Blobs in einer kv-Tabelle."""
+    def __init__(self, db_path):
+        import sqlite3
+        ensure_dir(db_path)
+        # Eine Verbindung, von mehreren HTTP-Threads genutzt -> eigener Lock,
+        # weil execute+commit-Folgen sonst ineinanderlaufen können.
+        self.lock = threading.Lock()
+        self.db = sqlite3.connect(db_path, check_same_thread=False)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
+        self.db.execute("CREATE TABLE IF NOT EXISTS kv"
+                        "(name TEXT PRIMARY KEY, data TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS reservations"
+                        "(id TEXT PRIMARY KEY, created TEXT, data TEXT NOT NULL)")
+        self.db.commit()
+
+    def load(self, name, default):
+        with self.lock:
+            row = self.db.execute("SELECT data FROM kv WHERE name=?",
+                                  (name,)).fetchone()
+        if row:
+            try:
+                return json.loads(row[0])
+            except ValueError:
+                pass
+        return default
+
+    def save(self, name, obj):
+        with self.lock:
+            self.db.execute("INSERT INTO kv(name, data) VALUES(?, ?) "
+                            "ON CONFLICT(name) DO UPDATE SET data=excluded.data",
+                            (name, json.dumps(obj, ensure_ascii=False)))
+            self.db.commit()
+
+    def res_load(self):
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT data FROM reservations ORDER BY created").fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def res_save_all(self, items):     # ganzen Bestand ersetzen (Import/Reconcile)
+        with self.lock, self.db:
+            self.db.execute("DELETE FROM reservations")
+            self.db.executemany(
+                "INSERT INTO reservations(id, created, data) VALUES(?,?,?)",
+                [(e.get("id"), e.get("created", ""), json.dumps(e, ensure_ascii=False))
+                 for e in items])
+
+    def res_put(self, entry, items):   # inkrementell: nur diese Zeile (upsert)
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO reservations(id, created, data) VALUES(?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET created=excluded.created, "
+                "data=excluded.data",
+                (entry.get("id"), entry.get("created", ""),
+                 json.dumps(entry, ensure_ascii=False)))
+            self.db.commit()
+
+    def res_delete(self, ids, items):  # inkrementell: nur diese Zeilen
+        if ids:
+            with self.lock:
+                self.db.executemany("DELETE FROM reservations WHERE id=?",
+                                    [(i,) for i in ids])
+                self.db.commit()
+
+    def close(self):
+        with self.lock:
+            self.db.close()
 
 
 def data_path(path, base="data"):
@@ -2648,6 +2790,41 @@ def serve(args, password):
     interval = max(0, args.refresh_interval)
     migrate_data_files(args.cache, args.res_file, args.roles_file)
 
+    # ---- Datenspeicher (JSON-Dateien oder SQLite) ----
+    _coll_paths = {"res": args.res_file, "roles": args.roles_file,
+                   "teams": args.teams_file, "selector": args.selector_file,
+                   "rolenames": args.rolenames_file, "tokens": args.tokens_file}
+    if args.storage == "sqlite":
+        store = SqliteStore(args.db_file)
+        # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
+        _MISS = object()
+        for _n in ("roles", "teams", "selector", "rolenames", "tokens"):
+            p = _coll_paths[_n]
+            if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        store.save(_n, json.load(f))
+                    print(f"Migriert nach SQLite: {os.path.basename(p)}",
+                          file=sys.stderr)
+                except Exception as e:
+                    print(f"Migration {p} fehlgeschlagen: {e}", file=sys.stderr)
+        if os.path.exists(args.res_file) and not store.res_load():
+            try:
+                with open(args.res_file, encoding="utf-8") as f:
+                    _lst = json.load(f)
+                if isinstance(_lst, list) and _lst:
+                    for _r in _lst:
+                        if isinstance(_r, dict):
+                            _r.setdefault("id", uuid.uuid4().hex[:12])
+                    store.res_save_all(_lst)
+                    print(f"Migriert nach SQLite: {len(_lst)} Reservierungen",
+                          file=sys.stderr)
+            except Exception as e:
+                print(f"Migration Reservierungen fehlgeschlagen: {e}", file=sys.stderr)
+        print(f"Datenspeicher: SQLite ({args.db_file})", file=sys.stderr)
+    else:
+        store = JsonStore(_coll_paths)
+
     # ---- AD-Anmeldung, Sessions und Rollen ----
     auth_enabled = bool(args.ad_url)
     admin_seed = {u.strip().lower() for u in (args.admin_user or "").split(",") if u.strip()}
@@ -2671,32 +2848,23 @@ def serve(args, password):
                 out.append(t)
         return out
 
+    _MISS = object()
+
     def load_teams():
-        if os.path.exists(args.teams_file):
-            try:
-                with open(args.teams_file, encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, list):
-                    return clean_teams(d)
-            except Exception as e:
-                print(f"Team-Datei unlesbar, starte ohne Teams: {e}",
-                      file=sys.stderr)
-            return []
-        # Datei fehlt: einmalig aus --approval-teams befüllen (Migration)
+        d = store.load("teams", _MISS)
+        if d is not _MISS:
+            return clean_teams(d) if isinstance(d, list) else []
+        # Kein Bestand: einmalig aus --approval-teams befüllen (Migration)
         seed = clean_teams((args.approval_teams or "").split(","))
         if seed:
             try:
-                ensure_dir(args.teams_file)
-                with open(args.teams_file, "w", encoding="utf-8") as f:
-                    json.dump(seed, f, ensure_ascii=False, indent=2)
+                store.save("teams", seed)
             except OSError as e:
                 print(f"Team-Datei nicht schreibbar: {e}", file=sys.stderr)
         return seed
 
     def save_teams():
-        ensure_dir(args.teams_file)
-        with open(args.teams_file, "w", encoding="utf-8") as f:
-            json.dump(approval_teams, f, ensure_ascii=False, indent=2)
+        store.save("teams", approval_teams)
 
     approval_teams = load_teams()
 
@@ -2721,20 +2889,13 @@ def serve(args, password):
         return out[:3]
 
     def load_selector():
-        if os.path.exists(args.selector_file):
-            try:
-                with open(args.selector_file, encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, list):
-                    return clean_selector(d)
-            except Exception as e:
-                print(f"Selektor-Datei unlesbar, starte ohne: {e}", file=sys.stderr)
+        d = store.load("selector", None)
+        if isinstance(d, list):
+            return clean_selector(d)
         return []
 
     def save_selector():
-        ensure_dir(args.selector_file)
-        with open(args.selector_file, "w", encoding="utf-8") as f:
-            json.dump(cluster_selector, f, ensure_ascii=False, indent=2)
+        store.save("selector", cluster_selector)
 
     cluster_selector = load_selector()
 
@@ -2743,24 +2904,16 @@ def serve(args, password):
 
     def load_rolenames():
         d = dict(DEFAULT_ROLE_NAMES)
-        if os.path.exists(args.rolenames_file):
-            try:
-                with open(args.rolenames_file, encoding="utf-8") as f:
-                    raw = json.load(f)
-                if isinstance(raw, dict):
-                    for k in ROLE_KEYS:
-                        v = raw.get(k)
-                        if isinstance(v, str) and v.strip():
-                            d[k] = v.strip()
-            except Exception as e:
-                print(f"Rollennamen-Datei unlesbar, nutze Standard: {e}",
-                      file=sys.stderr)
+        raw = store.load("rolenames", None)
+        if isinstance(raw, dict):
+            for k in ROLE_KEYS:
+                v = raw.get(k)
+                if isinstance(v, str) and v.strip():
+                    d[k] = v.strip()
         return d
 
     def save_rolenames():
-        ensure_dir(args.rolenames_file)
-        with open(args.rolenames_file, "w", encoding="utf-8") as f:
-            json.dump(role_names, f, ensure_ascii=False, indent=2)
+        store.save("rolenames", role_names)
 
     role_names = load_rolenames()
 
@@ -2806,33 +2959,26 @@ def serve(args, password):
                 login_fails.pop(k, None)
 
     def load_roles():
-        """Rollendatei: {benutzer: {role, abteilung}}; alte Form {benutzer: rolle}
+        """Rollen: {benutzer: {role, abteilung}}; alte Form {benutzer: rolle}
         wird beim Laden migriert."""
-        if os.path.exists(args.roles_file):
-            try:
-                with open(args.roles_file, encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, dict):
-                    out = {}
-                    for k, v in d.items():
-                        if isinstance(v, str) and v in VALID_ROLES:
-                            out[str(k).lower()] = {"role": v, "abteilung": "",
-                                                   "kind": "user"}
-                        elif isinstance(v, dict) and v.get("role") in VALID_ROLES:
-                            kind = "group" if v.get("kind") == "group" else "user"
-                            key = str(k) if kind == "group" else str(k).lower()
-                            out[key] = {"role": v["role"],
-                                        "abteilung": str(v.get("abteilung") or ""),
-                                        "kind": kind}
-                    return out
-            except Exception as e:
-                print(f"Rollendatei unlesbar, starte leer: {e}", file=sys.stderr)
+        d = store.load("roles", None)
+        if isinstance(d, dict):
+            out = {}
+            for k, v in d.items():
+                if isinstance(v, str) and v in VALID_ROLES:
+                    out[str(k).lower()] = {"role": v, "abteilung": "",
+                                           "kind": "user"}
+                elif isinstance(v, dict) and v.get("role") in VALID_ROLES:
+                    kind = "group" if v.get("kind") == "group" else "user"
+                    key = str(k) if kind == "group" else str(k).lower()
+                    out[key] = {"role": v["role"],
+                                "abteilung": str(v.get("abteilung") or ""),
+                                "kind": kind}
+            return out
         return {}
 
     def save_roles():
-        ensure_dir(args.roles_file)
-        with open(args.roles_file, "w", encoding="utf-8") as f:
-            json.dump(roles, f, ensure_ascii=False, indent=2, sort_keys=True)
+        store.save("roles", roles)
 
     roles = load_roles()
 
@@ -2910,25 +3056,49 @@ def serve(args, password):
         return [r for r in lst if ref_date(r) >= cutoff]
 
     def load_res():
-        if os.path.exists(args.res_file):
+        try:
+            lst = store.res_load()
+        except Exception as e:
+            print(f"Reservierungen unlesbar, starte leer: {e}", file=sys.stderr)
+            return []
+        changed = False
+        for r in lst:
+            if isinstance(r, dict) and "id" not in r:
+                r["id"] = uuid.uuid4().hex[:12]
+                changed = True
+        kept = prune_res(lst)
+        # Einmalige Reconciliation beim Start (nachgerüstete IDs / abgelaufene
+        # Einträge dauerhaft festschreiben, damit der Speicher konsistent ist).
+        if changed or len(kept) != len(lst):
             try:
-                with open(args.res_file, encoding="utf-8") as f:
-                    lst = json.load(f)
-                if isinstance(lst, list):
-                    for r in lst:
-                        if isinstance(r, dict):
-                            r.setdefault("id", uuid.uuid4().hex[:12])
-                    print(f"Reservierungen geladen: {args.res_file} ({len(lst)})",
-                          file=sys.stderr)
-                    return prune_res(lst)
+                store.res_save_all(kept)
             except Exception as e:
-                print(f"Reservierungsdatei unlesbar, starte leer: {e}", file=sys.stderr)
-        return []
+                print(f"Reservierungen konnten nicht bereinigt werden: {e}",
+                      file=sys.stderr)
+        print(f"Reservierungen geladen: {len(kept)}", file=sys.stderr)
+        return kept
 
     def save_res():
-        ensure_dir(args.res_file)
-        with open(args.res_file, "w", encoding="utf-8") as f:
-            json.dump(reservations, f, ensure_ascii=False, indent=2)
+        """Ganze Liste sichern (JSON: Datei, SQLite: Tabelle neu aufbauen).
+        Für einzelne Änderungen res_put()/res_drop() bevorzugen."""
+        store.res_save_all(reservations)
+
+    def res_put(entry):
+        """Eine Reservierung sichern (SQLite: nur diese Zeile per Upsert)."""
+        store.res_put(entry, reservations)
+
+    def res_drop(ids):
+        """Reservierungen mit diesen IDs aus dem Speicher entfernen."""
+        store.res_delete(list(ids), reservations)
+
+    def prune_reservations():
+        """Abgelaufene Reservierungen aus Liste UND Speicher entfernen."""
+        kept = prune_res(reservations)
+        if len(kept) != len(reservations):
+            keep_ids = {id(r) for r in kept}
+            dropped = [r.get("id") for r in reservations if id(r) not in keep_ids]
+            reservations[:] = kept
+            res_drop([d for d in dropped if d])
 
     reservations = load_res()
 
@@ -2936,21 +3106,14 @@ def serve(args, password):
     tokens_lock = threading.Lock()
 
     def load_tokens():
-        if os.path.exists(args.tokens_file):
-            try:
-                with open(args.tokens_file, encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, dict):
-                    return {k: v for k, v in d.items()
-                            if isinstance(v, dict) and v.get("hash")}
-            except Exception as e:
-                print(f"Token-Datei unlesbar, starte leer: {e}", file=sys.stderr)
+        d = store.load("tokens", None)
+        if isinstance(d, dict):
+            return {k: v for k, v in d.items()
+                    if isinstance(v, dict) and v.get("hash")}
         return {}
 
     def save_tokens():
-        ensure_dir(args.tokens_file)
-        with open(args.tokens_file, "w", encoding="utf-8") as f:
-            json.dump(tokens, f, ensure_ascii=False, indent=2)
+        store.save("tokens", tokens)
 
     tokens = load_tokens()
 
@@ -3333,7 +3496,7 @@ def serve(args, password):
                 if not s:
                     return
                 with res_lock:
-                    reservations[:] = prune_res(reservations)
+                    prune_reservations()
                     self._json(visible_res(s))
             elif route in ("/api/v1/reservations", "/api/v1/data", "/api/v1/status"):
                 # Stabile v1-API für externe Anwendungen: Bearer-Token oder Session
@@ -3356,7 +3519,7 @@ def serve(args, password):
                                 "clusters": state["clusters"]})
                 else:
                     with res_lock:
-                        reservations[:] = prune_res(reservations)
+                        prune_reservations()
                         data = (visible_res(s) if s and not tok
                                 else list(reservations))
                     for key in ("cluster", "abteilung"):
@@ -3508,9 +3671,9 @@ def serve(args, password):
                     self._json({"error": "Ungültige Zahlenwerte"}, 400)
                     return
                 with res_lock:
-                    reservations[:] = prune_res(reservations)
+                    prune_reservations()
                     reservations.append(entry)
-                    save_res()
+                    res_put(entry)
                     self._json(visible_res(s))
                 audit(s["user"], "Antrag erstellt", res_detail(entry))
             elif (self.path.startswith("/api/reservations/")
@@ -3562,7 +3725,7 @@ def serve(args, password):
                                     r["comment"] = comment
                                 action = "genehmigt"
                             notify = dict(r)
-                            save_res()
+                            res_put(r)
                     resp = None if err else visible_res(s)
                 if err:
                     self._json({"error": err[0]}, err[1])
@@ -3606,7 +3769,7 @@ def serve(args, password):
                             if comment:
                                 r["comment"] = comment
                             notify = dict(r)
-                            save_res()
+                            res_put(r)
                     resp = None if err else visible_res(s)
                 if err:
                     self._json({"error": err[0]}, err[1])
@@ -3653,7 +3816,7 @@ def serve(args, password):
                             if comment:
                                 r["comment"] = comment
                             notify = dict(r)
-                            save_res()
+                            res_put(r)
                     resp = None if err else visible_res(s)
                 if err:
                     self._json({"error": err[0]}, err[1])
@@ -4056,6 +4219,14 @@ def main():
     ap.add_argument("--teams-file", default="kapa_teams.json",
                     help="Datei mit den Genehmigungs-Teams (Standard: "
                          "data/kapa_teams.json); Pflege über die Verwaltungsseite")
+    ap.add_argument("--storage", default="json", choices=("json", "sqlite"),
+                    help="Datenspeicherung: 'json' (Standard, je Sammlung eine "
+                         "editierbare Datei) oder 'sqlite' (eine data/kapa.db, "
+                         "Reservierungen mit inkrementellen Schreibzugriffen). "
+                         "Beim Wechsel auf sqlite werden vorhandene JSON-Daten "
+                         "einmalig automatisch übernommen.")
+    ap.add_argument("--db-file", default="kapa.db",
+                    help="SQLite-Datei bei --storage sqlite (Standard: data/kapa.db)")
     ap.add_argument("--selector-file", default="kapa_selektor.json",
                     help="Datei mit den Tag-Kategorien des Cluster-Selektors "
                          "(Standard: data/kapa_selektor.json); Pflege über die "
@@ -4079,6 +4250,7 @@ def main():
     args.tokens_file = data_path(args.tokens_file, base)
     args.teams_file = data_path(args.teams_file, base)
     args.selector_file = data_path(args.selector_file, base)
+    args.db_file = data_path(args.db_file, base)
     args.rolenames_file = data_path(args.rolenames_file, base)
     if args.json:
         args.json = data_path(args.json, base)

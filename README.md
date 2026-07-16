@@ -220,6 +220,31 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Anlage automatisch gelöscht (Standard: 31, `0` = nie löschen); die angezeigte
   Gültigkeit endet einen Tag davor (30 Tage).
 
+## Datenspeicher
+
+Alle Schreibvorgänge erfolgen **atomar** (erst in eine Temp-Datei, dann
+umbenennen), sodass ein Absturz mitten im Speichern keine halb geschriebene,
+beschädigte Datei hinterlassen kann. Über `--storage` (bzw. `storage =` in der
+INI) wird die Ablageform gewählt:
+
+- **`json`** (Standard): Je Sammlung eine gut lesbare, notfalls von Hand
+  editierbare `.json`-Datei im `--data-dir` (`kapa_reservierungen.json`,
+  `kapa_rollen.json`, `kapa_teams.json` …). Für den üblichen Betrieb völlig
+  ausreichend.
+- **`sqlite`**: Eine einzelne `data/kapa.db` (SQLite steckt in der
+  Python-Standardbibliothek — **kein** zusätzliches Modul, kein Server, kein
+  Port). Reservierungen werden **inkrementell** geschrieben (nur die geänderte
+  Zeile statt der ganzen Liste); die kleinen Sammlungen liegen als
+  Schlüssel-Wert-Einträge in derselben Datei. Sinnvoll erst bei sehr vielen
+  (mehrere Tausend) aktiven Reservierungen.
+
+Beim **erstmaligen Umstellen** auf `sqlite` übernimmt das Dashboard vorhandene
+JSON-Daten **einmalig automatisch** in die neue `kapa.db` (Rollen, Teams,
+Selektor, Rollennamen, Tokens und alle Reservierungen). Die JSON-Dateien bleiben
+als Sicherung liegen — ein Rückwechsel auf `json` ist damit jederzeit möglich.
+Das Audit-Log (`kapa_log.jsonl`) und der Aria-Cache bleiben in beiden Modi
+eigene Dateien.
+
 ## API für externe Anwendungen
 
 Unter `/api/v1/` gibt es eine stabile, **lesende** REST-API für externe
