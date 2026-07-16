@@ -18,7 +18,8 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
   aufgeteilt in **CPU & RAM** (Auslastung, Kennzahlen, Reservierungen inkl.
   Antrags-Formular und darunter die **vSphere-Tags** des Clusters), **Storage**
   (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Netzwerk** (die
-  Portgruppen des Clusters mit ihren VLAN-Nummern), **Hosts** und
+  Portgruppen des Clusters mit ihren VLAN-Nummern, **direkt im Reiter nach
+  IP/VLAN/Name durchsuchbar**), **Hosts** und
   **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
   Die Karte ist breit angelegt und lässt sich unten rechts frei in der Größe
   ziehen.

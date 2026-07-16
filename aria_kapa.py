@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.14"
+VERSION = "1.14.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2087,14 +2087,25 @@ function card(c, idx, isTotal) {
     ${dsBlock}`;
   const paneHosts = `<table><tr><th>Host</th><th class="num">Cores</th><th class="num">RAM (GB)</th></tr>${hostRows}</table>`;
   const paneVms = `<table><tr><th>VM</th><th class="num">vCPU</th><th class="num">RAM (GB)</th></tr>${vmRows}</table>`;
-  // ---- Netzwerk-Reiter: Portgruppen des Clusters ----
+  // ---- Netzwerk-Reiter: Portgruppen des Clusters (mit VLAN-/IP-Suche) ----
   const allPg = c.portgroups || [];
   const nPg = allPg.length;
-  const pgRows = allPg.map(p =>
-    `<tr><td>${esc(p.name)}</td><td class="num">${esc(p.vlan || "–")}</td></tr>`).join("");
+  const nq = CARD_NET_Q.trim().toLowerCase();
+  const shownPg = nq ? allPg.filter(p =>
+      ((p.name || "") + " " + (p.vlan || "")).toLowerCase().includes(nq)) : allPg;
+  const pgRows = shownPg.map(p =>
+    `<tr><td>${esc(p.name)}</td><td class="num">${esc(p.vlan || "–")}</td></tr>`).join("")
+    || `<tr><td colspan="2" style="color:var(--muted)">Keine Portgruppe passt zur Suche.</td></tr>`;
   const paneNet = nPg ? `<div class="netbox">
       <h3>Portgruppen <span style="color:var(--muted);font-weight:400">· ${nPg}</span></h3>
-      <table><tr><th>Portgruppe</th><th class="num">VLAN</th></tr>${pgRows}</table>
+      <div class="vlanbar" style="margin-bottom:8px">
+        <input id="cardNetQ" class="filterbox" style="max-width:340px"
+               placeholder="VLAN / IP / Portgruppe suchen …" value="${esc(CARD_NET_Q)}"
+               oninput="onCardNetInput()">
+        <span id="cardNetCount" style="color:var(--muted);font-size:12px">${nq ? shownPg.length + " von " + nPg : ""}</span>
+      </div>
+      <table><thead><tr><th>Portgruppe</th><th class="num">VLAN</th></tr></thead>
+        <tbody id="cardNetBody">${pgRows}</tbody></table>
     </div>`
     : `<div style="color:var(--muted);font-size:12px">Keine Portgruppen-Daten aus Aria.</div>`;
 
@@ -2121,6 +2132,28 @@ function card(c, idx, isTotal) {
 // ---- Reiter in der Detailkarte ----
 let CARD_TAB = "cpu";   // cpu | storage | net | hosts | vms
 function setCardTab(t) { CARD_TAB = t; rerenderCard(); }
+
+// ---- VLAN-/Portgruppen-Suche im Netzwerk-Reiter (nur diese Karte) ----
+let CARD_NET_Q = "";
+function onCardNetInput() {
+  const el = document.getElementById("cardNetQ");
+  CARD_NET_Q = el ? el.value : "";
+  renderCardNetBody();     // nur die Tabelle neu füllen, Eingabefeld behält Fokus
+}
+function renderCardNetBody() {
+  const body = document.getElementById("cardNetBody");
+  if (!body) return;
+  const c = hoverIdx >= 0 ? CLUSTERS[hoverIdx] : null;
+  const all = (c && c.portgroups) || [];
+  const q = CARD_NET_Q.trim().toLowerCase();
+  const shown = q ? all.filter(p =>
+      ((p.name || "") + " " + (p.vlan || "")).toLowerCase().includes(q)) : all;
+  body.innerHTML = shown.map(p =>
+    `<tr><td>${esc(p.name)}</td><td class="num">${esc(p.vlan || "–")}</td></tr>`).join("")
+    || `<tr><td colspan="2" style="color:var(--muted)">Keine Portgruppe passt zur Suche.</td></tr>`;
+  const cnt = document.getElementById("cardNetCount");
+  if (cnt) cnt.textContent = q ? shown.length + " von " + all.length : "";
+}
 
 // ---- Storage-Detail (LUN-Liste) im Storage-Reiter ----
 let DS_SORT = "size";
@@ -2768,6 +2801,7 @@ let hoverIdx = null;
 const hc = document.getElementById("hovercard");
 
 function showCard(idx, rowEl) {
+  if (idx !== hoverIdx) CARD_NET_Q = "";   // beim Öffnen eines anderen Clusters Suche leeren
   hoverIdx = idx;
   hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
                  card(idx === -1 ? TOTAL : CLUSTERS[idx], idx, idx === -1);
