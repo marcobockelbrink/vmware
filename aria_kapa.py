@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.15.1"
+VERSION = "1.16"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1470,6 +1470,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           border-radius:10px; padding:3px; gap:3px; margin-bottom:16px; }
   .tab { padding:6px 14px; font-size:13px; color:var(--muted); cursor:pointer; border-radius:8px; }
   .tab.active { background:var(--card); color:var(--text); }
+  .subtabs { margin-bottom:18px; }
   .cl { color:var(--accent); cursor:pointer; }
   .cl:hover { text-decoration:underline; }
   .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
@@ -1643,6 +1644,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 </div>
 <div id="admView" style="display:none">
+<div class="tabs subtabs">
+  <span class="tab active" id="atabUsers" onclick="setAdmTab('users')">Benutzer &amp; Rollen</span>
+  <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
+  <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
+</div>
+
+<div id="admGrpUsers">
 <div class="sechead">Benutzer und Rollen</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
@@ -1676,23 +1684,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Team-Adressen speichern</button>
 
-<div class="sechead" style="margin-top:20px">Mail-Benachrichtigungen (je interner Rolle)</div>
-<div class="hint" style="color:var(--muted);margin-bottom:8px">
-  Legt fest, bei welchem Ereignis eine Mail rausgeht. <b>Anforderer</b> = der
-  jeweilige Antragsteller (automatisch). <b>Admin/Auditor</b> = die eingetragene
-  Verteiler-Adresse. <b>Reviewer / „Team ist dran"</b> = die Team-Adresse aus der
-  Tabelle oben. Voraussetzung ist ein konfigurierter SMTP-Server
-  (<code>--smtp-server</code>). „Freigabe" meint die endgültige Genehmigung.</div>
-<div class="tablewrap">
-<table class="kt" id="notifytable">
-  <thead><tr><th style="width:150px">Interne Rolle</th><th>Verteiler-Adresse</th>
-    <th class="num nosort">Anlage</th><th class="num nosort">Ablehnung</th>
-    <th class="num nosort">Freigabe</th><th class="num nosort">Team ist dran</th></tr></thead>
-  <tbody id="ntbody"></tbody>
-</table>
-</div>
-<button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Mail-Regeln speichern</button>
-<span id="notifySaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 <div class="sechead" style="margin-top:20px">Cluster-Selektor (Filter nach vSphere-Tags)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   Bis zu 3 Stufen, jede Stufe eine Tag-Kategorie. In der Kapazitätsübersicht
@@ -1720,15 +1711,47 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button class="btn" style="margin-left:10px"
           onclick="document.getElementById('newToken').style.display='none'">Ausblenden</button>
 </div>
+</div><!-- admGrpUsers -->
+
+<div id="admGrpMail" style="display:none">
+<div class="sechead">Mail-Benachrichtigungen (je interner Rolle)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Legt fest, bei welchem Ereignis eine Mail rausgeht. <b>Anforderer</b> = der
+  jeweilige Antragsteller (automatisch). <b>Admin/Auditor</b> = die eingetragene
+  Verteiler-Adresse. <b>Reviewer / „Team ist dran"</b> = die Team-Adresse aus der
+  Teams-Tabelle (Reiter „Benutzer &amp; Rollen"). Voraussetzung ist ein
+  konfigurierter SMTP-Server. „Freigabe" meint die endgültige Genehmigung.</div>
+<div class="tablewrap">
+<table class="kt" id="notifytable">
+  <thead><tr><th style="width:150px">Interne Rolle</th><th>Verteiler-Adresse</th>
+    <th class="num nosort">Anlage</th><th class="num nosort">Ablehnung</th>
+    <th class="num nosort">Freigabe</th><th class="num nosort">Team ist dran</th></tr></thead>
+  <tbody id="ntbody"></tbody>
+</table>
+</div>
+<button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Mail-Regeln speichern</button>
+<span id="notifySaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+<div class="sechead" style="margin-top:20px">SMTP / Versand (aus der Konfiguration)</div>
+<div id="configMail"></div>
+</div><!-- admGrpMail -->
+
+<div id="admGrpConf" style="display:none">
 <div id="backupSection" style="display:none">
-  <div class="sechead" style="margin-top:20px">Backup</div>
+  <div class="sechead">Backup</div>
   <div class="hint" style="color:var(--muted);margin-bottom:8px">
     Sichert alle Laufzeitdaten (Reservierungen, Rollen, Teams, Selektor, Log,
-    Tokens) als tar.gz auf das konfigurierte SFTP-Ziel. Läuft automatisch alle
-    12 Stunden – hier lässt sich ein Backup sofort auslösen.</div>
+    Tokens) als tar.gz auf das konfigurierte SFTP-Ziel. Läuft automatisch nach
+    dem konfigurierten Intervall – hier lässt sich ein Backup sofort auslösen.</div>
   <button class="btn primary" id="backupBtn" onclick="runBackup()">💾 Backup jetzt erstellen</button>
   <span id="backupStatus" style="font-size:12px;margin-left:10px"></span>
 </div>
+<div class="sechead" style="margin-top:20px">Konfiguration (schreibgeschützt)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Die im System gesetzten Werte (aus INI, kapa.env bzw. Kommandozeile). Nur zur
+  Ansicht – Änderungen erfolgen in der Konfiguration und erfordern einen Neustart.
+  <b>Passwörter werden nie angezeigt</b> (nur, ob gesetzt).</div>
+<div id="configSheet"></div>
+</div><!-- admGrpConf -->
 </div>
 <div class="tablewrap" id="logView" style="display:none">
 <table class="kt" id="ltable">
@@ -2357,7 +2380,7 @@ function setView(v) {
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); }
   if (v === "log") loadLog();
   render();
 }
@@ -2625,6 +2648,37 @@ function saveNotify() {
   }).catch(() => alert("Speichern der Mail-Regeln fehlgeschlagen."));
 }
 
+// ---- Unter-Reiter der Verwaltung + read-only Konfiguration ----
+let ADM_TAB = "users";
+function setAdmTab(t) {
+  ADM_TAB = t;
+  const tabs = { users: "atabUsers", mail: "atabMail", conf: "atabConf" };
+  const grps = { users: "admGrpUsers", mail: "admGrpMail", conf: "admGrpConf" };
+  for (const k in tabs) {
+    const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
+    const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
+  }
+}
+let CONFIG = null;
+function loadConfig() {
+  fetch("api/config").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.config) { CONFIG = d.config; if (VIEW === "adm") { renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); } }
+  }).catch(() => {});
+}
+function renderConfig(containerId, onlyGroup) {
+  const el = document.getElementById(containerId); if (!el) return;
+  if (!CONFIG) { el.innerHTML = '<div style="color:var(--muted);font-size:12px">Lade Konfiguration …</div>'; return; }
+  const groups = onlyGroup ? (CONFIG[onlyGroup] ? { [onlyGroup]: CONFIG[onlyGroup] } : {}) : CONFIG;
+  const keys = Object.keys(groups);
+  if (!keys.length) { el.innerHTML = '<div style="color:var(--muted);font-size:12px">–</div>'; return; }
+  el.innerHTML = keys.map(g => {
+    const rows = Object.keys(groups[g]).map(k =>
+      `<tr><td style="color:var(--muted);width:300px">${esc(k)}</td><td>${esc(String(groups[g][k]))}</td></tr>`).join("");
+    const head = onlyGroup ? "" : `<div class="sechead" style="margin-top:14px">${esc(g)}</div>`;
+    return `${head}<div class="tablewrap"><table class="kt">${rows}</table></div>`;
+  }).join("");
+}
+
 // ---- Cluster-Selektor konfigurieren ----
 async function apiSelector(method, body) {
   const r = await fetch("api/selector", { method: method,
@@ -2884,7 +2938,7 @@ function render() {
   if (VIEW === "vlan") { renderVlan(); return; }
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderSelector(); renderTokenTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -3569,6 +3623,62 @@ def serve(args, password):
             out[k] = e
         return out
 
+    def public_config():
+        """Im System gesetzte Werte für die schreibgeschützte Konfig-Ansicht.
+        NIE Passwörter/Geheimnisse – nur, ob sie gesetzt sind (ja/nein)."""
+        j = lambda b: "ja" if b else "nein"
+        pw = lambda name: j(bool(getattr(args, name, "")))
+        return {
+            "Aria Operations": {
+                "URL": args.url or "–",
+                "Benutzer": args.user or "–",
+                "Auth-Quelle": args.auth_source or "local",
+                "Zertifikat prüfen": j(not args.insecure),
+                "Auto-Refresh (Sek.)": args.refresh_interval,
+                "Aria-Passwort gesetzt": j(bool(password)),
+            },
+            "Berechnung": {
+                "CPU-Faktor": args.cpu_factor,
+                "Failover-Hosts (N+1)": args.failover_hosts,
+                "vSAN-Faktor": args.vsan_factor,
+                "Reservierung gültig (Tage)": args.res_ttl_days,
+                "Uplink-Portgruppen anzeigen": j(args.show_uplink_portgroups),
+                "Ausschluss-Tag": args.exclude_tag or "–",
+                "Tag-Präfix": args.tag_property or "(alle mit 'tag')",
+            },
+            "Mail / SMTP": {
+                "SMTP-Server": args.smtp_server or "– (kein Mailversand)",
+                "Absender": args.smtp_from or "–",
+                "smtp-to (Fallback Admin)": args.smtp_to or "–",
+                "STARTTLS": j(args.smtp_tls),
+                "SMTP-Passwort gesetzt": pw("smtp_password"),
+                "AD-Mail-Attribut": args.ad_mail_attribute or "– (UPN)",
+            },
+            "Backup": {
+                "Ziel": args.backup_target or "– (kein Backup)",
+                "Port": args.backup_port,
+                "Intervall (Sek.)": args.backup_interval,
+                "Aufbewahrung (Tage)": args.backup_keep_days,
+                "SSH-Key": args.backup_key or "–",
+                "Backup-Passwort gesetzt": pw("backup_password"),
+            },
+            "Active Directory": {
+                "URL": args.ad_url or "– (keine AD-Anmeldung)",
+                "Domäne": args.ad_domain or "–",
+                "Admin-User": args.admin_user or "–",
+                "Service-Konto (Bind-DN)": args.ad_bind_dn or "–",
+                "Basis-DN": args.ad_base_dn or "–",
+                "Bind-Passwort gesetzt": pw("ad_bind_password"),
+            },
+            "Server / Speicher": {
+                "Bind-Adresse": args.bind,
+                "Port": args.port,
+                "Datenspeicher": args.storage,
+                "Daten-Verzeichnis": args.data_dir or "data",
+                "Kontakt / Impressum": args.contact_info or "–",
+            },
+        }
+
     if auth_enabled:
         if not args.ad_url.startswith("ldaps://"):
             print("WARNUNG: --ad-url ohne ldaps:// – Passwörter gehen unverschlüsselt "
@@ -4153,6 +4263,10 @@ def serve(args, password):
                     return
                 with notify_lock:
                     self._json({"notify": json.loads(json.dumps(notify_cfg))})
+            elif route == "/api/config":
+                if not self._require("admin"):
+                    return
+                self._json({"config": public_config()})
             elif route == "/api/log":
                 if not self._require("admin"):
                     return
