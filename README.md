@@ -18,17 +18,15 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
   aufgeteilt in **CPU & RAM** (Auslastung, Kennzahlen, Reservierungen inkl.
   Antrags-Formular und darunter die **vSphere-Tags** des Clusters), **Storage**
   (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Netzwerk** (die
-  dvSwitches des Clusters mit ihren Portgruppen und VLAN-Nummern), **Hosts** und
+  Portgruppen des Clusters mit ihren VLAN-Nummern), **Hosts** und
   **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
   Die Karte ist breit angelegt und lässt sich unten rechts frei in der Größe
   ziehen.
 - **VLAN-Suche** (Tab „VLAN-Suche" bzw. `/vlan-suche`, zwischen Kapazität und
-  Reservierungen): durchsucht die Portgruppen **aller** dvSwitches. Weil die
+  Reservierungen): durchsucht die Portgruppen **aller** Cluster. Weil die
   Portgruppen-Namen die IP-Netze enthalten, findet man über eine Teil-Eingabe
-  (z. B. `10.2.30` oder `VLAN205`) sofort, **an welchem Cluster** (über welchen
-  dvSwitch) ein Netz hängt. Ergebnis als sortierbare Tabelle Portgruppe / VLAN /
-  dvSwitch / Cluster. Ein dvSwitch, der mehrere Cluster umspannt, erscheint je
-  betroffenem Cluster – so ist die Zuordnung vollständig.
+  (z. B. `10.2.30` oder `VLAN205`) sofort, **an welchem Cluster** ein Netz hängt.
+  Ergebnis als sortierbare Tabelle Portgruppe / VLAN / Cluster.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
 - **Cluster-Selektor**: Über der Kapazitätsliste blenden sich bis zu drei
