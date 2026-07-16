@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.12.2"
+VERSION = "1.12.3"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -976,9 +976,6 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # erstrecken; er (und seine Portgruppen) erscheint dann bei jedem. Die
     # VLAN-Nummer ist best effort (Property-Schlüssel je vROps-Version anders).
     # Fehler = leerer Bereich, der Rest läuft weiter.
-    PG_VLAN_KEYS = ["config|defaultPortConfig|vlan|vlanId",
-                    "config|vlan|vlanId", "summary|vlanId",
-                    "config|defaultPortConfig|vlan|pvlanId"]
     VLAN_IN_NAME = re.compile(r"vlan[\s_\-]?(\d{1,4})", re.I)
     try:
         log("Lese dvSwitches und Portgruppen ...")
@@ -986,45 +983,54 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         pg_list = api.resources("DistributedVirtualPortgroup")
         pg_name = {p["identifier"]: name_of(p) for p in pg_list}
 
-        # Den Property-Schlüssel der VLAN-Nummer NICHT raten, sondern an einer
-        # echten Portgruppe entdecken: alle Eigenschaften der ersten Portgruppe
-        # holen und jeden Schlüssel mit "vlan" im Namen übernehmen. Die Schlüssel
-        # landen im Log (wie beim Tag-Abruf), damit sich der richtige bei
-        # abweichender vROps-Version ablesen lässt.
-        vlan_keys = list(PG_VLAN_KEYS)
-        if pg_list:
-            try:
-                sample = api.all_properties(pg_list[0]["identifier"])
-                found = [k for k in sample if "vlan" in k.lower()]
-                for k in reversed(found):
-                    if k not in vlan_keys:
-                        vlan_keys.insert(0, k)
-                log("Portgruppen-Eigenschaften (Beispiel erste Portgruppe): "
-                    + (", ".join(sorted(sample)[:40]) or "keine"))
-                log("VLAN-Schlüssel erkannt: "
-                    + (", ".join(found) if found
-                       else "keiner mit 'vlan' im Namen – VLAN kommt, wenn möglich, "
-                            "aus dem Portgruppen-Namen"))
-            except Exception as e:
-                log(f"Portgruppen-Eigenschaften nicht lesbar: {e}")
+        # VLAN kommt je Portgruppe aus /resources/{id}/properties. Die Schlüssel
+        # heißen je nach vROps-Version anders, und über die Bulk-Abfrage kommen
+        # diese Config-Properties oft nicht zurück – deshalb pro Portgruppe die
+        # Eigenschaften einzeln holen (gecacht) und jeden Schlüssel mit "vlan" im
+        # Namen auswerten. "0" ist ein gültiger Wert (untagged), Trunk-Ranges wie
+        # "0-4094" werden unverändert übernommen.
+        pg_prop_cache = {}
 
-        pg_props = {}
-        if pg_list:
-            try:
-                pg_props = api.properties([p["identifier"] for p in pg_list],
-                    vlan_keys, progress=lambda m: log(f"Portgruppen-VLAN: {m}"))
-            except Exception as e:
-                log(f"VLAN-Nummern nicht lesbar (nur Namen): {e}")
+        def pg_props(pid):
+            if pid not in pg_prop_cache:
+                try:
+                    pg_prop_cache[pid] = api.all_properties(pid)
+                except Exception:
+                    pg_prop_cache[pid] = {}
+            return pg_prop_cache[pid]
+
+        def _clean_vlan(v):
+            s = str(v).strip()
+            return "" if s.lower() in ("", "none", "null") else s
 
         def pg_vlan(pid):
-            p = pg_props.get(pid) or {}
-            for k in vlan_keys:
-                v = str(p.get(k) or "").strip()
-                if v and v not in ("0", "None"):
-                    return v
+            props = pg_props(pid)
+            vlanish = [(k, v) for k, v in props.items() if "vlan" in k.lower()]
+            # bevorzugt einen konkreten ...vlanId-Wert
+            for k, v in vlanish:
+                if "vlanid" in k.lower().replace("|", "").replace("_", ""):
+                    s = _clean_vlan(v)
+                    if s:
+                        return s
+            # sonst irgendein vlan-Wert (z. B. Trunk-Range "0-4094")
+            for k, v in vlanish:
+                s = _clean_vlan(v)
+                if s:
+                    return s
             # Rückfall: VLAN aus dem Portgruppen-Namen (z. B. "...-VLAN205")
             m = VLAN_IN_NAME.search(pg_name.get(pid, ""))
             return m.group(1) if m else ""
+
+        # Diagnose: echte Schlüssel/Werte der ersten Portgruppe ins Log, damit
+        # sich der genaue VLAN-Schlüssel notfalls ablesen lässt.
+        if pg_list:
+            s0 = pg_props(pg_list[0]["identifier"])
+            vlan0 = {k: s0[k] for k in s0 if "vlan" in k.lower()}
+            log("Portgruppen-Properties (Beispiel 1. Portgruppe) – vlan-Schlüssel: "
+                + (", ".join(f"{k}={s0[k]}" for k in vlan0) if vlan0
+                   else "keiner mit 'vlan' im Namen"))
+            log("Alle Property-Schlüssel der 1. Portgruppe: "
+                + ((", ".join(sorted(s0)))[:600] or "keine"))
 
         # Der dvSwitch dient nur zur Zuordnung Portgruppe -> Cluster; sein Name
         # wird bewusst NICHT ausgeliefert (nur die Portgruppen je Cluster).
@@ -2901,6 +2907,32 @@ def int_or(default):
     return conv
 
 
+def _drop_empty_long_opts(argv):
+    """Langoptionen mit leerem Wert aus der Argumentliste entfernen.
+
+    Die systemd-Unit baut Argumente wie '--backup-target ${BACKUP_TARGET}' aus
+    kapa.env. Ist die Variable leer, käme '--backup-target ''' an und würde einen
+    in der INI gesetzten Wert überschreiben (leer schlägt INI). Ein leerer Wert
+    bedeutet in dieser App überall 'nicht gesetzt' – wir lassen ihn hier weg,
+    damit stattdessen INI bzw. eingebauter Standard greift. '--opt=' und
+    '--opt ''' werden beide verworfen; '--opt=wert' und Flags bleiben."""
+    out, i, n = [], 0, len(argv)
+    while i < n:
+        a = argv[i]
+        if a.startswith("--") and "=" in a:
+            if a.split("=", 1)[1] == "":
+                i += 1
+                continue
+            out.append(a)
+        elif a.startswith("--") and i + 1 < n and argv[i + 1] == "":
+            i += 2                     # '--opt' und der leere Folgewert: beide weg
+            continue
+        else:
+            out.append(a)
+        i += 1
+    return out
+
+
 def _html_escape(s):
     return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;"))
@@ -4409,11 +4441,18 @@ def main():
                     help="Datei mit den frei wählbaren Rollen-Bezeichnungen "
                          "(Standard: data/kapa_rollennamen.json); Pflege über die "
                          "Verwaltungsseite")
+    # Leere Werte von Langoptionen verwerfen, BEVOR geparst wird. Grund: Die
+    # systemd-Unit baut Argumente wie "--backup-target ${BACKUP_TARGET}" aus
+    # kapa.env; ist die Variable leer, käme ein leeres Argument an und würde den
+    # INI-Wert überschreiben (leer schlägt INI). Ein leerer Wert bedeutet hier
+    # überall "nicht gesetzt", also lassen wir ihn weg – dann greift die INI bzw.
+    # der eingebaute Standard. (String-Pendant zu int_or() für Zahlen.)
+    argv = _drop_empty_long_opts(sys.argv[1:])
     # Erst --config einlesen, dann endgültig parsen (CLI schlägt INI)
-    pre, _ = ap.parse_known_args()
+    pre, _ = ap.parse_known_args(argv)
     if pre.config:
         apply_config_file(ap, pre.config)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     # JSON-Datendateien ohne Pfadangabe unter --data-dir ablegen (Standard data/)
     base = args.data_dir or "data"
