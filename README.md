@@ -94,9 +94,12 @@ Ablehnungen, Stornos und Backups:
 - **Frei** = Kapazität − belegt − genehmigte Reservierungen (für vCPU, RAM und Storage)
 - **Ausschluss per Tag**: Mit `--exclude-tag Kapa_Filter:Ja` werden VMs mit dem
   angegebenen vROps-Tag (Kategorie:Wert) aus der Belegung herausgerechnet.
-- **vSphere-Tags**: Die Tags des Clusters werden aus Aria gelesen und in der
-  Detailkarte (Reiter „CPU & RAM") angezeigt. Der Abruf ist best effort – sind
-  keine Tags lesbar, bleibt der Bereich einfach leer.
+- **vSphere-Tags**: Die Tags des Clusters kommen aus den **Eigenschaften** der
+  Ressource (`/resources/{id}/properties`) und werden in der Detailkarte
+  (Reiter „CPU & RAM") angezeigt. Ohne weitere Angabe werden alle Eigenschaften
+  übernommen, deren Schlüssel `tag` enthält; mit `--tag-property` lässt sich das
+  auf ein Präfix eingrenzen (z. B. `summary|tag`). Das Log nennt nach jedem
+  Abruf die erkannten Schlüssel — praktisch zum Feinjustieren.
 - Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
   Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.7"
+VERSION = "1.7.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -172,28 +172,15 @@ class AriaOps:
                 out.append(r.get("identifier"))
         return out
 
-    def resource_tags(self, resource_id):
-        """Tags einer Ressource als Liste 'Kategorie: Wert'. Best effort –
-        die Struktur unterscheidet sich je nach vROps-Version leicht."""
-        resp = self._request("GET", f"/resources/{resource_id}/tags")
-        out = []
-        for t in (resp.get("tag") or resp.get("tags") or []):
-            cat = t.get("category") or t.get("categoryName") or ""
-            val = t.get("name") or t.get("value") or ""
-            if val:
-                out.append(f"{cat}: {val}" if cat else str(val))
-        return out
-
-    def all_tags(self):
-        """Alle Tag-Kategorien mit ihren Werten als [(Kategorie, Wert), ...]."""
-        resp = self._request("GET", "/tags")
-        out = []
-        for c in (resp.get("tag") or []):
-            cat = c.get("name") or ""
-            for v in (c.get("values") or []):
-                val = v.get("name") if isinstance(v, dict) else str(v)
-                if val:
-                    out.append((cat, val))
+    def all_properties(self, resource_id):
+        """ALLE Eigenschaften einer Ressource als {key: value}. vSphere-Tags
+        liefert vROps als Eigenschaften (nicht über /tags)."""
+        resp = self._request("GET", f"/resources/{resource_id}/properties")
+        out = {}
+        for p in resp.get("property", []):
+            name = p.get("name")
+            if name:
+                out[name] = p.get("value")
         return out
 
     def resources_by_tag(self, category, name, resource_kind=None,
@@ -625,7 +612,8 @@ def name_of(res):
     return res.get("resourceKey", {}).get("name", "?")
 
 
-def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag=""):
+def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
+            tag_property=""):
     log = progress or (lambda m: print(m, file=sys.stderr))
 
     log("Lese Cluster ...")
@@ -690,30 +678,44 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag=""):
         data[name_of(c)] = {"hosts": [], "vms": [], "tags": [],
                             "storage": {"cap_gb": 0.0, "used_gb": 0.0, "luns": []}}
 
-    # vSphere-Tags je Cluster (best effort). Bevorzugt direkt an der Ressource –
-    # klappt das nicht, über den Rückwärts-Abgleich aller Tags. Ohne Tags bleibt
-    # der Bereich in der Detailkarte einfach leer.
-    log("Lese vSphere-Tags der Cluster ...")
-    per_resource = True
+    # vSphere-Tags je Cluster: vROps liefert sie als EIGENSCHAFTEN der Ressource
+    # (/resources/{id}/properties), nicht über einen Tag-Endpunkt. Ohne
+    # --tag-property werden alle Eigenschaften genommen, deren Schlüssel "tag"
+    # enthält; das Log nennt die erkannten Schlüssel zur Kontrolle.
+    def tag_label(key, val):
+        # 'summary|tag:Standort' bzw. 'Tags|Standort' -> 'Standort: RZ-Nord'
+        cat = (key.split(":")[-1] if ":" in key else key.split("|")[-1]).strip()
+        val = str(val).strip()
+        return val if not cat or cat.lower() in ("tag", "tags") else f"{cat}: {val}"
+
+    log("Lese vSphere-Tags der Cluster (Eigenschaften) ...")
+    seen_keys = set()
     for c in clusters:
         try:
-            data[name_of(c)]["tags"] = api.resource_tags(c["identifier"])
+            props = api.all_properties(c["identifier"])
         except Exception as e:
-            per_resource = False
-            log(f"Tags je Ressource nicht abrufbar ({e}) – versuche Sammelabgleich ...")
+            log(f"Eigenschaften nicht lesbar – keine vSphere-Tags: {e}")
             break
-    if not per_resource:
-        try:
-            for cat, val in api.all_tags():
-                for r in api.resources_by_tag(cat, val, "ClusterComputeResource"):
-                    cl = name_of(r)
-                    label = f"{cat}: {val}" if cat else val
-                    if cl in data and label not in data[cl]["tags"]:
-                        data[cl]["tags"].append(label)
-        except Exception as e:
-            log(f"vSphere-Tags nicht verfügbar: {e}")
+        tags = []
+        for k, v in sorted(props.items()):
+            kl = k.lower()
+            if tag_property:
+                if not kl.startswith(tag_property.lower()):
+                    continue
+            elif "tag" not in kl:
+                continue
+            val = str(v or "").strip()
+            if not val:
+                continue
+            seen_keys.add(k)
+            label = tag_label(k, val)
+            if label not in tags:
+                tags.append(label)
+        data[name_of(c)]["tags"] = tags
     found = sum(len(d["tags"]) for d in data.values())
-    log(f"vSphere-Tags gefunden: {found}")
+    log(f"vSphere-Tags gefunden: {found}"
+        + (f" · Eigenschaften: {', '.join(sorted(seen_keys))}" if seen_keys
+           else " – keine Eigenschaft mit 'tag' im Namen gefunden"))
 
     for h in hosts:
         rid = h["identifier"]
@@ -2818,7 +2820,8 @@ def serve(args, password):
                 clusters = collect(api, args.cpu_factor,
                                    progress=lambda m: state.update(progress=m),
                                    failover_hosts=args.failover_hosts,
-                                   exclude_tag=args.exclude_tag)
+                                   exclude_tag=args.exclude_tag,
+                                   tag_property=args.tag_property)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
             ensure_dir(args.cache)
@@ -3601,6 +3604,11 @@ def main():
     ap.add_argument("--exclude-tag", default="",
                     help="VMs mit diesem vROps-Tag aus der Auswertung ausschließen, "
                          "Format Kategorie:Wert, z. B. Kapa_Filter:Ja (leer = aus)")
+    ap.add_argument("--tag-property", default="",
+                    help="Eigenschafts-Präfix für vSphere-Tags des Clusters, z. B. "
+                         "'summary|tag'. Ohne Angabe werden alle Eigenschaften "
+                         "genommen, deren Schlüssel 'tag' enthält (das Log nennt "
+                         "die erkannten Schlüssel)")
     ap.add_argument("--contact-info", default="",
                     help="Kontakt-/Impressumszeile (Abteilung/Firma + Mailadresse "
                          "für Rückfragen), wird im Footer und auf der Login-Maske "
@@ -3769,7 +3777,8 @@ def main():
         api = AriaOps(args.url, args.user, pw, args.auth_source,
                       verify_tls=not args.insecure)
         clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
-                           exclude_tag=args.exclude_tag)
+                           exclude_tag=args.exclude_tag,
+                           tag_property=args.tag_property)
 
     if args.json:
         ensure_dir(args.json)
