@@ -2127,10 +2127,14 @@ function openStorage(idx, cell) {
   showCard(idx, cell.parentElement);
 }
 function hideCard() { hc.style.display = "none"; hoverIdx = null; }
+// Klick außerhalb schließt die Detailkarte. WICHTIG: in der Capture-Phase (true)
+// prüfen – Elemente in der Karte (Reiter, Sortier-Links) ersetzen beim Klick den
+// Karteninhalt. In der Bubble-Phase wäre e.target dann schon aus dem DOM entfernt
+// und hc.contains(e.target) fälschlich false -> die Karte hätte sich geschlossen.
 document.addEventListener("click", e => {
   if (hc.style.display === "block" && !hc.contains(e.target) && !e.target.closest(".cl"))
     hideCard();
-});
+}, true);
 
 // ---- Rollenabhängige Sichtbarkeit ----
 if (ME) {
