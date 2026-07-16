@@ -103,10 +103,13 @@ Ablehnungen, Stornos und Backups:
   angegebenen vROps-Tag (Kategorie:Wert) aus der Belegung herausgerechnet.
 - **vSphere-Tags**: Die Tags des Clusters kommen aus den **Eigenschaften** der
   Ressource (`/resources/{id}/properties`) und werden in der Detailkarte
-  (Reiter „CPU & RAM") angezeigt. Ohne weitere Angabe werden alle Eigenschaften
-  übernommen, deren Schlüssel `tag` enthält; mit `--tag-property` lässt sich das
-  auf ein Präfix eingrenzen (z. B. `summary|tag`). Das Log nennt nach jedem
-  Abruf die erkannten Schlüssel — praktisch zum Feinjustieren.
+  (Reiter „CPU & RAM") als Chips angezeigt. Ohne weitere Angabe werden alle
+  Eigenschaften übernommen, deren Schlüssel `tag` enthält; mit `--tag-property`
+  lässt sich das auf ein Präfix eingrenzen (z. B. `summary|tag`).
+  Enthält eine Eigenschaft **JSON** (z. B. `TagJson`), wird es aufgeschlüsselt
+  und nur die Tags werden gelistet — rohes JSON erscheint nie in der Anzeige.
+  Das Log nennt nach jedem Abruf die erkannten Schlüssel und einen Auszug des
+  Rohwerts — praktisch zum Feinjustieren.
 - Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
   Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 

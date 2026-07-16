@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.8"
+VERSION = "1.8.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -701,14 +701,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # (/resources/{id}/properties), nicht über einen Tag-Endpunkt. Ohne
     # --tag-property werden alle Eigenschaften genommen, deren Schlüssel "tag"
     # enthält; das Log nennt die erkannten Schlüssel zur Kontrolle.
-    def tag_label(key, val):
-        # 'summary|tag:Standort' bzw. 'Tags|Standort' -> 'Standort: RZ-Nord'
-        cat = (key.split(":")[-1] if ":" in key else key.split("|")[-1]).strip()
-        val = str(val).strip()
-        return val if not cat or cat.lower() in ("tag", "tags") else f"{cat}: {val}"
-
     log("Lese vSphere-Tags der Cluster (Eigenschaften) ...")
-    seen_keys = set()
+    seen_keys, raw_sample = set(), []
     for c in clusters:
         try:
             props = api.all_properties(c["identifier"])
@@ -727,14 +721,18 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             if not val:
                 continue
             seen_keys.add(k)
-            label = tag_label(k, val)
-            if label not in tags:
-                tags.append(label)
-        data[name_of(c)]["tags"] = tags
+            if val[:1] in ("[", "{") and not raw_sample:
+                raw_sample.append(f"{k} = {val[:200]}")
+            for label in tag_labels(k, val):
+                if label not in tags:
+                    tags.append(label)
+        data[name_of(c)]["tags"] = sorted(tags)
     found = sum(len(d["tags"]) for d in data.values())
     log(f"vSphere-Tags gefunden: {found}"
         + (f" · Eigenschaften: {', '.join(sorted(seen_keys))}" if seen_keys
            else " – keine Eigenschaft mit 'tag' im Namen gefunden"))
+    if raw_sample:
+        log(f"Tag-Rohwert (Auszug): {raw_sample[0]}")
 
     for h in hosts:
         rid = h["identifier"]
@@ -2347,6 +2345,67 @@ def json_for_html(obj):
             .replace("<", "\\u003c").replace(">", "\\u003e")
             .replace("&", "\\u0026")
             .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+
+def parse_tag_json(raw):
+    """vSphere-Tags aus einem JSON-Wert (z. B. der Eigenschaft 'TagJson') lesen.
+
+    Die Struktur unterscheidet sich je nach vROps-/vCenter-Version, deshalb
+    werden die üblichen Formen abgefangen:
+      ["Standort: RZ-Nord", ...]
+      [{"category": "Standort", "name": "RZ-Nord"}, ...]   (auch categoryName/tagName)
+      {"Standort": "RZ-Nord", "Umgebung": ["Test", "Prod"]}
+      {"tags": [ ... ]}
+    Rückgabe: Liste 'Kategorie: Wert' (bzw. nur Wert ohne Kategorie).
+    """
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    out = []
+
+    def add(cat, name):
+        cat, name = str(cat or "").strip(), str(name or "").strip()
+        if not name:
+            return
+        label = (f"{cat}: {name}"
+                 if cat and cat.lower() not in ("tag", "tags", "tagjson") else name)
+        if label not in out:
+            out.append(label)
+
+    def walk(node, cat=""):
+        if isinstance(node, (str, int, float)):
+            add(cat, node)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, cat)
+        elif isinstance(node, dict):
+            c = (node.get("category") or node.get("categoryName")
+                 or node.get("Category") or node.get("category_name") or "")
+            n = (node.get("name") or node.get("tagName") or node.get("tag")
+                 or node.get("Name") or node.get("value") or "")
+            if n:
+                add(c or cat, n)
+                return
+            for k, v in node.items():          # {"Standort": "RZ-Nord", ...}
+                walk(v, k)
+
+    walk(data)
+    return out
+
+
+def tag_labels(key, val):
+    """Anzeige-Labels einer Tag-Eigenschaft. JSON-Werte (TagJson) werden
+    aufgeschlüsselt; sonst wird 'Kategorie: Wert' aus Schlüssel/Wert gebildet."""
+    s = str(val or "").strip()
+    if not s:
+        return []
+    if s[:1] in ("[", "{"):
+        # Rohes JSON niemals als Chip anzeigen – lieber nichts.
+        return parse_tag_json(s)
+    cat = (key.split(":")[-1] if ":" in key else key.split("|")[-1]).strip()
+    return [s if not cat or cat.lower() in ("tag", "tags", "tagjson")
+            else f"{cat}: {s}"]
 
 
 def int_or(default):
