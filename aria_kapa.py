@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.16"
+VERSION = "1.17"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -70,7 +70,8 @@ from datetime import datetime, timedelta
 # ---------------------------------------------------------------- Suite API --
 
 class AriaOps:
-    def __init__(self, base_url, username, password, auth_source="local", verify_tls=True):
+    def __init__(self, base_url, username, password, auth_source="local",
+                 verify_tls=True, proxy=""):
         self.base = base_url.rstrip("/") + "/suite-api/api"
         self.token = None
         self.ctx = None
@@ -78,7 +79,20 @@ class AriaOps:
             self.ctx = ssl.create_default_context()
             self.ctx.check_hostname = False
             self.ctx.verify_mode = ssl.CERT_NONE
+        # Optionaler HTTP(S)-Proxy für abgesicherte Umgebungen: alle Aria-Aufrufe
+        # laufen dann über einen build_opener mit ProxyHandler (statt urlopen).
+        self.opener = None
+        if proxy:
+            handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})]
+            if self.ctx is not None:
+                handlers.append(urllib.request.HTTPSHandler(context=self.ctx))
+            self.opener = urllib.request.build_opener(*handlers)
         self._login(username, password, auth_source)
+
+    def _open(self, req, timeout=120):
+        if self.opener is not None:
+            return self.opener.open(req, timeout=timeout)
+        return urllib.request.urlopen(req, context=self.ctx, timeout=timeout)
 
     def _request(self, method, path, body=None, params=None):
         url = self.base + path
@@ -91,7 +105,7 @@ class AriaOps:
         if self.token:
             req.add_header("Authorization", "OpsToken " + self.token)
         try:
-            with urllib.request.urlopen(req, context=self.ctx, timeout=120) as r:
+            with self._open(req, timeout=120) as r:
                 return json.loads(r.read().decode() or "{}")
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:500]
@@ -154,7 +168,7 @@ class AriaOps:
             req = urllib.request.Request(url)
             req.add_header("Accept", "application/json")
             req.add_header("Authorization", "OpsToken " + self.token)
-            with urllib.request.urlopen(req, context=self.ctx, timeout=120) as r:
+            with self._open(req, timeout=120) as r:
                 merged["values"].extend(json.loads(r.read().decode()).get("values", []))
         return merged
 
@@ -791,11 +805,12 @@ def backup_rotate(args):
 
 # ----------------------------------------------------------- Mail-Reports ----
 
-def send_mail(args, subject, body, extra_to=(), to_override=None):
+def send_mail(args, subject, body, extra_to=(), to_override=None, html=None):
     """Report-Mail über den konfigurierten SMTP-Server (--smtp-server).
 
     to_override: exakte Empfängerliste (aus den Mail-Regeln). Ist sie gesetzt,
-    wird --smtp-to NICHT zusätzlich angeschrieben."""
+    wird --smtp-to NICHT zusätzlich angeschrieben. html: optionale HTML-Fassung
+    (multipart/alternative; Clients ohne HTML zeigen den Klartext)."""
     import smtplib
     from email.message import EmailMessage
     if not args.smtp_server:
@@ -817,6 +832,8 @@ def send_mail(args, subject, body, extra_to=(), to_override=None):
     msg["From"] = args.smtp_from or "kapa-dashboard@localhost"
     msg["To"] = ", ".join(to)
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
     host, _, port = args.smtp_server.partition(":")
     with smtplib.SMTP(host, int(port or 25), timeout=15) as smtp:
         if args.smtp_tls:
@@ -826,40 +843,79 @@ def send_mail(args, subject, body, extra_to=(), to_override=None):
         smtp.send_message(msg)
 
 
-def reservation_mail_body(r, action, admin, res_ttl):
-    valid = ""
+def _res_valid_date(r, res_ttl):
     if r.get("created"):
         try:
             d = datetime.fromisoformat(r["created"]) + \
                 timedelta(days=(res_ttl - 1 if res_ttl > 0 else 30))
-            valid = d.strftime("%d.%m.%Y")
+            return d.strftime("%d.%m.%Y")
         except ValueError:
             pass
+    return ""
+
+
+def _res_rows(r, res_ttl):
+    """Feldliste (Label, Wert) für die Reservierungs-Mail."""
+    return [
+        ("ID", r.get("id") or "–"),
+        ("Anfrage", r.get("name") or "?"),
+        ("Change / Jira", r.get("change") or "–"),
+        ("Cluster", r.get("cluster") or "?"),
+        ("vCPU", r.get("vcpu", 0)),
+        ("RAM", f"{r.get('ram_gb', 0)} GB"),
+        ("Storage", f"{r.get('storage_gb') or 0} GB"),
+        ("Team", r.get("abteilung") or "–"),
+        ("Beantragt", f"von {r.get('von') or '–'} am {r.get('created') or '–'}"),
+        ("Gültig bis", _res_valid_date(r, res_ttl) or "–"),
+    ]
+
+
+def reservation_mail_body(r, action, admin, res_ttl):
+    """Klartext-Fassung (Fallback für Clients ohne HTML)."""
     approvals = r.get("approvals") or []
-    if approvals:
-        freigaben = "\n".join(
-            f"             - {a.get('team') or '?'}: {a.get('by') or '?'} "
-            f"am {a.get('on') or '?'}" for a in approvals)
-        freigaben = "\n" + freigaben
-    else:
-        freigaben = " –"
-    stor = r.get("storage_gb") or 0
-    return (f"Kapazitätsreservierung {action}\n"
-            f"\n"
-            f"ID:          {r.get('id') or '–'}\n"
-            f"Anfrage:     {r.get('name', '?')}\n"
-            f"Change:      {r.get('change') or '–'}\n"
-            f"Cluster:     {r.get('cluster', '?')}\n"
-            f"vCPU:        {r.get('vcpu', 0)}\n"
-            f"RAM:         {r.get('ram_gb', 0)} GB\n"
-            f"Storage:     {stor} GB\n"
-            f"Abteilung:   {r.get('abteilung') or '–'}\n"
-            f"Beantragt:   von {r.get('von') or '–'} am {r.get('created') or '–'}\n"
-            f"Gültig bis:  {valid or '–'}\n"
-            f"Freigaben:  {freigaben}\n"
-            f"Kommentar:   {r.get('comment') or '–'}\n"
-            f"\n"
+    freigaben = ("\n" + "\n".join(
+        f"             - {a.get('team') or '?'}: {a.get('by') or '?'} "
+        f"am {a.get('on') or '?'}" for a in approvals)) if approvals else " –"
+    lines = [f"{label + ':':<14}{value}" for label, value in _res_rows(r, res_ttl)]
+    return (f"Kapazitätsreservierung {action}\n\n"
+            + "\n".join(lines) + "\n"
+            f"{'Freigaben:':<14}{freigaben}\n"
+            f"{'Kommentar:':<14}{r.get('comment') or '–'}\n\n"
             f"{action} von {admin} am {datetime.now().strftime('%d.%m.%Y %H:%M')}\n")
+
+
+def reservation_mail_html(r, action, admin, res_ttl):
+    """Dezente HTML-Fassung – neutral (Grautöne), ohne Farben/Bilder."""
+    esc = _html_escape
+    approvals = r.get("approvals") or []
+    freigaben = "<br>".join(
+        f"{esc(a.get('team') or '?')} · {esc(str(a.get('by') or '?'))} "
+        f"am {esc(str(a.get('on') or '?'))}" for a in approvals) or "–"
+    rows = _res_rows(r, res_ttl) + [("Freigaben", None), ("Kommentar", r.get("comment") or "–")]
+    tr = []
+    for label, value in rows:
+        v = freigaben if label == "Freigaben" else esc(str(value))
+        tr.append(
+            '<tr>'
+            '<td style="padding:7px 14px 7px 0;color:#6b7280;white-space:nowrap;'
+            'border-bottom:1px solid #eef0f3;vertical-align:top">' + esc(label) + '</td>'
+            '<td style="padding:7px 0;border-bottom:1px solid #eef0f3;'
+            'vertical-align:top">' + v + '</td></tr>')
+    now = datetime.now().strftime('%d.%m.%Y %H:%M')
+    return (
+        '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,'
+        'Helvetica,Arial,sans-serif;color:#1f2937;font-size:14px;line-height:1.5;'
+        'max-width:600px">'
+        '<div style="font-size:17px;font-weight:600;margin:0 0 2px">'
+        f'Kapazitätsreservierung {esc(action)}</div>'
+        '<div style="color:#6b7280;font-size:13px;margin:0 0 16px">'
+        f'{esc(r.get("name") or "?")} &middot; {esc(r.get("cluster") or "?")}</div>'
+        '<table style="border-collapse:collapse;width:100%;border-top:1px solid #eef0f3">'
+        + "".join(tr) + '</table>'
+        '<div style="color:#9ca3af;font-size:12px;margin-top:16px">'
+        f'{esc(action)} von {esc(str(admin or "System"))} am {now}</div>'
+        '<div style="color:#c3c8d0;font-size:11px;margin-top:4px">'
+        'VMware Kapazitätsplanung</div></div>')
 
 # ------------------------------------------------------------- Datenabfrage --
 
@@ -3634,6 +3690,7 @@ def serve(args, password):
                 "Benutzer": args.user or "–",
                 "Auth-Quelle": args.auth_source or "local",
                 "Zertifikat prüfen": j(not args.insecure),
+                "Proxy": args.aria_proxy or "– (direkt)",
                 "Auto-Refresh (Sek.)": args.refresh_interval,
                 "Aria-Passwort gesetzt": j(bool(password)),
             },
@@ -3941,10 +3998,11 @@ def serve(args, password):
                       "approved": "genehmigt"}.get(kind, kind)
             subject = f"Kapazitätsreservierung {action}: {name} ({cluster})"
         body = reservation_mail_body(r, action, actor or "System", args.res_ttl_days)
+        html = reservation_mail_html(r, action, actor or "System", args.res_ttl_days)
 
         def worker():
             try:
-                send_mail(args, subject, body, to_override=to)
+                send_mail(args, subject, body, to_override=to, html=html)
             except Exception as e:
                 print(f"Mail-Versand fehlgeschlagen: {e}", file=sys.stderr)
         threading.Thread(target=worker, daemon=True).start()
@@ -3993,7 +4051,7 @@ def serve(args, password):
                 clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
             else:
                 api = AriaOps(args.url, args.user, password, args.auth_source,
-                              verify_tls=not args.insecure)
+                              verify_tls=not args.insecure, proxy=args.aria_proxy)
                 clusters = collect(api, args.cpu_factor,
                                    progress=lambda m: state.update(progress=m),
                                    failover_hosts=args.failover_hosts,
@@ -4893,6 +4951,10 @@ def main():
                          "für Rückfragen), wird im Footer und auf der Login-Maske "
                          "angezeigt")
     ap.add_argument("--insecure", action="store_true", help="TLS-Zertifikat nicht prüfen (Self-Signed)")
+    ap.add_argument("--aria-proxy", default="",
+                    help="Optionaler HTTP(S)-Proxy für die Aria-Anfragen, z. B. "
+                         "http://proxy.firma.local:3128 (für abgesicherte Umgebungen; "
+                         "ohne Angabe direkte Verbindung)")
     ap.add_argument("--output", default="kapa_dashboard.html", help="Ausgabedatei")
     ap.add_argument("--json", help="Rohdaten zusätzlich als JSON speichern")
     ap.add_argument("--sample", action="store_true", help="Demo mit Beispieldaten")
@@ -5086,7 +5148,7 @@ def main():
             ap.error("--url und --user sind erforderlich (oder --sample für Demo)")
         pw = args.password or getpass.getpass("Passwort: ")
         api = AriaOps(args.url, args.user, pw, args.auth_source,
-                      verify_tls=not args.insecure)
+                      verify_tls=not args.insecure, proxy=args.aria_proxy)
         clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
                            exclude_tag=args.exclude_tag,
                            tag_property=args.tag_property,

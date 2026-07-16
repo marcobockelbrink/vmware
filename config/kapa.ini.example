@@ -29,6 +29,7 @@ user = svc-kapa-readonly
 #password = besser-per-ARIA_PASSWORD-umgebungsvariable
 auth-source = local
 #insecure = true                 ; Self-Signed-Zertifikat akzeptieren
+#aria-proxy = http://proxy.firma.local:3128   ; optionaler Proxy (leer = direkt)
 
 # --- Berechnung ---------------------------------------------------------------
 cpu-factor = 6

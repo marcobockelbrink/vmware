@@ -407,6 +407,7 @@ auslösen** – im Tab „Verwaltung" (Abschnitt „Backup") per Knopf oder dire
 | `--failover-hosts 1` | Ausfall-Hosts pro Cluster (N+1), `0` = aus |
 | `--auth-source local` | Auth-Quelle (z. B. AD-Quelle) |
 | `--insecure` | TLS-Zertifikat nicht prüfen (Self-Signed) |
+| `--aria-proxy http://proxy:3128` | optionaler HTTP(S)-Proxy für die Aria-Anfragen (abgesicherte Umgebungen) |
 | `--serve --port 8080` | Webserver-Modus |
 | `--bind 0.0.0.0` | Bind-Adresse für `--serve` |
 | `--refresh-interval 1800` | Auto-Aktualisierung in Sekunden (`0` = aus) |

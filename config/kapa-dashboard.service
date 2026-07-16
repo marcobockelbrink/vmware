@@ -46,6 +46,7 @@ ExecStart=/usr/bin/python3 /opt/kapa/aria_kapa.py --serve \
     --data-dir /var/lib/kapa \
     --exclude-tag ${EXCLUDE_TAG} \
     --url ${ARIA_URL} --user ${ARIA_USER} --auth-source ${ARIA_AUTH_SOURCE} \
+    --aria-proxy ${ARIA_PROXY} \
     --password-file ${CREDENTIALS_DIRECTORY}/aria-password \
     --ad-url ${AD_URL} --ad-domain ${AD_DOMAIN} --admin-user ${ADMIN_USER} \
     --ad-bind-dn ${AD_BIND_DN} --ad-base-dn ${AD_BASE_DN} \
