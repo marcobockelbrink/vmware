@@ -34,6 +34,11 @@ auth-source = local
 cpu-factor = 6
 failover-hosts = 1
 
+# --- Netzwerk / VLAN ----------------------------------------------------------
+# Uplink-/Trunk-Portgruppen (Name enthält "uplink" oder VLAN 0-4094) werden
+# standardmäßig ausgeblendet. Auf 'true' setzen, um sie einzublenden.
+#show-uplink-portgroups = false
+
 # --- Webserver ----------------------------------------------------------------
 serve = true
 bind = 127.0.0.1

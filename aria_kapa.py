@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.14.1"
+VERSION = "1.15"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -436,6 +436,80 @@ def ldap_member_of(url, bind_dn, bind_pw, base_dn, user_upn,
     finally:
         sock.close()
 
+
+def ldap_user_attr(url, bind_dn, bind_pw, base_dn, user_upn, attr,
+                   timeout=10, insecure=False):
+    """Ein einzelnes AD-Attribut eines Benutzers über das Service-Konto lesen
+    (z. B. 'mail', 'proxyAddresses'). Bindet als Service-Konto, sucht
+    (userPrincipalName=user_upn) und gibt den ersten Attributwert als String
+    zurück ('' bei Fehler/kein Wert)."""
+    import socket
+    if not (bind_dn and bind_pw and base_dn and user_upn and attr):
+        return ""
+    u = urllib.parse.urlparse(url if "//" in url else "ldap://" + url)
+    host, port = u.hostname, u.port or (636 if u.scheme == "ldaps" else 389)
+    sock = socket.create_connection((host, port), timeout=timeout)
+    try:
+        if u.scheme == "ldaps":
+            ctx = ssl.create_default_context()
+            if insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+        bind_req = _tlv(0x60, _tlv(0x02, b"\x03")
+                        + _tlv(0x04, bind_dn.encode())
+                        + _tlv(0x80, bind_pw.encode()))
+        sock.sendall(_tlv(0x30, _tlv(0x02, b"\x01") + bind_req))
+        buf = b""
+        tag, val, buf = _read_tlv(sock, buf)
+        ok = False
+        for t, v in _iter_tlv(val):
+            if t == 0x61:
+                for t2, v2 in _iter_tlv(v):
+                    if t2 == 0x0A:
+                        ok = (v2[:1] == b"\x00")
+                        break
+                break
+        if not ok:
+            return ""
+        filt = _tlv(0xA3, _tlv(0x04, b"userPrincipalName")
+                    + _tlv(0x04, user_upn.encode()))
+        attrs = _tlv(0x30, _tlv(0x04, attr.encode()))
+        search = _tlv(0x63,
+                      _tlv(0x04, base_dn.encode())
+                      + _tlv(0x0A, b"\x02") + _tlv(0x0A, b"\x00")
+                      + _tlv(0x02, b"\x00") + _tlv(0x02, bytes([30]))
+                      + _tlv(0x01, b"\x00") + filt + attrs)
+        sock.sendall(_tlv(0x30, _tlv(0x02, b"\x02") + search))
+        for _ in range(1000):
+            tag, val, buf = _read_tlv(sock, buf)
+            op = None
+            for t, v in _iter_tlv(val):
+                if t in (0x64, 0x65):
+                    op = (t, v)
+                    break
+            if not op:
+                continue
+            if op[0] == 0x65:                        # SearchResultDone
+                break
+            for t, v in _iter_tlv(op[1]):
+                if t == 0x30:                        # PartialAttributeList
+                    for _t, a in _iter_tlv(v):
+                        sub = list(_iter_tlv(a))
+                        if not sub:
+                            continue
+                        if sub[0][1].decode(errors="replace").lower() != attr.lower():
+                            continue
+                        for st, sv in sub[1:]:
+                            if st == 0x31:            # SET OF values
+                                for vt, vv in _iter_tlv(sv):
+                                    val = vv.decode(errors="replace").strip()
+                                    if val:
+                                        return val
+        return ""
+    finally:
+        sock.close()
+
 # ----------------------------------------------------------- Datendateien ----
 
 def ensure_dir(path):
@@ -793,16 +867,53 @@ def name_of(res):
     return res.get("resourceKey", {}).get("name", "?")
 
 
+def is_uplink_pg(name, vlan):
+    """dvSwitch-Uplink-/Trunk-Portgruppen erkennen (keine echten Netz-VLANs):
+    Name enthält 'uplink' ODER die VLAN ist eine breite Trunk-Range (z. B.
+    0-4094). Solche Gruppen tragen alle VLANs und gehören nicht in die
+    VLAN-Übersicht."""
+    if "uplink" in str(name or "").lower():
+        return True
+    m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", str(vlan or ""))
+    return bool(m) and int(m.group(2)) - int(m.group(1)) >= 100
+
+
+def strip_uplinks(clusters, hide=True):
+    """Uplink-/Trunk-Portgruppen aus den fertigen Cluster-Dicts entfernen
+    (an einer Stelle, damit Serve- und Demo-Modus gleich reagieren)."""
+    if not hide:
+        return clusters
+    for c in clusters:
+        pgs = c.get("portgroups")
+        if pgs:
+            c["portgroups"] = [p for p in pgs
+                               if not is_uplink_pg(p.get("name"), p.get("vlan"))]
+    return clusters
+
+
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             tag_property="", vsan_factor=0.5):
-    log = progress or (lambda m: print(m, file=sys.stderr))
+    # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
+    # grob geschätzten Prozentwert über report().
+    log = lambda m: print(m, file=sys.stderr)
 
+    def report(pct):
+        if progress:
+            try:
+                progress(str(int(pct)) + " %")
+            except Exception:
+                pass
+
+    report(3)
     log("Lese Cluster ...")
     clusters = api.resources("ClusterComputeResource")
+    report(8)
     log(f"Lese ESXi-Hosts ... ({len(clusters)} Cluster gefunden)")
     hosts = api.resources("HostSystem")
+    report(15)
     log(f"Lese VMs ... ({len(hosts)} Hosts gefunden)")
     vms = api.resources("VirtualMachine")
+    report(22)
     log(f"{len(vms)} VMs gefunden")
 
     # Systeme mit dem Ausschluss-Tag (z. B. Kapa_Filter:Ja) aus der Auswertung
@@ -823,6 +934,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     host_ids = [h["identifier"] for h in hosts]
     vm_ids = [v["identifier"] for v in vms]
 
+    report(30)
     log("Lese Host-Metriken (Cores, RAM) ...")
     host_stats = api.latest_stats(host_ids,
         ["cpu|corecount_provisioned", "mem|host_provisioned"],
@@ -831,6 +943,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     host_props = api.properties(host_ids, ["summary|parentCluster"],
         progress=lambda m: log(f"Host-Eigenschaften: {m}"))
 
+    report(50)
     log("Lese VM-Metriken (vCPU, RAM) ...")
     vm_stats = api.latest_stats(vm_ids,
         ["config|hardware|num_Cpu", "mem|guest_provisioned"],
@@ -849,6 +962,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                     "config|fileSystemType", "summary|fileSystemType"]
     datastores, ds_stats, ds_props = [], {}, {}
     try:
+        report(68)
         log("Lese Datastores (Storage-Kapazität) ...")
         datastores = api.resources("Datastore")
         ds_ids = [d["identifier"] for d in datastores]
@@ -882,6 +996,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # (/resources/{id}/properties), nicht über einen Tag-Endpunkt. Ohne
     # --tag-property werden alle Eigenschaften genommen, deren Schlüssel "tag"
     # enthält; das Log nennt die erkannten Schlüssel zur Kontrolle.
+    report(80)
     log("Lese vSphere-Tags der Cluster (Eigenschaften) ...")
     seen_keys, raw_sample = set(), []
     for c in clusters:
@@ -1017,6 +1132,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # Fehler = leerer Bereich, der Rest läuft weiter.
     VLAN_IN_NAME = re.compile(r"vlan[\s_\-]?(\d{1,4})", re.I)
     try:
+        report(90)
         log("Lese dvSwitches und Portgruppen ...")
         dvs_list = api.resources("VmwareDistributedVirtualSwitch")
         pg_list = api.resources("DistributedVirtualPortgroup")
@@ -1109,6 +1225,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     except Exception as e:
         log(f"Netzwerk-Daten (dvSwitch) nicht verfügbar: {e}")
 
+    report(100)
     return build_summary(data, cpu_factor, failover_hosts)
 
 
@@ -1207,6 +1324,9 @@ def sample_data():
             zweck = random.choice(["Prod", "Test", "Mgmt", "Backup", "DMZ"])
             pgs.append({"name": f"PG-{zweck}-10.{ci}.{octet}.0_24-VLAN{vlan}",
                         "vlan": str(vlan)})
+        # Eine Uplink-/Trunk-Portgruppe (VLAN 0-4094) – wird standardmäßig
+        # ausgeblendet (siehe --show-uplink-portgroups).
+        pgs.append({"name": f"dvSwitch-{cl}-DVUplinks", "vlan": "0-4094"})
         pgs.sort(key=lambda x: x["name"].lower())
         data[cl] = {"hosts": hosts, "vms": vms, "tags": tags, "portgroups": pgs,
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
@@ -3647,7 +3767,7 @@ def serve(args, password):
         # Anforderer -> der Antragsteller selbst
         if kind in ("created", "rejected", "approved") \
                 and (roles.get("anforderer") or {}).get(kind):
-            to += _split_addrs(r.get("von"))
+            to += _split_addrs(r.get("von_mail") or r.get("von"))
         # Admin / Auditor -> feste Verteiler-Adresse (Admin fällt auf --smtp-to zurück)
         for role in ("admin", "auditor"):
             rc = roles.get(role) or {}
@@ -3683,13 +3803,18 @@ def serve(args, password):
                 print(f"Mail-Versand fehlgeschlagen: {e}", file=sys.stderr)
         threading.Thread(target=worker, daemon=True).start()
 
+    def public_res(r):
+        """Reservierung ohne serverinterne Felder (z. B. die aufgelöste
+        Empfänger-Mailadresse von_mail) – so wie sie an Clients gehen darf."""
+        return {k: v for k, v in r.items() if k != "von_mail"}
+
     def visible_res(s):
         """Sichtbare Reservierungen je Rolle: Admin, Auditor und Reviewer sehen
         ALLE Anfragen. Nur Anforderer sind auf ihr eigenes Team beschränkt –
         fremde genehmigte bleiben anonymisiert enthalten, damit die freie
         Kapazität stimmt."""
         if s["role"] in ("admin", "auditor", "reviewer"):
-            return list(reservations)
+            return [public_res(r) for r in reservations]
         team = s.get("abteilung") or ""
         out = []
         for r in reservations:
@@ -3699,7 +3824,7 @@ def serve(args, password):
                 # (welches Team schon freigegeben hat) bleibt jedoch sichtbar,
                 # nur ohne Namen.
                 d = {k: v for k, v in r.items()
-                     if k not in ("approved_by", "rejected_by")}
+                     if k not in ("approved_by", "rejected_by", "von_mail")}
                 if isinstance(d.get("approvals"), list):
                     d["approvals"] = [{"team": a.get("team"), "on": a.get("on")}
                                       for a in d["approvals"]]
@@ -3715,7 +3840,7 @@ def serve(args, password):
         return out
 
     def do_refresh():
-        state.update(refreshing=True, error=None, progress="Verbinde mit Aria Operations ...")
+        state.update(refreshing=True, error=None, progress="0 %")
         try:
             if args.sample:
                 time.sleep(2)  # Demo: Ladezeit simulieren
@@ -3729,6 +3854,7 @@ def serve(args, password):
                                    exclude_tag=args.exclude_tag,
                                    tag_property=args.tag_property,
                                    vsan_factor=args.vsan_factor)
+            strip_uplinks(clusters, not args.show_uplink_portgroups)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
             ensure_dir(args.cache)
@@ -3951,7 +4077,7 @@ def serve(args, password):
                     with res_lock:
                         prune_reservations()
                         data = (visible_res(s) if s and not tok
-                                else list(reservations))
+                                else [public_res(r) for r in reservations])
                     for key in ("cluster", "abteilung"):
                         if key in query:
                             data = [r for r in data if r.get(key) == query[key][0]]
@@ -4052,9 +4178,22 @@ def serve(args, password):
                 audit(user, "Anmeldung", f"Rolle: {entry['role']}{source}"
                       + (f", Abteilung/Team: {entry.get('abteilung')}"
                          if entry.get("abteilung") else ""))
+                # Mailadresse des Anforderers: standardmäßig der Anmeldename (UPN);
+                # optional aus einem anderen AD-Attribut (--ad-mail-attribute).
+                mail_addr = ""
+                if args.ad_mail_attribute and args.ad_bind_dn:
+                    try:
+                        mail_addr = ldap_user_attr(
+                            args.ad_url, args.ad_bind_dn, args.ad_bind_password,
+                            args.ad_base_dn, user, args.ad_mail_attribute,
+                            insecure=args.ad_insecure)
+                    except Exception as e:
+                        print(f"AD-Mailattribut-Suche fehlgeschlagen: {e}",
+                              file=sys.stderr)
                 token = secrets.token_urlsafe(32)
                 sessions[token] = {"user": user, "role": entry["role"],
                                    "abteilung": entry.get("abteilung") or "",
+                                   "mail": mail_addr,
                                    "exp": time.time() + session_ttl}
                 secure = "" if args.cookie_insecure else " Secure;"
                 self._json({"user": user, "role": entry["role"],
@@ -4095,6 +4234,7 @@ def serve(args, password):
                              "ram_gb": int(float(item.get("ram_gb") or 0)),
                              "storage_gb": int(float(item.get("storage_gb") or 0)),
                              "von": s["user"] or "",
+                             "von_mail": s.get("mail") or "",
                              "abteilung": s.get("abteilung") or "",
                              "created": datetime.now().date().isoformat(),
                              "approvals": [],
@@ -4393,7 +4533,7 @@ def serve(args, password):
                 with res_lock:
                     reservations[:] = prune_res(cleaned)
                     save_res()
-                    self._json(list(reservations))
+                    self._json([public_res(r) for r in reservations])
                 audit(self._session()["user"], "Reservierungen importiert",
                       f"{len(cleaned)} Einträge (ersetzt Bestand)")
             elif self.path == "/api/teams":
@@ -4595,6 +4735,11 @@ def main():
                          "'summary|tag'. Ohne Angabe werden alle Eigenschaften "
                          "genommen, deren Schlüssel 'tag' enthält (das Log nennt "
                          "die erkannten Schlüssel)")
+    ap.add_argument("--show-uplink-portgroups", action="store_true",
+                    help="dvSwitch-Uplink-/Trunk-Portgruppen NICHT ausblenden. "
+                         "Standard: ausblenden (Portgruppen mit 'uplink' im Namen "
+                         "oder breiter VLAN-Trunk-Range wie 0-4094 sind keine "
+                         "echten Netz-VLANs)")
     ap.add_argument("--contact-info", default="",
                     help="Kontakt-/Impressumszeile (Abteilung/Firma + Mailadresse "
                          "für Rückfragen), wird im Footer und auf der Login-Maske "
@@ -4650,6 +4795,12 @@ def main():
     ap.add_argument("--ad-base-dn", default="",
                     help="Basis-DN für die Gruppensuche, z. B. DC=firma,DC=local "
                          "(ohne Angabe aus --ad-domain abgeleitet)")
+    ap.add_argument("--ad-mail-attribute", default="",
+                    help="AD-Attribut, aus dem die Empfänger-Mailadresse des "
+                         "Anforderers gelesen wird (z. B. 'mail'). Ohne Angabe wird "
+                         "der Anmeldename (UPN) als Adresse verwendet. Erfordert ein "
+                         "Service-Konto (--ad-bind-dn); wird bei der Anmeldung "
+                         "aufgelöst und mit der Reservierung gespeichert")
     ap.add_argument("--cookie-insecure", action="store_true",
                     help="Session-Cookie ohne Secure-Flag setzen (nur für lokalen "
                          "HTTP-Test ohne HTTPS-Proxy; im Betrieb NICHT verwenden)")
@@ -4792,6 +4943,7 @@ def main():
                            exclude_tag=args.exclude_tag,
                            tag_property=args.tag_property,
                            vsan_factor=args.vsan_factor)
+        strip_uplinks(clusters, not args.show_uplink_portgroups)
 
     if args.json:
         ensure_dir(args.json)

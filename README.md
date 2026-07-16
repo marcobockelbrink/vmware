@@ -133,10 +133,15 @@ Ablehnungen, Stornos und Backups:
   (`DistributedVirtualPortgroup`) als eigene Ressourcen. Die Zuordnung zum
   Cluster läuft — wie beim Storage — über die angedockten Hosts
   (dvSwitch → HostSystem → `summary|parentCluster`); die VLAN-Nummer wird best
-  effort aus den Portgruppen-Eigenschaften gelesen. Schlägt der Abruf fehl,
-  bleibt der Netzwerk-Reiter leer und der Rest läuft weiter. Das Log meldet
-  `dvSwitches: N, Portgruppen: M · zugeordnet: …` — dort nach dem nächsten
+  effort aus den Portgruppen-Eigenschaften gelesen (pro Portgruppe über
+  `/resources/{id}/properties`, jeder Schlüssel mit „vlan" im Namen). Schlägt der
+  Abruf fehl, bleibt der Netzwerk-Reiter leer und der Rest läuft weiter. Das Log
+  meldet `dvSwitches: N, Portgruppen: M · zugeordnet: …` — dort nach dem nächsten
   Abruf gegenprüfen.
+  **Uplink-/Trunk-Portgruppen** (Name enthält „uplink" oder VLAN ist eine breite
+  Trunk-Range wie `0-4094`) sind keine echten Netz-VLANs und werden
+  standardmäßig **ausgeblendet**; mit `--show-uplink-portgroups` lassen sie sich
+  wieder einblenden.
 - Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
   Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 
@@ -230,7 +235,11 @@ Detailkarte eines Clusters; Export/Import als JSON.
   eine Mail rausgeht — **Anlage**, **Ablehnung**, **Freigabe** (endgültige
   Genehmigung) und **„Team ist dran"** (ein Team ist im Freigabe-Workflow an der
   Reihe). Empfänger:
-  - **Anforderer** → der jeweilige Antragsteller (automatisch),
+  - **Anforderer** → der jeweilige Antragsteller (automatisch). Als Adresse dient
+    standardmäßig der Anmeldename (UPN); mit `--ad-mail-attribute mail` (o. Ä.)
+    wird stattdessen ein frei wählbares **AD-Attribut** ausgelesen (Service-Konto
+    `--ad-bind-dn` nötig; wird bei der Anmeldung aufgelöst und mit der
+    Reservierung gespeichert),
   - **Admin/Auditor** → je eine frei eingetragene Verteiler-Adresse
     (Admin fällt auf `--smtp-to` zurück, falls das Feld leer bleibt),
   - **„Team ist dran"** → die pro Genehmigungs-Team hinterlegte Adresse.
@@ -462,6 +471,14 @@ Fertige Vorlagen liegen unter [`config/`](config/):
   `BACKUP_PASSWORD`) oder `--smtp-password-file`/`--backup-password-file`.
   Empfehlung: eigenes Nur-Lese-Servicekonto in Aria Operations verwenden,
   das Skript liest ausschließlich.
+- **Passwort des AD-Service-Kontos** (für AD-Gruppen bzw. `--ad-mail-attribute`)
+  genauso als Datei verstecken, nicht im Klartext in die `kapa.env`:
+  ```bash
+  sudo sh -c 'echo "AD_PASSWORT" > /etc/kapa/ad_bind.pass'
+  sudo chown root:kapa /etc/kapa/ad_bind.pass && sudo chmod 640 /etc/kapa/ad_bind.pass
+  ```
+  dann `AD_BIND_PASSWORD_FILE=/etc/kapa/ad_bind.pass` setzen (`AD_BIND_PASSWORD`
+  leer lassen). Rangfolge überall: Parameter > Passwort-Datei > Umgebungsvariable.
 - **`config/nginx-kapa.conf`** — Snippet für den bestehenden 443er-Server:
   stellt das Dashboard unter `https://<host>/capa/` bereit (Redirect
   `/capa` → `/capa/`, Prefix-Stripping, Cookie-Pfad). Die Weboberfläche
