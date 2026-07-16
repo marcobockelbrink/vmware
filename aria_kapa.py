@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.7.2"
+VERSION = "1.8"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -613,7 +613,7 @@ def name_of(res):
 
 
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
-            tag_property=""):
+            tag_property="", vsan_factor=0.5):
     log = progress or (lambda m: print(m, file=sys.stderr))
 
     log("Lese Cluster ...")
@@ -662,7 +662,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
 
     # Storage-Kapazität aus den Datastores (vSAN + angedockte FC-LUNs).
     # Best effort – schlägt es fehl, bleibt die Anzeige leer, der Rest läuft weiter.
-    datastores, ds_stats = [], {}
+    # Der Typ (VMFS/NFS/vSAN) kommt als Eigenschaft; die Schlüssel unterscheiden
+    # sich je nach vROps-Version, deshalb mehrere Kandidaten in einem Bulk-Aufruf.
+    DS_TYPE_KEYS = ["summary|type", "summary|datastore_type",
+                    "config|fileSystemType", "summary|fileSystemType"]
+    datastores, ds_stats, ds_props = [], {}, {}
     try:
         log("Lese Datastores (Storage-Kapazität) ...")
         datastores = api.resources("Datastore")
@@ -670,8 +674,23 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         ds_stats = api.latest_stats(ds_ids,
             ["capacity|total_capacity", "capacity|used_space"],
             progress=lambda m: log(f"Datastore-Metriken: {m}"))
+        ds_props = api.properties(ds_ids, DS_TYPE_KEYS,
+            progress=lambda m: log(f"Datastore-Typ: {m}"))
     except Exception as e:
         log(f"Storage-Kapazität nicht verfügbar: {e}")
+
+    def ds_type(did, name):
+        """Storage-Typ eines Datastores (erste gefüllte Kandidaten-Eigenschaft)."""
+        p = ds_props.get(did) or {}
+        for k in DS_TYPE_KEYS:
+            v = str(p.get(k) or "").strip()
+            if v:
+                return v
+        # Fallback: vSAN-Datastores heißen praktisch immer so
+        return "vSAN" if "vsan" in (name or "").lower() else ""
+
+    def is_vsan(typ, name):
+        return "vsan" in (typ or "").lower() or "vsan" in (name or "").lower()
 
     data = {}
     for c in clusters:
@@ -782,18 +801,34 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             used = st.get("capacity|used_space")
             if not ds or (not cap and not used):
                 continue
-            data[cl]["storage"]["cap_gb"] += float(cap or 0)
-            data[cl]["storage"]["used_gb"] += float(used or 0)
+            nm = name_of(ds)
+            typ = ds_type(did, nm)
+            # vSAN spiegelt (RAID-1): brutto zählt nur anteilig als nutzbar.
+            # Kapazität UND Belegung werden mit dem Faktor gerechnet, sonst
+            # käme die Auslastung nicht hin (vROps meldet beide brutto).
+            f = vsan_factor if is_vsan(typ, nm) else 1.0
+            raw_cap, raw_used = float(cap or 0), float(used or 0)
+            eff_cap, eff_used = raw_cap * f, raw_used * f
+            data[cl]["storage"]["cap_gb"] += eff_cap
+            data[cl]["storage"]["used_gb"] += eff_used
             data[cl]["storage"]["luns"].append({
-                "name": name_of(ds),
-                "cap_gb": float(cap or 0),
-                "used_gb": float(used or 0)})
+                "name": nm,
+                "type": typ or "unbekannt",
+                "cap_gb": eff_cap,
+                "used_gb": eff_used,
+                "raw_cap_gb": raw_cap,
+                "factor": f})
     if datastores:
+        typen = sorted({l["type"] for d in data.values() for l in d["storage"]["luns"]})
         log("Storage zugeordnet: "
             + (", ".join(f"{cl}={len(d['storage']['luns'])} LUNs / "
                          f"{round(d['storage']['cap_gb'])} GB"
                          for cl, d in data.items() if d["storage"]["luns"])
-               or "keinem Cluster (Beziehungen prüfen)"))
+               or "keinem Cluster (Beziehungen prüfen)")
+            + (f" · Typen: {', '.join(typen)}" if typen else "")
+            + (f" · vSAN mit Faktor {vsan_factor} gerechnet"
+               if any(l["factor"] != 1.0 for d in data.values()
+                      for l in d["storage"]["luns"]) else ""))
 
     return build_summary(data, cpu_factor, failover_hosts)
 
@@ -833,8 +868,11 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "storageFree": round(stor_cap - stor_used, 1),
             "datastores": sorted(
                 [{"name": l.get("name"),
+                  "type": l.get("type") or "",
                   "cap_gb": round(float(l.get("cap_gb") or 0), 1),
-                  "used_gb": round(float(l.get("used_gb") or 0), 1)}
+                  "used_gb": round(float(l.get("used_gb") or 0), 1),
+                  "raw_cap_gb": round(float(l.get("raw_cap_gb") or 0), 1),
+                  "factor": float(l.get("factor") or 1.0)}
                  for l in (storage.get("luns") or [])],
                 key=lambda l: l["cap_gb"], reverse=True),
             "vmCount": len(d["vms"]),
@@ -862,14 +900,16 @@ def sample_data():
                 "ram_gb": random.choice([8, 16, 16, 32, 64]),
                 "on": random.random() > 0.1}
                for vi in range(1, random.randint(40, 120))]
-        # Beispiel-LUNs: ein großer vSAN-Datastore + mehrere FC-LUNs
-        luns = [{"name": f"vsan-cl{ci}",
-                 "cap_gb": random.choice([20000, 40000]),
-                 "used_gb": 0}]
+        # Beispiel-LUNs: ein großer vSAN-Datastore (Spiegelung -> 50 % nutzbar)
+        # plus mehrere FC-LUNs (VMFS, brutto = nutzbar)
+        raw = random.choice([40000, 80000])
+        luns = [{"name": f"vsan-cl{ci}", "type": "vSAN", "factor": 0.5,
+                 "raw_cap_gb": raw, "cap_gb": raw * 0.5, "used_gb": 0}]
         for li in range(1, random.randint(3, 7)):
-            luns.append({"name": f"FC-LUN-{ci}{li:02d}",
-                         "cap_gb": random.choice([2000, 4000, 8000]),
-                         "used_gb": 0})
+            cap = random.choice([2000, 4000, 8000])
+            luns.append({"name": f"FC-LUN-{ci}{li:02d}", "type": "VMFS",
+                         "factor": 1.0, "raw_cap_gb": cap,
+                         "cap_gb": cap, "used_gb": 0})
         for l in luns:
             l["used_gb"] = round(l["cap_gb"] * random.uniform(0.35, 0.9))
         cap_gb = sum(l["cap_gb"] for l in luns)
@@ -966,7 +1006,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .trtotal td { background:linear-gradient(135deg,#1e293b,#16233b); font-weight:600; }
   .barcol { width:130px; min-width:110px; }
   .bar.mini { height:8px; }
-  .hovercard { position:fixed; z-index:20; width:480px; max-width:92vw; display:none;
+  .hovercard { position:fixed; z-index:20; width:624px; max-width:92vw; display:none;
                max-height:82vh; overflow:auto; border-radius:12px;
                box-shadow:0 14px 44px rgba(0,0,0,.55); }
   .hovercard .card { border-color:#3b5479; }
@@ -1544,15 +1584,22 @@ function card(c, idx, isTotal) {
     : (a, b) => b.cap_gb - a.cap_gb);
   const dsRows = ds.map(d => {
     const p = d.cap_gb ? Math.round(d.used_gb / d.cap_gb * 100) : 0;
-    return `<tr><td>${esc(d.name)}</td><td class="num">${fmt(Math.round(d.cap_gb))}</td>
+    // Bei vSAN zeigen wir die NUTZBARE Kapazität (Faktor) – Brutto im Tooltip
+    const net = (d.factor && d.factor !== 1)
+      ? ` title="brutto ${fmt(Math.round(d.raw_cap_gb))} GB · mit Faktor ${d.factor} als nutzbar gerechnet"` : "";
+    const typ = (d.factor && d.factor !== 1)
+      ? `${esc(d.type)} <span style="color:var(--muted)">(${Math.round(d.factor * 100)} %)</span>`
+      : esc(d.type || "–");
+    return `<tr${net}><td>${esc(d.name)}</td><td>${typ}</td>
+      <td class="num">${fmt(Math.round(d.cap_gb))}</td>
       <td class="num">${fmt(Math.round(d.used_gb))}</td>
       <td class="num" style="color:${color(p)}">${p}%</td>
       <td class="num">${fmt(Math.round((d.cap_gb - d.used_gb) * 10) / 10)}</td></tr>`;
   }).join("");
   const dsLink = m => `<a href="#" onclick="setDsSort('${m}');return false"${DS_SORT === m ? ' style="font-weight:600;color:var(--text)"' : ""}>${m === "size" ? "Größe" : "Belegung"}</a>`;
   const dsBlock = ds.length ? `
-      <div style="margin:6px 0 8px;font-size:12px;color:var(--muted)">${ds.length} Datastores / LUNs · Sortierung: ${dsLink("size")} · ${dsLink("util")}</div>
-      <table><tr><th>Datastore / LUN</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>`
+      <div style="margin:6px 0 8px;font-size:12px;color:var(--muted)">${ds.length} Datastores / LUNs · Sortierung: ${dsLink("size")} · ${dsLink("util")}${ds.some(d => d.factor && d.factor !== 1) ? " · vSAN wird als nutzbare Kapazität gerechnet (Spiegelung)" : ""}</div>
+      <table><tr><th>Datastore / LUN</th><th>Typ</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Storage-Daten aus Aria.</div>`;
   const tagBlock = (c.tags || []).length ? `
     <div class="tagbox">
@@ -2822,7 +2869,8 @@ def serve(args, password):
                                    progress=lambda m: state.update(progress=m),
                                    failover_hosts=args.failover_hosts,
                                    exclude_tag=args.exclude_tag,
-                                   tag_property=args.tag_property)
+                                   tag_property=args.tag_property,
+                                   vsan_factor=args.vsan_factor)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
             ensure_dir(args.cache)
@@ -3605,6 +3653,10 @@ def main():
     ap.add_argument("--exclude-tag", default="",
                     help="VMs mit diesem vROps-Tag aus der Auswertung ausschließen, "
                          "Format Kategorie:Wert, z. B. Kapa_Filter:Ja (leer = aus)")
+    ap.add_argument("--vsan-factor", type=float, default=0.5,
+                    help="Anteil der vSAN-Bruttokapazität, der als nutzbar zählt "
+                         "(Standard: 0.5 für RAID-1/Spiegelung; 1 = brutto). "
+                         "Wirkt auf Kapazität UND Belegung des vSAN-Datastores.")
     ap.add_argument("--tag-property", default="",
                     help="Eigenschafts-Präfix für vSphere-Tags des Clusters, z. B. "
                          "'summary|tag'. Ohne Angabe werden alle Eigenschaften "
@@ -3779,7 +3831,8 @@ def main():
                       verify_tls=not args.insecure)
         clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
                            exclude_tag=args.exclude_tag,
-                           tag_property=args.tag_property)
+                           tag_property=args.tag_property,
+                           vsan_factor=args.vsan_factor)
 
     if args.json:
         ensure_dir(args.json)

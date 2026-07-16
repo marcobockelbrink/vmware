@@ -81,8 +81,15 @@ Ablehnungen, Stornos und Backups:
   über die Host-Beziehungen in Aria (Datastore → angedockte Hosts → Cluster);
   jeder Datastore zählt **je Cluster genau einmal**, auch wenn ihn alle Hosts
   sehen (kein Doppeln geteilter LUNs). Wird keine Kapazität geliefert, zeigt die
-  Spalte „–". Der Abruf protokolliert im Log, wie viele Datastores zugeordnet
-  wurden und die Summe je Cluster – hilfreich zur Kontrolle.
+  Spalte „–". Der Abruf protokolliert im Log die zugeordneten Datastores, die
+  Summe je Cluster und die erkannten Storage-Typen – hilfreich zur Kontrolle.
+- **vSAN wird als nutzbare Kapazität gerechnet**: Weil vSAN spiegelt (RAID-1),
+  zählt die Bruttokapazität nur anteilig. Der Faktor ist über `--vsan-factor`
+  einstellbar (Standard `0.5`; `1` = brutto). Er wirkt auf **Kapazität und
+  Belegung**, damit die Auslastung stimmt — vROps meldet beide Werte brutto.
+  Die LUN-Liste zeigt den **Storage-Typ** (vSAN/VMFS/NFS) und bei vSAN die
+  Bruttokapazität im Tooltip. Der Typ kommt aus den Datastore-Eigenschaften;
+  wird keiner geliefert, greift die Erkennung über den Datastore-Namen.
   - **LUN-Detail**: Ein Klick auf den Storage-Wert (oder auf den Clusternamen)
     öffnet die Detailkarte mit **jedem einzelnen Datastore/LUN** – wahlweise
     sortiert nach **Größe** oder nach **Belegung**, mit Größe, belegtem Platz,
