@@ -17,10 +17,18 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
 - **Detailkarte in Reitern**: Klick auf den Clusternamen öffnet die Details,
   aufgeteilt in **CPU & RAM** (Auslastung, Kennzahlen, Reservierungen inkl.
   Antrags-Formular und darunter die **vSphere-Tags** des Clusters), **Storage**
-  (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Hosts** und
+  (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Netzwerk** (die
+  dvSwitches des Clusters mit ihren Portgruppen und VLAN-Nummern), **Hosts** und
   **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
   Die Karte ist breit angelegt und lässt sich unten rechts frei in der Größe
   ziehen.
+- **VLAN-Suche** (Tab „VLAN-Suche" bzw. `/vlan-suche`, zwischen Kapazität und
+  Reservierungen): durchsucht die Portgruppen **aller** dvSwitches. Weil die
+  Portgruppen-Namen die IP-Netze enthalten, findet man über eine Teil-Eingabe
+  (z. B. `10.2.30` oder `VLAN205`) sofort, **an welchem Cluster** (über welchen
+  dvSwitch) ein Netz hängt. Ergebnis als sortierbare Tabelle Portgruppe / VLAN /
+  dvSwitch / Cluster. Ein dvSwitch, der mehrere Cluster umspannt, erscheint je
+  betroffenem Cluster – so ist die Zuordnung vollständig.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
 - **Cluster-Selektor**: Über der Kapazitätsliste blenden sich bis zu drei
@@ -121,6 +129,15 @@ Ablehnungen, Stornos und Backups:
   und nur die Tags werden gelistet — rohes JSON erscheint nie in der Anzeige.
   Das Log nennt nach jedem Abruf die erkannten Schlüssel und einen Auszug des
   Rohwerts — praktisch zum Feinjustieren.
+- **dvSwitches / Portgruppen**: Aria liefert die verteilten Switches
+  (`VmwareDistributedVirtualSwitch`) und Portgruppen
+  (`DistributedVirtualPortgroup`) als eigene Ressourcen. Die Zuordnung zum
+  Cluster läuft — wie beim Storage — über die angedockten Hosts
+  (dvSwitch → HostSystem → `summary|parentCluster`); die VLAN-Nummer wird best
+  effort aus den Portgruppen-Eigenschaften gelesen. Schlägt der Abruf fehl,
+  bleibt der Netzwerk-Reiter leer und der Rest läuft weiter. Das Log meldet
+  `dvSwitches: N, Portgruppen: M · zugeordnet: …` — dort nach dem nächsten
+  Abruf gegenprüfen.
 - Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
   Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.11"
+VERSION = "1.12"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -836,7 +836,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
 
     data = {}
     for c in clusters:
-        data[name_of(c)] = {"hosts": [], "vms": [], "tags": [],
+        data[name_of(c)] = {"hosts": [], "vms": [], "tags": [], "dvswitches": [],
                             "storage": {"cap_gb": 0.0, "used_gb": 0.0, "luns": []}}
 
     # vSphere-Tags je Cluster: vROps liefert sie als EIGENSCHAFTEN der Ressource
@@ -970,6 +970,68 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                if any(l["factor"] != 1.0 for d in data.values()
                       for l in d["storage"]["luns"]) else ""))
 
+    # dvSwitches + Portgruppen je Cluster (Netzwerk-Reiter im Popup + VLAN-Suche).
+    # Zuordnung wie beim Storage über die Hosts: dvSwitch -> HostSystem ->
+    # summary|parentCluster. Ein dvSwitch kann sich über mehrere Cluster
+    # erstrecken; er (und seine Portgruppen) erscheint dann bei jedem. Die
+    # VLAN-Nummer ist best effort (Property-Schlüssel je vROps-Version anders).
+    # Fehler = leerer Bereich, der Rest läuft weiter.
+    PG_VLAN_KEYS = ["config|defaultPortConfig|vlan|vlanId",
+                    "config|vlan|vlanId", "summary|vlanId",
+                    "config|defaultPortConfig|vlan|pvlanId"]
+    try:
+        log("Lese dvSwitches und Portgruppen ...")
+        dvs_list = api.resources("VmwareDistributedVirtualSwitch")
+        pg_list = api.resources("DistributedVirtualPortgroup")
+        pg_name = {p["identifier"]: name_of(p) for p in pg_list}
+        pg_props = {}
+        if pg_list:
+            try:
+                pg_props = api.properties([p["identifier"] for p in pg_list],
+                    PG_VLAN_KEYS, progress=lambda m: log(f"Portgruppen-VLAN: {m}"))
+            except Exception as e:
+                log(f"VLAN-Nummern nicht lesbar (nur Namen): {e}")
+
+        def pg_vlan(pid):
+            p = pg_props.get(pid) or {}
+            for k in PG_VLAN_KEYS:
+                v = str(p.get(k) or "").strip()
+                if v and v not in ("0", "None"):
+                    return v
+            return ""
+
+        for dv in dvs_list:
+            did = dv["identifier"]
+            try:
+                dv_hosts = api.related(did, {"HostSystem"})
+            except Exception as e:
+                log(f"dvSwitch-Hosts nicht lesbar: {e}")
+                dv_hosts = []
+            dv_clusters = {host_cluster.get(h) for h in dv_hosts} & set(data)
+            if not dv_clusters:
+                continue
+            try:
+                dv_pg_ids = api.related(did, {"DistributedVirtualPortgroup"})
+            except Exception:
+                dv_pg_ids = []
+            pgs = [{"name": pg_name.get(pid, "?"), "vlan": pg_vlan(pid)}
+                   for pid in dict.fromkeys(dv_pg_ids) if pid in pg_name]
+            pgs.sort(key=lambda x: x["name"].lower())
+            entry = {"name": name_of(dv), "portgroups": pgs}
+            for cl in dv_clusters:
+                data[cl]["dvswitches"].append(entry)
+        for d in data.values():
+            d["dvswitches"].sort(key=lambda x: x["name"].lower())
+        n_pg = sum(len(dv["portgroups"]) for d in data.values()
+                   for dv in d["dvswitches"])
+        log(f"dvSwitches: {len(dvs_list)}, Portgruppen: {len(pg_list)} · zugeordnet: "
+            + (", ".join(f"{cl}={len(d['dvswitches'])}"
+                         for cl, d in data.items() if d["dvswitches"])
+               or "keinem Cluster (Beziehungen prüfen)")
+            + (f" · {n_pg} Portgruppen sichtbar" if n_pg else ""))
+    except Exception as e:
+        log(f"Netzwerk-Daten (dvSwitch) nicht verfügbar: {e}")
+
     return build_summary(data, cpu_factor, failover_hosts)
 
 
@@ -1018,6 +1080,7 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "vmCount": len(d["vms"]),
             "vmOff": sum(1 for v in d["vms"] if not v["on"]),
             "tags": list(d.get("tags") or []),
+            "dvswitches": list(d.get("dvswitches") or []),
             "hosts": d["hosts"],
             "vms": d["vms"],
         })
@@ -1058,7 +1121,19 @@ def sample_data():
                 f"Umgebung: {random.choice(['Produktion', 'Test'])}",
                 f"Betreuung: {random.choice(['Team Netzwerk', 'Team Betrieb'])}",
                 "Kapa_Filter: Nein"]
+        # Beispiel-dvSwitch mit Portgruppen, die (wie in echt) IP-Netze im Namen
+        # tragen – so lässt sich die VLAN-Suche offline ausprobieren.
+        pgs = []
+        for pi in range(random.randint(3, 6)):
+            octet = 10 + ci * 10 + pi
+            vlan = 100 * ci + pi
+            zweck = random.choice(["Prod", "Test", "Mgmt", "Backup", "DMZ"])
+            pgs.append({"name": f"PG-{zweck}-10.{ci}.{octet}.0_24-VLAN{vlan}",
+                        "vlan": str(vlan)})
+        pgs.sort(key=lambda x: x["name"].lower())
+        dvswitches = [{"name": f"dvSwitch-{cl}", "portgroups": pgs}]
         data[cl] = {"hosts": hosts, "vms": vms, "tags": tags,
+                    "dvswitches": dvswitches,
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
 
@@ -1176,6 +1251,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .selbar select { background:#0f172a; border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:13px; }
   .selbar .btn { padding:5px 10px; }
+  .netbox { margin-top:12px; }
+  .netbox:first-child { margin-top:0; }
+  .netbox h3 { font-size:13px; color:var(--text); margin-bottom:6px; }
+  .vlanbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .vlanbar input { flex:1; max-width:520px; background:#0f172a; border:1px solid var(--line);
+                   color:var(--text); border-radius:8px; padding:9px 12px; font-size:14px; }
   .kpi { background:#0b1220; border-radius:8px; padding:8px 12px; font-size:12px; color:var(--muted); }
   .kpi b { display:block; font-size:16px; color:var(--text); }
   details { margin-top:12px; }
@@ -1311,6 +1392,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <div class="tabs">
   <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
+  <span class="tab" id="tabVlan" onclick="setView('vlan')">VLAN-Suche</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
   <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
@@ -1326,6 +1408,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <th class="num">Storage frei (GB)</th><th class="barcol">Storage-Auslastung</th>
     <th class="num">Res.</th></tr></thead>
   <tbody id="ktbody"></tbody>
+</table>
+</div>
+</div>
+<div id="vlanView" style="display:none">
+<div class="hint" style="color:var(--muted);margin:4px 0 10px">
+  Portgruppen aller dvSwitches durchsuchen – z. B. nach einer IP-Adresse oder
+  einem Netz aus dem Portgruppen-Namen. Das Ergebnis zeigt, an welchem Cluster
+  (über welchen dvSwitch) das Netz hängt. Teil-Eingaben genügen
+  (z. B. <code>10.2.30</code> oder <code>VLAN205</code>).</div>
+<div class="vlanbar">
+  <input id="vlanQ" placeholder="IP-Adresse, Netz oder Portgruppen-Name suchen …"
+         oninput="renderVlan()" autocomplete="off">
+  <span id="vlanCount" style="color:var(--muted);font-size:13px"></span>
+</div>
+<div class="tablewrap">
+<table class="kt" id="vtable">
+  <thead><tr><th>Portgruppe</th><th class="num">VLAN</th><th>dvSwitch</th><th>Cluster</th></tr></thead>
+  <tbody id="vtbody"></tbody>
 </table>
 </div>
 </div>
@@ -1884,17 +1984,32 @@ function card(c, idx, isTotal) {
     ${dsBlock}`;
   const paneHosts = `<table><tr><th>Host</th><th class="num">Cores</th><th class="num">RAM (GB)</th></tr>${hostRows}</table>`;
   const paneVms = `<table><tr><th>VM</th><th class="num">vCPU</th><th class="num">RAM (GB)</th></tr>${vmRows}</table>`;
+  // ---- Netzwerk-Reiter: dvSwitches mit ihren Portgruppen ----
+  const dvs = c.dvswitches || [];
+  const nPg = dvs.reduce((s, d) => s + (d.portgroups || []).length, 0);
+  const paneNet = dvs.length ? dvs.map(d => {
+    const pgRows = (d.portgroups || []).map(p =>
+      `<tr><td>${esc(p.name)}</td><td class="num">${esc(p.vlan || "–")}</td></tr>`).join("");
+    return `<div class="netbox">
+      <h3>${esc(d.name)} <span style="color:var(--muted);font-weight:400">· ${(d.portgroups || []).length} Portgruppen</span></h3>
+      ${(d.portgroups || []).length
+        ? `<table><tr><th>Portgruppe</th><th class="num">VLAN</th></tr>${pgRows}</table>`
+        : `<div style="color:var(--muted);font-size:12px">Keine Portgruppen.</div>`}
+    </div>`;
+  }).join("")
+    : `<div style="color:var(--muted);font-size:12px">Keine dvSwitch-Daten aus Aria.</div>`;
 
   // Gesamt-Karte hat keine Host-/VM-Listen
   const avail = isTotal ? [["cpu", "CPU & RAM"], ["storage", "Storage"]]
     : [["cpu", "CPU & RAM"], ["storage", "Storage"],
+       ["net", "Netzwerk" + (dvs.length ? " (" + nPg + ")" : "")],
        ["hosts", "Hosts (" + (c.hosts || []).length + ")"],
        ["vms", "VMs (" + c.vmCount + ")"]];
   const tab = avail.some(t => t[0] === CARD_TAB) ? CARD_TAB : "cpu";
   const tabBar = `<div class="tabs ctabs">${avail.map(([k, l]) =>
     `<span class="tab ${tab === k ? "active" : ""}" onclick="setCardTab('${k}')">${l}</span>`).join("")}</div>`;
   const pane = tab === "storage" ? paneStorage : tab === "hosts" ? paneHosts
-             : tab === "vms" ? paneVms : paneCpu;
+             : tab === "vms" ? paneVms : tab === "net" ? paneNet : paneCpu;
 
   return `<div class="card ${isTotal?'total':''}">
     <h2>${esc(c.name)}</h2>
@@ -1905,7 +2020,7 @@ function card(c, idx, isTotal) {
 }
 
 // ---- Reiter in der Detailkarte ----
-let CARD_TAB = "cpu";   // cpu | storage | hosts | vms
+let CARD_TAB = "cpu";   // cpu | storage | net | hosts | vms
 function setCardTab(t) { CARD_TAB = t; rerenderCard(); }
 
 // ---- Storage-Detail (LUN-Liste) im Storage-Reiter ----
@@ -1963,7 +2078,8 @@ function row(c, idx, isTotal) {
 // ---- Ansichten: Kapazität / Reservierungen / Genehmigungen / Verwaltung ----
 // endsWith statt ===, damit die Routen auch hinter einem Proxy-Unterpfad
 // (z. B. https://host/capa/reservierungen) funktionieren
-let VIEW = (location.pathname.endsWith("/reservierungen") || location.hash === "#reservierungen") ? "res"
+let VIEW = (location.pathname.endsWith("/vlan-suche") || location.hash === "#vlan-suche") ? "vlan"
+         : (location.pathname.endsWith("/reservierungen") || location.hash === "#reservierungen") ? "res"
          : (location.pathname.endsWith("/genehmigungen") || location.hash === "#genehmigungen") ? "app"
          : (location.pathname.endsWith("/verwaltung") || location.hash === "#verwaltung") ? "adm"
          : (location.pathname.endsWith("/log") || location.hash === "#log") ? "log"
@@ -1972,19 +2088,21 @@ if ((VIEW === "adm" || VIEW === "log") && !IS_ADMIN) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  const tabs = { kapa: "tabKapa", res: "tabRes", app: "tabApp", adm: "tabAdm", log: "tabLog" };
-  const views = { kapa: "kapaView", res: "resView", app: "appView", adm: "admView", log: "logView" };
+  const tabs = { kapa: "tabKapa", vlan: "tabVlan", res: "tabRes", app: "tabApp", adm: "tabAdm", log: "tabLog" };
+  const views = { kapa: "kapaView", vlan: "vlanView", res: "resView", app: "appView", adm: "admView", log: "logView" };
   for (const k in tabs) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
+  document.getElementById("filter").style.display = v === "vlan" ? "none" : "";
   document.getElementById("filter").placeholder =
     v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
   try {
     history.replaceState(null, "",
       v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
-      : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
+      : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
+      : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
   hideCard();
   if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); }
@@ -2418,9 +2536,40 @@ function renderAppTable() {
   reSort("atable");
 }
 
+// ---- VLAN-/Portgruppen-Suche (cluster-übergreifend) ----
+// Ein dvSwitch, der mehrere Cluster umspannt, liefert seine Portgruppen je
+// Cluster einmal (serverseitig so aufgebaut) – die Suche zeigt also für jedes
+// betroffene Cluster eine Zeile, damit „wo hängt das Netz" vollständig ist.
+let VLAN_INDEX = null;
+function vlanIndex() {
+  if (VLAN_INDEX) return VLAN_INDEX;
+  const out = [];
+  CLUSTERS.forEach(c => (c.dvswitches || []).forEach(d =>
+    (d.portgroups || []).forEach(p =>
+      out.push({ pg: p.name || "", vlan: p.vlan || "", dvs: d.name || "", cluster: c.name }))));
+  VLAN_INDEX = out;
+  return out;
+}
+function renderVlan() {
+  const q = (document.getElementById("vlanQ").value || "").trim().toLowerCase();
+  const all = vlanIndex();
+  const hits = q ? all.filter(r =>
+    r.pg.toLowerCase().includes(q) || String(r.vlan).toLowerCase().includes(q)) : all;
+  document.getElementById("vtbody").innerHTML = hits.map(r =>
+    `<tr><td>${esc(r.pg)}</td><td class="num">${esc(r.vlan || "–")}</td>
+     <td>${esc(r.dvs)}</td><td>${esc(r.cluster)}</td></tr>`).join("")
+    || `<tr><td colspan="4" style="color:var(--muted)">${all.length
+         ? "Keine Portgruppe passt zur Suche." : "Keine dvSwitch-/Portgruppen-Daten aus Aria."}</td></tr>`;
+  document.getElementById("vlanCount").textContent = all.length
+    ? (q ? hits.length + " von " + all.length + " Portgruppen"
+         : all.length + " Portgruppen gesamt") : "";
+  reSort("vtable");
+}
+
 function render() {
   const pend = RES.filter(isPend).length;
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
+  if (VIEW === "vlan") { renderVlan(); return; }
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderSelector(); renderTokenTable(); return; }
@@ -2510,7 +2659,7 @@ if (ROLE === "anforderer") {
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
 const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0},
-                   ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1} };
+                   ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1}, vtable:{pin:0} };
 const sortState = {};
 function cellVal(td) {
   let t = (td ? td.textContent : "").trim();
