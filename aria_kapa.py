@@ -2353,10 +2353,11 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__DATE__", updated or datetime.now().strftime("%d.%m.%Y %H:%M")))
 
 
-def render_dashboard(clusters, cpu_factor, path, res_ttl=31, failover_hosts=1):
+def render_dashboard(clusters, cpu_factor, path, res_ttl=31, failover_hosts=1,
+                     contact=""):
     with open(path, "w", encoding="utf-8") as f:
         f.write(render_html(clusters, cpu_factor, res_ttl=res_ttl,
-                            failover_hosts=failover_hosts))
+                            failover_hosts=failover_hosts, contact=contact))
 
 # ------------------------------------------------------------- Serve-Modus ---
 
@@ -3786,7 +3787,8 @@ def main():
             json.dump(clusters, f, ensure_ascii=False, indent=2)
 
     render_dashboard(clusters, args.cpu_factor, args.output,
-                     args.res_ttl_days, args.failover_hosts)
+                     args.res_ttl_days, args.failover_hosts,
+                     contact=args.contact_info)
 
     print(f"\n{'Cluster':<22}{'Hosts':>6}{'Cores':>7}{'vCPU-Kap':>10}{'vCPU-belegt':>12}"
           f"{'vCPU-frei':>10}{'RAM-Kap GB':>12}{'RAM-belegt':>12}{'RAM-frei':>10}")

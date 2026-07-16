@@ -3,10 +3,23 @@
 # =============================================================================
 # Verwendung:  python3 aria_kapa.py --config /etc/kapa/kapa.ini --serve
 # Schlüssel entsprechen den Kommandozeilen-Optionen (mit - oder _).
-# Kommandozeilen-Argumente überschreiben Werte aus dieser Datei.
+#
+# RANGFOLGE (wichtig!):  Kommandozeile  >  diese INI  >  eingebauter Standard
+#
+# ACHTUNG beim Betrieb mit systemd: Die Unit baut aus kapa.env
+# Kommandozeilen-Argumente (z. B. --url ${ARIA_URL}). Diese schlagen die INI —
+# und zwar AUCH, wenn die Variable in kapa.env leer ist! Ein leeres Argument
+# überschreibt den INI-Wert mit "leer".
+#   => Eine Option entweder in kapa.env ODER hier pflegen, nicht in beiden.
+#   => In der INI gehören die Optionen, die die Unit NICHT übergibt, z. B.
+#      cpu-factor, failover-hosts, res-ttl-days, contact-info, tag-property,
+#      backup-interval, backup-keep-days.
+#      Eingebunden wird sie über:  KAPA_EXTRA_ARGS=--config /etc/kapa/kapa.ini
+#
 # Enthält die Datei Passwörter: chmod 600 nicht vergessen!
-# (Alternativ Passwörter per Umgebung: ARIA_PASSWORD, SMTP_PASSWORD,
-#  BACKUP_PASSWORD — siehe kapa.env.example)
+# (Passwörter alternativ per Umgebung: ARIA_PASSWORD, SMTP_PASSWORD,
+#  BACKUP_PASSWORD, AD_BIND_PASSWORD — diese greifen als LETZTE Rückfallebene:
+#  Parameter > Passwort-Datei > Umgebungsvariable; siehe kapa.env.example)
 # =============================================================================
 
 [kapa]
