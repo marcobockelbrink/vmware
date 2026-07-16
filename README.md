@@ -21,6 +21,12 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
   **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
+- **Cluster-Selektor**: Über der Kapazitätsliste blenden sich bis zu drei
+  **kaskadierende** Auswahllisten ein, mit denen man sich anhand der
+  vSphere-Tags zu den Clustern durchfiltert (z. B. Umgebung → Standort →
+  Betreuung). Stufe 2 zeigt nur Werte, die zur Wahl in Stufe 1 passen. Welche
+  Tag-Kategorien die Stufen bilden, konfigurierst du frei im Tab „Verwaltung"
+  (Abschnitt „Cluster-Selektor") — die Werte kommen live aus den Tags.
 - **Sortierbare Tabellen**: Klick auf eine Spaltenüberschrift sortiert auf-/
   absteigend (numerisch, nach Datum oder Text) – in allen Datentabellen
   (Kapazität, Reservierungen, Genehmigungen, Log, Benutzer/Rollen, Tokens). Die

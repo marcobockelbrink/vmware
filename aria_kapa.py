@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.8.1"
+VERSION = "1.9"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1025,6 +1025,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .tag { display:inline-block; background:#0b1220; border:1px solid var(--line);
          border-radius:6px; padding:2px 8px; margin:0 4px 4px 0;
          font-size:11px; color:var(--text); }
+  .selbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+            background:#0b1220; border:1px solid var(--line); border-radius:10px;
+            padding:10px 14px; margin-bottom:12px; }
+  .selbar .sellabel { font-size:12px; color:var(--muted); font-weight:600; }
+  .selbar label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  .selbar select { background:#0f172a; border:1px solid var(--line); color:var(--text);
+                   border-radius:6px; padding:5px 8px; font-size:13px; }
+  .selbar .btn { padding:5px 10px; }
   .kpi { background:#0b1220; border-radius:8px; padding:8px 12px; font-size:12px; color:var(--muted); }
   .kpi b { display:block; font-size:16px; color:var(--text); }
   details { margin-top:12px; }
@@ -1165,7 +1173,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
   <span class="tab" id="tabLog" onclick="setView('log')">Log</span>
 </div>
-<div class="tablewrap" id="kapaView">
+<div id="kapaView">
+<div class="selbar" id="clusterSelector" style="display:none"></div>
+<div class="tablewrap">
 <table class="kt" id="ktable">
   <thead><tr><th>Cluster</th><th class="num">Hosts</th><th class="num">VMs</th>
     <th class="num">vCPU frei</th><th class="barcol">vCPU-Auslastung</th>
@@ -1174,6 +1184,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <th class="num">Res.</th></tr></thead>
   <tbody id="ktbody"></tbody>
 </table>
+</div>
 </div>
 <div class="tablewrap" id="resView" style="display:none">
 <table class="kt" id="rtable">
@@ -1221,6 +1232,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <tbody id="tmbody"></tbody>
 </table>
 </div>
+<div class="sechead" style="margin-top:20px">Cluster-Selektor (Filter nach vSphere-Tags)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Bis zu 3 Stufen, jede Stufe eine Tag-Kategorie. In der Kapazitätsübersicht
+  erscheinen dann kaskadierende Auswahllisten (Stufe 2 zeigt nur Werte, die zur
+  Wahl in Stufe 1 passen). Die Kategorien kommen aus den vorhandenen
+  Cluster-Tags – sind noch keine Daten geladen, ist die Liste leer.</div>
+<div class="tablewrap">
+<table class="kt" id="seltable">
+  <thead><tr><th style="width:60px">Stufe</th><th>Tag-Kategorie</th></tr></thead>
+  <tbody id="selbody"></tbody>
+</table>
+</div>
 <div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
 <div class="tablewrap">
 <table class="kt" id="ttable">
@@ -1252,7 +1275,67 @@ const SERVE = __SERVE__;
 const TTL = __TTL__;
 const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
 let TEAMS = __TEAMS__;      // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig); auf der Verwaltungsseite pflegbar
+let SELECTOR = __SELECTOR__; // Tag-Kategorien des Cluster-Selektors (max 3, kaskadierend)
+let SEL_VALUES = {};         // gewählte Werte je Kategorie
 const LS_KEY = "aria_kapa_reservierungen";
+
+// ---- vSphere-Tags / Cluster-Selektor ----
+function tagCategories() {   // alle im Datenbestand vorkommenden Tag-Kategorien
+  const set = new Set();
+  CLUSTERS.forEach(c => (c.tags || []).forEach(t => {
+    const i = t.indexOf(": "); if (i > 0) set.add(t.slice(0, i)); }));
+  return [...set].sort();
+}
+function clusterTagVals(c, cat) {   // Werte, die Cluster c für Kategorie cat hat
+  const p = cat + ": ";
+  return (c.tags || []).filter(t => t.startsWith(p)).map(t => t.slice(p.length));
+}
+function selMatch(c) {       // erfüllt Cluster c alle gewählten Selektor-Stufen?
+  return SELECTOR.every(cat => {
+    const v = SEL_VALUES[cat];
+    return !v || clusterTagVals(c, cat).includes(v);
+  });
+}
+// Werte für Stufe i – kaskadierend: nur die, die zu den höheren Stufen passen
+function selectorOptions(i) {
+  const upper = SELECTOR.slice(0, i);
+  const base = CLUSTERS.filter(c => upper.every(cat => {
+    const v = SEL_VALUES[cat]; return !v || clusterTagVals(c, cat).includes(v); }));
+  const vals = new Set();
+  base.forEach(c => clusterTagVals(c, SELECTOR[i]).forEach(v => vals.add(v)));
+  return [...vals].sort();
+}
+function onSelectorChange(i, val) {
+  SEL_VALUES[SELECTOR[i]] = val;
+  // tiefere Stufen zurücksetzen, wenn ihr Wert nicht mehr wählbar ist
+  for (let j = i + 1; j < SELECTOR.length; j++) {
+    const opts = selectorOptions(j);
+    if (SEL_VALUES[SELECTOR[j]] && !opts.includes(SEL_VALUES[SELECTOR[j]]))
+      SEL_VALUES[SELECTOR[j]] = "";
+  }
+  render();
+}
+function resetSelector() { SEL_VALUES = {}; render(); }
+function renderClusterSelector() {
+  const box = document.getElementById("clusterSelector");
+  if (!box) return;
+  const cats = SELECTOR.filter(c => tagCategories().includes(c));
+  if (!cats.length) { box.innerHTML = ""; box.style.display = "none"; return; }
+  box.style.display = "";
+  const any = SELECTOR.some(c => SEL_VALUES[c]);
+  box.innerHTML = '<span class="sellabel">Cluster-Selektor:</span>' +
+    SELECTOR.map((cat, i) => {
+      if (!tagCategories().includes(cat)) return "";
+      const opts = selectorOptions(i);
+      const cur = SEL_VALUES[cat] || "";
+      return `<label>${esc(cat)}
+        <select onchange="onSelectorChange(${i}, this.value)">
+          <option value="">alle</option>
+          ${opts.map(v => `<option value="${esc(v)}" ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
+        </select></label>`;
+    }).join("") +
+    (any ? '<button class="btn" onclick="resetSelector()">Zurücksetzen</button>' : "");
+}
 
 // ---- Rollen ----
 const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
@@ -1686,7 +1769,8 @@ let TOTAL = null;
 function filteredIdx() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   return CLUSTERS.map((c, i) => i)
-                 .filter(i => !q || CLUSTERS[i].name.toLowerCase().includes(q));
+                 .filter(i => (!q || CLUSTERS[i].name.toLowerCase().includes(q))
+                              && selMatch(CLUSTERS[i]));
 }
 
 function miniBar(used, resv, cap) {
@@ -1749,7 +1833,7 @@ function setView(v) {
       : v === "adm" ? "#verwaltung" : v === "log" ? "#log" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadRoleNames(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); }
   if (v === "log") loadLog();
   render();
 }
@@ -1938,6 +2022,40 @@ function renderTeams() {
     (rows || `<tr><td colspan="3" style="color:var(--muted)">Keine Teams – einstufig (Admin genehmigt direkt).</td></tr>`);
 }
 
+// ---- Cluster-Selektor konfigurieren ----
+async function apiSelector(method, body) {
+  const r = await fetch("api/selector", { method: method,
+    headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadSelector() {
+  apiSelector("GET").then(d => { if (d && d.selector) SELECTOR = d.selector;
+                                 if (VIEW === "adm") render(); }).catch(() => {});
+}
+function saveSelector() {
+  const list = [0, 1, 2].map(i => document.getElementById("sel" + i).value).filter(Boolean);
+  apiSelector("PUT", list).then(d => {
+    if (d && d.selector) SELECTOR = d.selector;
+    Object.keys(SEL_VALUES).forEach(k => { if (!SELECTOR.includes(k)) delete SEL_VALUES[k]; });
+    render();
+  }).catch(() => alert("Speichern des Selektors fehlgeschlagen."));
+}
+function renderSelector() {
+  const all = [...new Set([...tagCategories(), ...SELECTOR])].sort();
+  const rows = [0, 1, 2].map(i => {
+    const cur = SELECTOR[i] || "";
+    return `<tr><td class="num">${i + 1}</td>
+      <td><select id="sel${i}" class="filterbox" style="max-width:360px" onchange="saveSelector()">
+        <option value="">– keine –</option>
+        ${all.map(c => `<option value="${esc(c)}" ${cur === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+      </select>${cur && !tagCategories().includes(cur) ? ' <span class="st pend" title="Kategorie derzeit in keinem Cluster-Tag">⚠ derzeit ohne Werte</span>' : ""}</td></tr>`;
+  }).join("");
+  document.getElementById("selbody").innerHTML = rows +
+    (all.length ? "" : `<tr><td></td><td style="color:var(--muted)">Noch keine Tag-Kategorien – erst nach dem ersten Aria-Abruf verfügbar.</td></tr>`);
+}
+
 // ---- Rollen-Bezeichnungen frei umbenennen ----
 async function apiRoleNames(method, body) {
   const r = await fetch("api/rolenames", {
@@ -2116,8 +2234,9 @@ function render() {
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderTokenTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderSelector(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
+  renderClusterSelector();
   const idxs = filteredIdx();
   const vis = idxs.map(i => CLUSTERS[i]);
   TOTAL = {
@@ -2425,7 +2544,7 @@ def _html_escape(s):
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
-                contact=""):
+                contact="", selector=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -2450,6 +2569,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__TTL__", str(res_ttl))
             .replace("__USERINFO__", json_for_html(userinfo))
             .replace("__TEAMS__", json_for_html(teams or []))
+            .replace("__SELECTOR__", json_for_html(selector or []))
             .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
@@ -2530,6 +2650,35 @@ def serve(args, password):
             json.dump(approval_teams, f, ensure_ascii=False, indent=2)
 
     approval_teams = load_teams()
+
+    # ---- Cluster-Selektor: bis zu 3 Tag-Kategorien (kaskadierender Filter) ----
+    selector_lock = threading.Lock()
+
+    def clean_selector(seq):
+        out = []
+        for t in seq:
+            t = str(t or "").strip()
+            if t and t not in out:
+                out.append(t)
+        return out[:3]
+
+    def load_selector():
+        if os.path.exists(args.selector_file):
+            try:
+                with open(args.selector_file, encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, list):
+                    return clean_selector(d)
+            except Exception as e:
+                print(f"Selektor-Datei unlesbar, starte ohne: {e}", file=sys.stderr)
+        return []
+
+    def save_selector():
+        ensure_dir(args.selector_file)
+        with open(args.selector_file, "w", encoding="utf-8") as f:
+            json.dump(cluster_selector, f, ensure_ascii=False, indent=2)
+
+    cluster_selector = load_selector()
 
     # ---- Frei wählbare Rollen-Bezeichnungen (Schlüssel bleiben fest) ----
     rolenames_lock = threading.Lock()
@@ -3104,7 +3253,8 @@ def serve(args, password):
                                        res_ttl=args.res_ttl_days,
                                        failover_hosts=args.failover_hosts,
                                        userinfo=userinfo, teams=approval_teams,
-                                       rolenames=role_names, contact=args.contact_info),
+                                       rolenames=role_names, contact=args.contact_info,
+                                       selector=cluster_selector),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 if not self._require():
@@ -3175,6 +3325,11 @@ def serve(args, password):
                     return
                 with teams_lock:
                     self._json({"teams": list(approval_teams)})
+            elif route == "/api/selector":
+                if not self._require("admin"):
+                    return
+                with selector_lock:
+                    self._json({"selector": list(cluster_selector)})
             elif route == "/api/rolenames":
                 if not self._require("admin"):
                     return
@@ -3587,6 +3742,21 @@ def serve(args, password):
                 audit(s["user"], "Genehmigungs-Teams geändert",
                       " → ".join(new) if new else "(keine – einstufig)")
                 self._json({"teams": list(approval_teams)})
+            elif self.path == "/api/selector":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, list):
+                    self._json({"error": "Liste von Tag-Kategorien erwartet"}, 400)
+                    return
+                new = clean_selector(body)
+                with selector_lock:
+                    cluster_selector[:] = new
+                    save_selector()
+                audit(s["user"], "Cluster-Selektor geändert",
+                      " → ".join(new) if new else "(keiner)")
+                self._json({"selector": list(cluster_selector)})
             elif self.path == "/api/rolenames":
                 s = self._require("admin")
                 if not s:
@@ -3826,6 +3996,10 @@ def main():
     ap.add_argument("--teams-file", default="kapa_teams.json",
                     help="Datei mit den Genehmigungs-Teams (Standard: "
                          "data/kapa_teams.json); Pflege über die Verwaltungsseite")
+    ap.add_argument("--selector-file", default="kapa_selektor.json",
+                    help="Datei mit den Tag-Kategorien des Cluster-Selektors "
+                         "(Standard: data/kapa_selektor.json); Pflege über die "
+                         "Verwaltungsseite")
     ap.add_argument("--rolenames-file", default="kapa_rollennamen.json",
                     help="Datei mit den frei wählbaren Rollen-Bezeichnungen "
                          "(Standard: data/kapa_rollennamen.json); Pflege über die "
@@ -3844,6 +4018,7 @@ def main():
     args.log_file = data_path(args.log_file, base)
     args.tokens_file = data_path(args.tokens_file, base)
     args.teams_file = data_path(args.teams_file, base)
+    args.selector_file = data_path(args.selector_file, base)
     args.rolenames_file = data_path(args.rolenames_file, base)
     if args.json:
         args.json = data_path(args.json, base)
