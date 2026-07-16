@@ -5,14 +5,18 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 
 ![Dashboard mit Demo-Daten](docs/screenshot.png)
 
-*Screenshot mit Demo-Daten (`python3 aria_kapa.py --sample --serve`).*
+*Kapazitätsübersicht mit Demo-Daten: freie vCPU-, RAM- und Storage-Kapazität je
+Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
 
 ## Dashboard
 
-- **Kompakte Tabellenansicht**: pro Cluster die freien vCPU-/RAM-Kapazitäten
-  (nach Abzug genehmigter Reservierungen) mit Auslastungsbalken; Klick auf den
-  Clusternamen zeigt Details (Hosts, VMs, Reservierungen, Antrags-Formular)
-- **Filterfeld** für Cluster bzw. Reservierungen
+- **Kompakte Tabellenansicht**: pro Cluster die freien **vCPU-, RAM- und
+  Storage**-Kapazitäten (nach Abzug genehmigter Reservierungen) mit
+  Auslastungsbalken; Klick auf den Clusternamen zeigt Details (Hosts, VMs,
+  Datastores/LUNs, Reservierungen, Antrags-Formular). Die Erläuterungen zur
+  Berechnung stehen hinter den Knöpfen „ℹ Info Kapa-Berechnung" und „? Hilfe".
+- **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
+  Anforderer, Team, Status und ID)
 - **Sortierbare Tabellen**: Klick auf eine Spaltenüberschrift sortiert auf-/
   absteigend (numerisch, nach Datum oder Text) – in allen Datentabellen
   (Kapazität, Reservierungen, Genehmigungen, Log, Benutzer/Rollen, Tokens). Die
@@ -36,23 +40,27 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 
 Alle Aufnahmen mit Demo-Daten (`python3 aria_kapa.py --sample --serve`).
 
-**Reservierungen** — alle Anfragen mit ID, Change-Nummer, Status,
-Entscheider und Kommentar:
+**Reservierungen** — alle Anfragen mit ID, Change-Nummer, Team, vCPU/RAM/Storage
+und Status: `beantragt`, `in Prüfung (n/3)`, `genehmigt`, `abgelehnt` und
+`storniert`. Jede Spalte ist per Klick sortierbar, „⦸ Storno" zieht eine Anfrage
+zurück:
 
 ![Reservierungen](docs/screenshot-reservierungen.png)
 
-**Genehmigungen** — offene Anträge mit freier Cluster-Kapazität;
-⚠ markiert Anträge, die nicht mehr passen:
+**Genehmigungen** — offene Anträge mit der freien Kapazität des Ziel-Clusters
+(⚠ markiert Anträge, die nicht mehr hineinpassen), dem Fortschritt der
+mehrstufigen Freigabe und der Schaltfläche für das jeweils zuständige Team:
 
 ![Genehmigungen](docs/screenshot-genehmigungen.png)
 
-**Verwaltung** (nur Admins) — Rollen/Abteilungen aus dem Active Directory
-und API-Tokens für externe Anwendungen:
+**Verwaltung** (nur Admins) — Benutzer **und AD-Gruppen** mit Rolle und Team,
+frei wählbare Rollen-Bezeichnungen, die Genehmigungs-Teams in ihrer
+Prüfreihenfolge sowie API-Tokens für externe Anwendungen:
 
 ![Verwaltung](docs/screenshot-verwaltung.png)
 
-**Log** (nur Admins) — Audit-Log mit Anmeldungen, Anträgen,
-Entscheidungen und Backups:
+**Log** (nur Admins) — Audit-Log mit Anmeldungen, Anträgen, Freigaben,
+Ablehnungen, Stornos und Backups:
 
 ![Audit-Log](docs/screenshot-log.png)
 
