@@ -12,9 +12,13 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
 
 - **Kompakte Tabellenansicht**: pro Cluster die freien **vCPU-, RAM- und
   Storage**-Kapazitäten (nach Abzug genehmigter Reservierungen) mit
-  Auslastungsbalken; Klick auf den Clusternamen zeigt Details (Hosts, VMs,
-  Datastores/LUNs, Reservierungen, Antrags-Formular). Die Erläuterungen zur
-  Berechnung stehen hinter den Knöpfen „ℹ Info Kapa-Berechnung" und „? Hilfe".
+  Auslastungsbalken. Die Erläuterungen zur Berechnung stehen hinter den Knöpfen
+  „ℹ Info Kapa-Berechnung" und „? Hilfe".
+- **Detailkarte in Reitern**: Klick auf den Clusternamen öffnet die Details,
+  aufgeteilt in **CPU & RAM** (Auslastung, Kennzahlen, **vSphere-Tags** des
+  Clusters und die Reservierungen inkl. Antrags-Formular), **Storage**
+  (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Hosts** und
+  **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
 - **Sortierbare Tabellen**: Klick auf eine Spaltenüberschrift sortiert auf-/
@@ -90,6 +94,9 @@ Ablehnungen, Stornos und Backups:
 - **Frei** = Kapazität − belegt − genehmigte Reservierungen (für vCPU, RAM und Storage)
 - **Ausschluss per Tag**: Mit `--exclude-tag Kapa_Filter:Ja` werden VMs mit dem
   angegebenen vROps-Tag (Kategorie:Wert) aus der Belegung herausgerechnet.
+- **vSphere-Tags**: Die Tags des Clusters werden aus Aria gelesen und in der
+  Detailkarte (Reiter „CPU & RAM") angezeigt. Der Abruf ist best effort – sind
+  keine Tags lesbar, bleibt der Bereich einfach leer.
 - Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
   Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 

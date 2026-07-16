@@ -172,6 +172,30 @@ class AriaOps:
                 out.append(r.get("identifier"))
         return out
 
+    def resource_tags(self, resource_id):
+        """Tags einer Ressource als Liste 'Kategorie: Wert'. Best effort –
+        die Struktur unterscheidet sich je nach vROps-Version leicht."""
+        resp = self._request("GET", f"/resources/{resource_id}/tags")
+        out = []
+        for t in (resp.get("tag") or resp.get("tags") or []):
+            cat = t.get("category") or t.get("categoryName") or ""
+            val = t.get("name") or t.get("value") or ""
+            if val:
+                out.append(f"{cat}: {val}" if cat else str(val))
+        return out
+
+    def all_tags(self):
+        """Alle Tag-Kategorien mit ihren Werten als [(Kategorie, Wert), ...]."""
+        resp = self._request("GET", "/tags")
+        out = []
+        for c in (resp.get("tag") or []):
+            cat = c.get("name") or ""
+            for v in (c.get("values") or []):
+                val = v.get("name") if isinstance(v, dict) else str(v)
+                if val:
+                    out.append((cat, val))
+        return out
+
     def resources_by_tag(self, category, name, resource_kind=None,
                          adapter_kind="VMWARE"):
         """Ressourcen mit dem Tag category:name (paginiert). Best effort."""
@@ -663,8 +687,33 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag=""):
 
     data = {}
     for c in clusters:
-        data[name_of(c)] = {"hosts": [], "vms": [],
+        data[name_of(c)] = {"hosts": [], "vms": [], "tags": [],
                             "storage": {"cap_gb": 0.0, "used_gb": 0.0, "luns": []}}
+
+    # vSphere-Tags je Cluster (best effort). Bevorzugt direkt an der Ressource –
+    # klappt das nicht, über den Rückwärts-Abgleich aller Tags. Ohne Tags bleibt
+    # der Bereich in der Detailkarte einfach leer.
+    log("Lese vSphere-Tags der Cluster ...")
+    per_resource = True
+    for c in clusters:
+        try:
+            data[name_of(c)]["tags"] = api.resource_tags(c["identifier"])
+        except Exception as e:
+            per_resource = False
+            log(f"Tags je Ressource nicht abrufbar ({e}) – versuche Sammelabgleich ...")
+            break
+    if not per_resource:
+        try:
+            for cat, val in api.all_tags():
+                for r in api.resources_by_tag(cat, val, "ClusterComputeResource"):
+                    cl = name_of(r)
+                    label = f"{cat}: {val}" if cat else val
+                    if cl in data and label not in data[cl]["tags"]:
+                        data[cl]["tags"].append(label)
+        except Exception as e:
+            log(f"vSphere-Tags nicht verfügbar: {e}")
+    found = sum(len(d["tags"]) for d in data.values())
+    log(f"vSphere-Tags gefunden: {found}")
 
     for h in hosts:
         rid = h["identifier"]
@@ -788,6 +837,7 @@ def build_summary(data, cpu_factor, failover_hosts=1):
                 key=lambda l: l["cap_gb"], reverse=True),
             "vmCount": len(d["vms"]),
             "vmOff": sum(1 for v in d["vms"] if not v["on"]),
+            "tags": list(d.get("tags") or []),
             "hosts": d["hosts"],
             "vms": d["vms"],
         })
@@ -822,7 +872,11 @@ def sample_data():
             l["used_gb"] = round(l["cap_gb"] * random.uniform(0.35, 0.9))
         cap_gb = sum(l["cap_gb"] for l in luns)
         used_gb = sum(l["used_gb"] for l in luns)
-        data[cl] = {"hosts": hosts, "vms": vms,
+        tags = [f"Standort: {random.choice(['RZ-Nord', 'RZ-Sued'])}",
+                f"Umgebung: {random.choice(['Produktion', 'Test'])}",
+                f"Betreuung: {random.choice(['Team Netzwerk', 'Team Betrieb'])}",
+                "Kapa_Filter: Nein"]
+        data[cl] = {"hosts": hosts, "vms": vms, "tags": tags,
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
 
@@ -924,6 +978,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .bar .r { background:repeating-linear-gradient(45deg,var(--res),var(--res) 4px,#4f46e5 4px,#4f46e5 8px); }
   .free { font-weight:600; }
   .kpis { display:flex; gap:14px; margin-top:10px; flex-wrap:wrap; }
+  .ctabs { margin:0 0 14px; }
+  .ctabs .tab { padding:5px 11px; font-size:12px; }
+  .tagbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  .tagbox h3 { font-size:12px; color:var(--muted); font-weight:600; margin-bottom:6px; }
+  .tag { display:inline-block; background:#0b1220; border:1px solid var(--line);
+         border-radius:6px; padding:2px 8px; margin:0 4px 4px 0;
+         font-size:11px; color:var(--text); }
   .kpi { background:#0b1220; border-radius:8px; padding:8px 12px; font-size:12px; color:var(--muted); }
   .kpi b { display:block; font-size:16px; color:var(--text); }
   details { margin-top:12px; }
@@ -1488,11 +1549,14 @@ function card(c, idx, isTotal) {
   }).join("");
   const dsLink = m => `<a href="#" onclick="setDsSort('${m}');return false"${DS_SORT === m ? ' style="font-weight:600;color:var(--text)"' : ""}>${m === "size" ? "Größe" : "Belegung"}</a>`;
   const dsBlock = ds.length ? `
-    <details ${DS_OPEN ? "open" : ""} ontoggle="DS_OPEN=this.open">
-      <summary>Storage im Detail: ${ds.length} Datastores / LUNs</summary>
-      <div style="margin:6px 0;font-size:12px;color:var(--muted)">Sortierung: ${dsLink("size")} · ${dsLink("util")}</div>
-      <table><tr><th>Datastore / LUN</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>
-    </details>` : "";
+      <div style="margin:6px 0 8px;font-size:12px;color:var(--muted)">${ds.length} Datastores / LUNs · Sortierung: ${dsLink("size")} · ${dsLink("util")}</div>
+      <table><tr><th>Datastore / LUN</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>`
+    : `<div style="color:var(--muted);font-size:12px">Keine Storage-Daten aus Aria.</div>`;
+  const tagBlock = (c.tags || []).length ? `
+    <div class="tagbox">
+      <h3>vSphere-Tags</h3>
+      <div>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+    </div>` : "";
   const resRows = clRes.map(r =>
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
@@ -1503,18 +1567,16 @@ function card(c, idx, isTotal) {
     : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
   const spare = (c.spareCores || c.spareRamGb) ?
     ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
-  return `<div class="card ${isTotal?'total':''}">
-    <h2>${esc(c.name)}</h2>
-    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
+  // ---- Inhalte je Reiter ----
+  const paneCpu = `
     ${metric("vCPU (Cores × " + FACTOR + ")", c.vcpuUsed, rvCpu, c.vcpuCap, "vCPU")}
     ${metric("RAM", c.ramUsed, rvRam, c.ramCap, "GB")}
-    ${hasStor ? metric("Storage", c.storageUsed, rvStor, c.storageCap, "GB") : ""}
     <div class="kpis">
-      <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB${hasStor ? " / " + fmt(Math.round(((c.storageFree||0) - rvStor)*10)/10) + " GB Storage" : ""}</b></div>
-      <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB${hasStor || rvStor ? " / " + fmt(rvStor) + " GB Storage" : ""}</b></div>
+      <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB</b></div>
+      <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
     </div>
-    ${dsBlock}
+    ${tagBlock}
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
       ${resTable}
@@ -1528,20 +1590,43 @@ function card(c, idx, isTotal) {
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
-    </div>
-    ${isTotal ? "" : `
-    <details><summary>Hosts anzeigen</summary>
-      <table><tr><th>Host</th><th class="num">Cores</th><th class="num">RAM (GB)</th></tr>${hostRows}</table>
-    </details>
-    <details><summary>VMs anzeigen</summary>
-      <table><tr><th>VM</th><th class="num">vCPU</th><th class="num">RAM (GB)</th></tr>${vmRows}</table>
-    </details>`}
+    </div>`;
+  const paneStorage = `
+    ${hasStor ? metric("Storage", c.storageUsed, rvStor, c.storageCap, "GB") : ""}
+    ${hasStor ? `<div class="kpis">
+      <div class="kpi">frei nach Reservierungen<b>${fmt(Math.round(((c.storageFree||0) - rvStor)*10)/10)} GB</b></div>
+      <div class="kpi">reserviert<b>${fmt(rvStor)} GB</b></div>
+    </div>` : ""}
+    ${dsBlock}`;
+  const paneHosts = `<table><tr><th>Host</th><th class="num">Cores</th><th class="num">RAM (GB)</th></tr>${hostRows}</table>`;
+  const paneVms = `<table><tr><th>VM</th><th class="num">vCPU</th><th class="num">RAM (GB)</th></tr>${vmRows}</table>`;
+
+  // Gesamt-Karte hat keine Host-/VM-Listen
+  const avail = isTotal ? [["cpu", "CPU & RAM"], ["storage", "Storage"]]
+    : [["cpu", "CPU & RAM"], ["storage", "Storage"],
+       ["hosts", "Hosts (" + (c.hosts || []).length + ")"],
+       ["vms", "VMs (" + c.vmCount + ")"]];
+  const tab = avail.some(t => t[0] === CARD_TAB) ? CARD_TAB : "cpu";
+  const tabBar = `<div class="tabs ctabs">${avail.map(([k, l]) =>
+    `<span class="tab ${tab === k ? "active" : ""}" onclick="setCardTab('${k}')">${l}</span>`).join("")}</div>`;
+  const pane = tab === "storage" ? paneStorage : tab === "hosts" ? paneHosts
+             : tab === "vms" ? paneVms : paneCpu;
+
+  return `<div class="card ${isTotal?'total':''}">
+    <h2>${esc(c.name)}</h2>
+    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
+    ${tabBar}
+    ${pane}
   </div>`;
 }
 
-// ---- Storage-Detail (LUN-Liste) in der Karte ----
-let DS_SORT = "size", DS_OPEN = false;
-function setDsSort(m) { DS_SORT = m; DS_OPEN = true; rerenderCard(); }
+// ---- Reiter in der Detailkarte ----
+let CARD_TAB = "cpu";   // cpu | storage | hosts | vms
+function setCardTab(t) { CARD_TAB = t; rerenderCard(); }
+
+// ---- Storage-Detail (LUN-Liste) im Storage-Reiter ----
+let DS_SORT = "size";
+function setDsSort(m) { DS_SORT = m; rerenderCard(); }
 function rerenderCard() {
   if (hoverIdx !== null && hc.style.display === "block")
     hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
@@ -2038,7 +2123,7 @@ function toggleCard(idx, cell) {
   else showCard(idx, cell.parentElement);
 }
 function openStorage(idx, cell) {
-  DS_OPEN = true;                 // LUN-Liste direkt aufgeklappt zeigen
+  CARD_TAB = "storage";           // Klick auf den Storage-Wert -> Storage-Reiter
   showCard(idx, cell.parentElement);
 }
 function hideCard() { hc.style.display = "none"; hoverIdx = null; }
