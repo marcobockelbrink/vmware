@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.9.1"
+VERSION = "1.10"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1004,8 +1004,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .trtotal td { background:linear-gradient(135deg,#1e293b,#16233b); font-weight:600; }
   .barcol { width:130px; min-width:110px; }
   .bar.mini { height:8px; }
-  .hovercard { position:fixed; z-index:20; width:624px; max-width:92vw; display:none;
-               max-height:82vh; overflow:auto; border-radius:12px;
+  .hovercard { position:fixed; z-index:20; width:1180px; max-width:96vw; display:none;
+               height:auto; max-height:86vh; min-width:420px; min-height:220px;
+               overflow:auto; resize:both; border-radius:12px;
                box-shadow:0 14px 44px rgba(0,0,0,.55); }
   .hovercard .card { border-color:#3b5479; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
@@ -1259,6 +1260,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button class="btn" style="margin-left:10px"
           onclick="document.getElementById('newToken').style.display='none'">Ausblenden</button>
 </div>
+<div id="backupSection" style="display:none">
+  <div class="sechead" style="margin-top:20px">Backup</div>
+  <div class="hint" style="color:var(--muted);margin-bottom:8px">
+    Sichert alle Laufzeitdaten (Reservierungen, Rollen, Teams, Selektor, Log,
+    Tokens) als tar.gz auf das konfigurierte SFTP-Ziel. Läuft automatisch alle
+    12 Stunden – hier lässt sich ein Backup sofort auslösen.</div>
+  <button class="btn primary" id="backupBtn" onclick="runBackup()">💾 Backup jetzt erstellen</button>
+  <span id="backupStatus" style="font-size:12px;margin-left:10px"></span>
+</div>
 </div>
 <div class="tablewrap" id="logView" style="display:none">
 <table class="kt" id="ltable">
@@ -1277,6 +1287,7 @@ const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst n
 let TEAMS = __TEAMS__;      // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig); auf der Verwaltungsseite pflegbar
 let SELECTOR = __SELECTOR__; // Tag-Kategorien des Cluster-Selektors (max 3, kaskadierend)
 let SEL_VALUES = {};         // gewählte Werte je Kategorie
+const HAS_BACKUP = __BACKUP__; // ist ein SFTP-Backup-Ziel konfiguriert?
 const LS_KEY = "aria_kapa_reservierungen";
 
 // ---- vSphere-Tags / Cluster-Selektor ----
@@ -1707,7 +1718,6 @@ function card(c, idx, isTotal) {
       <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
     </div>
-    ${tagBlock}
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
       ${resTable}
@@ -1721,7 +1731,8 @@ function card(c, idx, isTotal) {
         <button class="btn" onclick="addRes(${idx})">+ Beantragen</button>
       </div>
       <div class="err" id="f${idx}e"></div>`}
-    </div>`;
+    </div>
+    ${tagBlock}`;
   const paneStorage = `
     ${hasStor ? metric("Storage", c.storageUsed, rvStor, c.storageCap, "GB") : ""}
     ${hasStor ? `<div class="kpis">
@@ -1851,6 +1862,26 @@ async function apiTokens(method, path, body) {
 function loadTokens() {
   apiTokens("GET").then(d => { TOKENS = d || {}; if (VIEW === "adm") render(); })
                   .catch(() => {});
+}
+// ---- Backup manuell auslösen ----
+function runBackup() {
+  const st = document.getElementById("backupStatus");
+  const btn = document.getElementById("backupBtn");
+  btn.disabled = true;
+  st.style.color = "var(--muted)";
+  st.textContent = "Backup läuft … (kann einen Moment dauern)";
+  fetch("api/backup", { method: "POST" })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { st.style.color = "var(--crit)"; st.textContent = "Fehlgeschlagen: " + d.error; }
+      else {
+        st.style.color = "var(--ok)";
+        st.textContent = "✓ Backup erstellt: " + d.backup
+          + (d.rotated ? " · " + d.rotated + " alte(s) Archiv(e) gelöscht" : "");
+      }
+    })
+    .catch(() => { st.style.color = "var(--crit)"; st.textContent = "Server nicht erreichbar."; })
+    .finally(() => { btn.disabled = false; });
 }
 function addToken() {
   const n = document.getElementById("tknName").value.trim();
@@ -2329,6 +2360,7 @@ if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabLog").style.display = "none";
+if (HAS_BACKUP && SERVE) document.getElementById("backupSection").style.display = "";
 if (ROLE === "anforderer") {
   const th = document.getElementById("thDec");
   if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
@@ -2560,7 +2592,7 @@ def _html_escape(s):
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
-                contact="", selector=None):
+                contact="", selector=None, backup=False):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -2586,6 +2618,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__USERINFO__", json_for_html(userinfo))
             .replace("__TEAMS__", json_for_html(teams or []))
             .replace("__SELECTOR__", json_for_html(selector or []))
+            .replace("__BACKUP__", "true" if backup else "false")
             .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
@@ -3279,7 +3312,8 @@ def serve(args, password):
                                        failover_hosts=args.failover_hosts,
                                        userinfo=userinfo, teams=approval_teams,
                                        rolenames=role_names, contact=args.contact_info,
-                                       selector=cluster_selector),
+                                       selector=cluster_selector,
+                                       backup=bool(args.backup_target)),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 if not self._require():

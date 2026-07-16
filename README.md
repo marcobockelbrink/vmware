@@ -15,10 +15,12 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
   Auslastungsbalken. Die Erläuterungen zur Berechnung stehen hinter den Knöpfen
   „ℹ Info Kapa-Berechnung" und „? Hilfe".
 - **Detailkarte in Reitern**: Klick auf den Clusternamen öffnet die Details,
-  aufgeteilt in **CPU & RAM** (Auslastung, Kennzahlen, **vSphere-Tags** des
-  Clusters und die Reservierungen inkl. Antrags-Formular), **Storage**
+  aufgeteilt in **CPU & RAM** (Auslastung, Kennzahlen, Reservierungen inkl.
+  Antrags-Formular und darunter die **vSphere-Tags** des Clusters), **Storage**
   (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Hosts** und
   **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
+  Die Karte ist breit angelegt und lässt sich unten rechts frei in der Größe
+  ziehen.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
 - **Cluster-Selektor**: Über der Kapazitätsliste blenden sich bis zu drei
@@ -330,7 +332,8 @@ Datendateien (Reservierungen, Rollen, Audit-Log, Cache) regelmäßig als
 auf dem Ziel automatisch gelöscht (`--backup-keep-days`, per sftp, auch auf
 sftp-only-Servern). Authentifizierung bevorzugt per SSH-Key (`--backup-key`);
 ein Passwort (`--backup-password` bzw. `BACKUP_PASSWORD`) funktioniert nur
-mit installiertem `sshpass`. Admins können ein Backup auch manuell auslösen:
+mit installiertem `sshpass`. Admins können ein Backup jederzeit **manuell
+auslösen** – im Tab „Verwaltung" (Abschnitt „Backup") per Knopf oder direkt über
 `POST /api/backup`. Ergebnisse (auch Fehler) landen im Audit-Log.
 
 **Restore**: Schritt-für-Schritt-Anleitung in
