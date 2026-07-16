@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.12.4"
+VERSION = "1.13"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1336,10 +1336,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   a.btn { text-decoration:none; display:inline-block; line-height:normal; }
   .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
-  .resform { display:grid; grid-template-columns:2fr 110px 70px 80px auto; gap:6px; margin-top:8px; }
+  .resform { display:grid; grid-template-columns:2fr 1.4fr 80px 90px 90px; gap:6px; margin-top:8px; }
   .resform input { background:#0b1220; border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
   .resform input:focus { outline:none; border-color:var(--res); }
+  .resform button { grid-column:1 / -1; }   /* Beantragen-Knopf über die volle Breite */
   .del { background:none; border:none; color:var(--crit); cursor:pointer; font-size:13px; }
   .edit { background:none; border:none; color:var(--accent); cursor:pointer; font-size:13px; }
   .err { color:var(--crit); font-size:12px; margin-top:4px; display:none; }
@@ -1395,8 +1396,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <select id="mCluster" onchange="modalHint()"></select>
     <label>Bezeichnung / Projekt</label>
     <input id="mName" placeholder="z. B. SAP-Erweiterung Q4">
-    <label>Change-Nummer (CHB… oder CHI…)</label>
-    <input id="mChange" placeholder="z. B. CHB0012345">
+    <label>Change / Jira Ticket (optional)</label>
+    <input id="mChange">
     <label>vCPU</label>
     <input id="mCpu" type="number" min="0" step="1" placeholder="0">
     <label>RAM (GB)</label>
@@ -1740,11 +1741,7 @@ function createRes(c, name, change, vcpu, ram, storage, errEl) {
     errEl.textContent = "Bitte Bezeichnung sowie vCPU, RAM und/oder Storage angeben.";
     errEl.style.display = "block"; return false;
   }
-  const ch = String(change || "").toUpperCase().replace(/\s+/g, "");
-  if (!/^CH[BI][A-Z0-9-]{3,20}$/.test(ch)) {
-    errEl.textContent = "Bitte gültige Change-Nummer angeben (beginnt mit CHB oder CHI).";
-    errEl.style.display = "block"; return false;
-  }
+  const ch = String(change || "").trim();   // Change/Jira optional, frei wählbar
   const f = freeAfter(c);
   const over = vcpu > f.cpu || ram > f.ram || (f.hasStor && storage > f.stor);
   if (over &&
@@ -2002,7 +1999,7 @@ function card(c, idx, isTotal) {
       ${isTotal || !CAN_REQUEST ? "" : `
       <div class="resform">
         <input id="f${idx}n" placeholder="Bezeichnung / Projekt">
-        <input id="f${idx}ch" placeholder="CHB/CHI-Nr.">
+        <input id="f${idx}ch" placeholder="Change / Jira Ticket (optional)">
         <input id="f${idx}c" type="number" min="0" step="1" placeholder="vCPU">
         <input id="f${idx}r" type="number" min="0" step="1" placeholder="RAM GB">
         <input id="f${idx}s" type="number" min="0" step="1" placeholder="Storage GB">
@@ -3855,11 +3852,8 @@ def serve(args, password):
                 if not isinstance(item, dict) or not str(item.get("name") or "").strip():
                     self._json({"error": "Ungültige Reservierung"}, 400)
                     return
-                change = re.sub(r"\s+", "", str(item.get("change") or "")).upper()
-                if not re.fullmatch(r"CH[BI][A-Z0-9-]{3,20}", change):
-                    self._json({"error": "Ungültige Change-Nummer "
-                                         "(muss mit CHB oder CHI beginnen)"}, 400)
-                    return
+                # Change / Jira-Ticket ist freiwillig und frei wählbar (kein Format)
+                change = str(item.get("change") or "").strip()[:60]
                 try:
                     entry = {"id": uuid.uuid4().hex[:12],
                              "cluster": str(item.get("cluster") or ""),

@@ -176,11 +176,10 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Report-Mail, im CSV-Export (`/api/v1/reservations?format=csv`) und im
   Audit-Log — so lässt sich jede Anfrage zweifelsfrei referenzieren.
 
-- **Change-Nummer (Pflichtfeld)**: Jede Anfrage benötigt eine Change-Nummer,
-  beginnend mit `CHB` oder `CHI` (z. B. `CHB0012345`); Eingaben werden
-  normalisiert (Großschreibung, ohne Leerzeichen) und client- wie
-  serverseitig validiert. Die Nummer erscheint in den Übersichten und in
-  der Report-Mail.
+- **Change / Jira-Ticket (optional)**: Jede Anfrage kann eine Change-Nummer oder
+  ein Jira-Ticket tragen – frei wählbar, ohne festes Format und **kein
+  Pflichtfeld**. Der Wert erscheint in den Übersichten und in der Report-Mail;
+  fehlt er, steht dort „–".
 
 - **Ressourcen**: Je Anfrage werden **vCPU**, **RAM (GB)** und **Storage (GB)**
   als **Ganzzahlen** erfasst (keine Kommazahlen). vCPU und RAM zählen gegen die
