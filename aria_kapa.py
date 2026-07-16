@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.12.3"
+VERSION = "1.12.4"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2576,8 +2576,8 @@ let VLAN_INDEX = null;
 function vlanIndex() {
   if (VLAN_INDEX) return VLAN_INDEX;
   const out = [];
-  CLUSTERS.forEach(c => (c.portgroups || []).forEach(p =>
-    out.push({ pg: p.name || "", vlan: p.vlan || "", cluster: c.name })));
+  CLUSTERS.forEach((c, ci) => (c.portgroups || []).forEach(p =>
+    out.push({ pg: p.name || "", vlan: p.vlan || "", cluster: c.name, cidx: ci })));
   VLAN_INDEX = out;
   return out;
 }
@@ -2588,7 +2588,7 @@ function renderVlan() {
     r.pg.toLowerCase().includes(q) || String(r.vlan).toLowerCase().includes(q)) : all;
   document.getElementById("vtbody").innerHTML = hits.map(r =>
     `<tr><td>${esc(r.pg)}</td><td class="num">${esc(r.vlan || "–")}</td>
-     <td>${esc(r.cluster)}</td></tr>`).join("")
+     <td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${r.cidx}, this)">${esc(r.cluster)}</td></tr>`).join("")
     || `<tr><td colspan="3" style="color:var(--muted)">${all.length
          ? "Keine Portgruppe passt zur Suche." : "Keine Portgruppen-Daten aus Aria."}</td></tr>`;
   document.getElementById("vlanCount").textContent = all.length
