@@ -26,7 +26,10 @@ Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
   vSphere-Tags zu den Clustern durchfiltert (z. B. Umgebung → Standort →
   Betreuung). Stufe 2 zeigt nur Werte, die zur Wahl in Stufe 1 passen. Welche
   Tag-Kategorien die Stufen bilden, konfigurierst du frei im Tab „Verwaltung"
-  (Abschnitt „Cluster-Selektor") — die Werte kommen live aus den Tags.
+  (Abschnitt „Cluster-Selektor"); pro Stufe lässt sich ein eigener
+  **Anzeigename** vergeben (z. B. Kategorie „Standort" → Beschriftung
+  „Rechenzentrum"). Gespeichert wird per Knopf „✓ Selektor speichern". Die
+  Werte kommen live aus den Tags.
 - **Sortierbare Tabellen**: Klick auf eine Spaltenüberschrift sortiert auf-/
   absteigend (numerisch, nach Datum oder Text) – in allen Datentabellen
   (Kapazität, Reservierungen, Genehmigungen, Log, Benutzer/Rollen, Tokens). Die

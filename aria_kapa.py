@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.9"
+VERSION = "1.9.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1240,7 +1240,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   Cluster-Tags – sind noch keine Daten geladen, ist die Liste leer.</div>
 <div class="tablewrap">
 <table class="kt" id="seltable">
-  <thead><tr><th style="width:60px">Stufe</th><th>Tag-Kategorie</th></tr></thead>
+  <thead><tr><th style="width:60px">Stufe</th><th style="width:320px">Tag-Kategorie</th><th>Anzeigename im Selektor</th></tr></thead>
   <tbody id="selbody"></tbody>
 </table>
 </div>
@@ -1290,28 +1290,29 @@ function clusterTagVals(c, cat) {   // Werte, die Cluster c für Kategorie cat h
   const p = cat + ": ";
   return (c.tags || []).filter(t => t.startsWith(p)).map(t => t.slice(p.length));
 }
+function selCat(i) { return SELECTOR[i] ? SELECTOR[i].category : ""; }
 function selMatch(c) {       // erfüllt Cluster c alle gewählten Selektor-Stufen?
-  return SELECTOR.every(cat => {
-    const v = SEL_VALUES[cat];
-    return !v || clusterTagVals(c, cat).includes(v);
+  return SELECTOR.every(s => {
+    const v = SEL_VALUES[s.category];
+    return !v || clusterTagVals(c, s.category).includes(v);
   });
 }
 // Werte für Stufe i – kaskadierend: nur die, die zu den höheren Stufen passen
 function selectorOptions(i) {
   const upper = SELECTOR.slice(0, i);
-  const base = CLUSTERS.filter(c => upper.every(cat => {
-    const v = SEL_VALUES[cat]; return !v || clusterTagVals(c, cat).includes(v); }));
+  const base = CLUSTERS.filter(c => upper.every(s => {
+    const v = SEL_VALUES[s.category]; return !v || clusterTagVals(c, s.category).includes(v); }));
   const vals = new Set();
-  base.forEach(c => clusterTagVals(c, SELECTOR[i]).forEach(v => vals.add(v)));
+  base.forEach(c => clusterTagVals(c, selCat(i)).forEach(v => vals.add(v)));
   return [...vals].sort();
 }
 function onSelectorChange(i, val) {
-  SEL_VALUES[SELECTOR[i]] = val;
+  SEL_VALUES[selCat(i)] = val;
   // tiefere Stufen zurücksetzen, wenn ihr Wert nicht mehr wählbar ist
   for (let j = i + 1; j < SELECTOR.length; j++) {
     const opts = selectorOptions(j);
-    if (SEL_VALUES[SELECTOR[j]] && !opts.includes(SEL_VALUES[SELECTOR[j]]))
-      SEL_VALUES[SELECTOR[j]] = "";
+    if (SEL_VALUES[selCat(j)] && !opts.includes(SEL_VALUES[selCat(j)]))
+      SEL_VALUES[selCat(j)] = "";
   }
   render();
 }
@@ -1319,16 +1320,16 @@ function resetSelector() { SEL_VALUES = {}; render(); }
 function renderClusterSelector() {
   const box = document.getElementById("clusterSelector");
   if (!box) return;
-  const cats = SELECTOR.filter(c => tagCategories().includes(c));
-  if (!cats.length) { box.innerHTML = ""; box.style.display = "none"; return; }
+  const active = SELECTOR.filter(s => tagCategories().includes(s.category));
+  if (!active.length) { box.innerHTML = ""; box.style.display = "none"; return; }
   box.style.display = "";
-  const any = SELECTOR.some(c => SEL_VALUES[c]);
+  const any = SELECTOR.some(s => SEL_VALUES[s.category]);
   box.innerHTML = '<span class="sellabel">Cluster-Selektor:</span>' +
-    SELECTOR.map((cat, i) => {
-      if (!tagCategories().includes(cat)) return "";
+    SELECTOR.map((s, i) => {
+      if (!tagCategories().includes(s.category)) return "";
       const opts = selectorOptions(i);
-      const cur = SEL_VALUES[cat] || "";
-      return `<label>${esc(cat)}
+      const cur = SEL_VALUES[s.category] || "";
+      return `<label>${esc(s.label || s.category)}
         <select onchange="onSelectorChange(${i}, this.value)">
           <option value="">alle</option>
           ${opts.map(v => `<option value="${esc(v)}" ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
@@ -2035,25 +2036,40 @@ function loadSelector() {
                                  if (VIEW === "adm") render(); }).catch(() => {});
 }
 function saveSelector() {
-  const list = [0, 1, 2].map(i => document.getElementById("sel" + i).value).filter(Boolean);
+  const list = [0, 1, 2].map(i => ({
+      category: document.getElementById("sel" + i).value,
+      label: (document.getElementById("sellbl" + i).value || "").trim()
+    })).filter(x => x.category);
   apiSelector("PUT", list).then(d => {
     if (d && d.selector) SELECTOR = d.selector;
-    Object.keys(SEL_VALUES).forEach(k => { if (!SELECTOR.includes(k)) delete SEL_VALUES[k]; });
+    const cats = SELECTOR.map(s => s.category);
+    Object.keys(SEL_VALUES).forEach(k => { if (!cats.includes(k)) delete SEL_VALUES[k]; });
+    const st = document.getElementById("selSaved");
+    if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     render();
   }).catch(() => alert("Speichern des Selektors fehlgeschlagen."));
 }
 function renderSelector() {
-  const all = [...new Set([...tagCategories(), ...SELECTOR])].sort();
+  const all = [...new Set([...tagCategories(), ...SELECTOR.map(s => s.category)])].sort();
   const rows = [0, 1, 2].map(i => {
-    const cur = SELECTOR[i] || "";
+    const cur = SELECTOR[i] || {category: "", label: ""};
+    const warn = cur.category && !tagCategories().includes(cur.category)
+      ? ' <span class="st pend" title="Kategorie derzeit in keinem Cluster-Tag">⚠ derzeit ohne Werte</span>' : "";
     return `<tr><td class="num">${i + 1}</td>
-      <td><select id="sel${i}" class="filterbox" style="max-width:360px" onchange="saveSelector()">
+      <td><select id="sel${i}" class="filterbox" style="max-width:280px">
         <option value="">– keine –</option>
-        ${all.map(c => `<option value="${esc(c)}" ${cur === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
-      </select>${cur && !tagCategories().includes(cur) ? ' <span class="st pend" title="Kategorie derzeit in keinem Cluster-Tag">⚠ derzeit ohne Werte</span>' : ""}</td></tr>`;
+        ${all.map(c => `<option value="${esc(c)}" ${cur.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+      </select>${warn}</td>
+      <td><input id="sellbl${i}" class="filterbox" style="width:100%"
+           placeholder="Anzeigename (leer = Kategorie)" value="${esc(cur.label && cur.label !== cur.category ? cur.label : "")}"
+           onkeydown="if(event.key==='Enter')saveSelector()"></td></tr>`;
   }).join("");
   document.getElementById("selbody").innerHTML = rows +
-    (all.length ? "" : `<tr><td></td><td style="color:var(--muted)">Noch keine Tag-Kategorien – erst nach dem ersten Aria-Abruf verfügbar.</td></tr>`);
+    `<tr><td></td><td colspan="2">
+       <button class="btn approve" onclick="saveSelector()">✓ Selektor speichern</button>
+       <span id="selSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+       ${all.length ? "" : '<span style="color:var(--muted);font-size:12px;margin-left:8px">Noch keine Tag-Kategorien – erst nach dem ersten Aria-Abruf verfügbar.</span>'}
+     </td></tr>`;
 }
 
 // ---- Rollen-Bezeichnungen frei umbenennen ----
@@ -2655,11 +2671,20 @@ def serve(args, password):
     selector_lock = threading.Lock()
 
     def clean_selector(seq):
-        out = []
-        for t in seq:
-            t = str(t or "").strip()
-            if t and t not in out:
-                out.append(t)
+        # Einträge: {"category": "<Tag-Kategorie>", "label": "<Anzeigename>"}.
+        # Alte Form (Liste von Strings) wird migriert: label = category.
+        out, seen = [], set()
+        for item in seq:
+            if isinstance(item, str):
+                cat = label = item.strip()
+            elif isinstance(item, dict):
+                cat = str(item.get("category") or "").strip()
+                label = str(item.get("label") or "").strip() or cat
+            else:
+                continue
+            if cat and cat not in seen:
+                seen.add(cat)
+                out.append({"category": cat, "label": label})
         return out[:3]
 
     def load_selector():
@@ -3755,7 +3780,8 @@ def serve(args, password):
                     cluster_selector[:] = new
                     save_selector()
                 audit(s["user"], "Cluster-Selektor geändert",
-                      " → ".join(new) if new else "(keiner)")
+                      " → ".join(f"{e['label']} ({e['category']})" for e in new)
+                      if new else "(keiner)")
                 self._json({"selector": list(cluster_selector)})
             elif self.path == "/api/rolenames":
                 s = self._require("admin")
