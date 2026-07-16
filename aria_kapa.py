@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.12"
+VERSION = "1.12.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -979,26 +979,52 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     PG_VLAN_KEYS = ["config|defaultPortConfig|vlan|vlanId",
                     "config|vlan|vlanId", "summary|vlanId",
                     "config|defaultPortConfig|vlan|pvlanId"]
+    VLAN_IN_NAME = re.compile(r"vlan[\s_\-]?(\d{1,4})", re.I)
     try:
         log("Lese dvSwitches und Portgruppen ...")
         dvs_list = api.resources("VmwareDistributedVirtualSwitch")
         pg_list = api.resources("DistributedVirtualPortgroup")
         pg_name = {p["identifier"]: name_of(p) for p in pg_list}
+
+        # Den Property-Schlüssel der VLAN-Nummer NICHT raten, sondern an einer
+        # echten Portgruppe entdecken: alle Eigenschaften der ersten Portgruppe
+        # holen und jeden Schlüssel mit "vlan" im Namen übernehmen. Die Schlüssel
+        # landen im Log (wie beim Tag-Abruf), damit sich der richtige bei
+        # abweichender vROps-Version ablesen lässt.
+        vlan_keys = list(PG_VLAN_KEYS)
+        if pg_list:
+            try:
+                sample = api.all_properties(pg_list[0]["identifier"])
+                found = [k for k in sample if "vlan" in k.lower()]
+                for k in reversed(found):
+                    if k not in vlan_keys:
+                        vlan_keys.insert(0, k)
+                log("Portgruppen-Eigenschaften (Beispiel erste Portgruppe): "
+                    + (", ".join(sorted(sample)[:40]) or "keine"))
+                log("VLAN-Schlüssel erkannt: "
+                    + (", ".join(found) if found
+                       else "keiner mit 'vlan' im Namen – VLAN kommt, wenn möglich, "
+                            "aus dem Portgruppen-Namen"))
+            except Exception as e:
+                log(f"Portgruppen-Eigenschaften nicht lesbar: {e}")
+
         pg_props = {}
         if pg_list:
             try:
                 pg_props = api.properties([p["identifier"] for p in pg_list],
-                    PG_VLAN_KEYS, progress=lambda m: log(f"Portgruppen-VLAN: {m}"))
+                    vlan_keys, progress=lambda m: log(f"Portgruppen-VLAN: {m}"))
             except Exception as e:
                 log(f"VLAN-Nummern nicht lesbar (nur Namen): {e}")
 
         def pg_vlan(pid):
             p = pg_props.get(pid) or {}
-            for k in PG_VLAN_KEYS:
+            for k in vlan_keys:
                 v = str(p.get(k) or "").strip()
                 if v and v not in ("0", "None"):
                     return v
-            return ""
+            # Rückfall: VLAN aus dem Portgruppen-Namen (z. B. "...-VLAN205")
+            m = VLAN_IN_NAME.search(pg_name.get(pid, ""))
+            return m.group(1) if m else ""
 
         for dv in dvs_list:
             did = dv["identifier"]
