@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.13"
+VERSION = "1.14"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -26,6 +26,32 @@ VERSION = "1.13"
 ROLE_KEYS = ("admin", "anforderer", "reviewer", "auditor")
 DEFAULT_ROLE_NAMES = {"admin": "Administrator", "anforderer": "Anforderer",
                       "reviewer": "Reviewer", "auditor": "Technische Prüfung"}
+
+# Mail-Benachrichtigungen je interner Rolle. Ereignisse: created (Anlage),
+# rejected (Ablehnung), approved (endgültige Genehmigung), team_turn (ein Team
+# ist im Freigabe-Workflow an der Reihe). Empfänger (Modell "Gemischt"):
+#   anforderer -> der Antragsteller (r.von), kein eigenes Adressfeld
+#   admin/auditor -> feste Verteiler-Adresse (Feld "email")
+#   reviewer/team_turn -> die pro Team hinterlegte Adresse (team_email)
+NOTIFY_EVENTS = ("created", "rejected", "approved", "team_turn")
+# Welche Ereignisse je Rolle überhaupt wählbar sind (Rest wird als "–" gezeigt):
+NOTIFY_ROLE_EVENTS = {
+    "anforderer": ("created", "rejected", "approved"),
+    "admin":      ("created", "rejected", "approved", "team_turn"),
+    "auditor":    ("created", "rejected", "approved", "team_turn"),
+    "reviewer":   ("team_turn",),
+}
+DEFAULT_NOTIFY = {
+    "role": {
+        "anforderer": {"created": False, "rejected": True,  "approved": True},
+        "admin":      {"created": False, "rejected": False, "approved": False,
+                       "team_turn": False, "email": ""},
+        "auditor":    {"created": False, "rejected": False, "approved": False,
+                       "team_turn": False, "email": ""},
+        "reviewer":   {"team_turn": True},
+    },
+    "team_email": {},        # {Team-Name: Verteiler-Adresse}
+}
 
 import argparse
 import getpass
@@ -629,9 +655,11 @@ def sftp_backup(args):
     import tempfile
     if not args.backup_target:
         raise RuntimeError("kein --backup-target konfiguriert")
+    db = getattr(args, "db_file", "")
     files = [p for p in (args.cache, args.res_file, args.roles_file,
                          args.log_file, args.tokens_file, args.teams_file,
-                         args.rolenames_file)
+                         args.rolenames_file, args.selector_file, args.notify_file,
+                         db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
         raise RuntimeError("keine Datendateien vorhanden")
@@ -689,14 +717,25 @@ def backup_rotate(args):
 
 # ----------------------------------------------------------- Mail-Reports ----
 
-def send_mail(args, subject, body, extra_to=()):
-    """Report-Mail über den konfigurierten SMTP-Server (--smtp-server)."""
+def send_mail(args, subject, body, extra_to=(), to_override=None):
+    """Report-Mail über den konfigurierten SMTP-Server (--smtp-server).
+
+    to_override: exakte Empfängerliste (aus den Mail-Regeln). Ist sie gesetzt,
+    wird --smtp-to NICHT zusätzlich angeschrieben."""
     import smtplib
     from email.message import EmailMessage
     if not args.smtp_server:
         return
-    to = [t.strip() for t in (args.smtp_to or "").split(",") if t.strip()]
-    to += [t for t in extra_to if t and "@" in t and t not in to]
+    if to_override is not None:
+        seen, to = set(), []
+        for t in to_override:
+            t = str(t or "").strip()
+            if "@" in t and t not in seen:
+                seen.add(t)
+                to.append(t)
+    else:
+        to = [t.strip() for t in (args.smtp_to or "").split(",") if t.strip()]
+        to += [t for t in extra_to if t and "@" in t and t not in to]
     if not to:
         return
     msg = EmailMessage()
@@ -1505,13 +1544,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   Anträge durchlaufen die Teams von oben nach unten. Erst wenn alle Teams
   freigegeben haben, ist ein Antrag genehmigt. Ohne Teams gilt einstufig
-  (Admin genehmigt direkt). Reviewer werden oben ihrem Team zugewiesen.</div>
+  (Admin genehmigt direkt). Reviewer werden oben ihrem Team zugewiesen.
+  Die <b>E-Mail/Verteiler</b> je Team wird angeschrieben, sobald das Team im
+  Workflow an der Reihe ist (siehe „Mail-Benachrichtigungen"); mit „✓ Team-Adressen
+  speichern" sichern.</div>
 <div class="tablewrap">
 <table class="kt" id="tmtable">
-  <thead><tr><th style="width:60px">Stufe</th><th>Team</th><th style="width:220px">Aktion</th></tr></thead>
+  <thead><tr><th style="width:60px">Stufe</th><th>Team</th><th>E-Mail / Verteiler (Team ist dran)</th><th style="width:220px" class="nosort">Aktion</th></tr></thead>
   <tbody id="tmbody"></tbody>
 </table>
 </div>
+<button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Team-Adressen speichern</button>
+
+<div class="sechead" style="margin-top:20px">Mail-Benachrichtigungen (je interner Rolle)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Legt fest, bei welchem Ereignis eine Mail rausgeht. <b>Anforderer</b> = der
+  jeweilige Antragsteller (automatisch). <b>Admin/Auditor</b> = die eingetragene
+  Verteiler-Adresse. <b>Reviewer / „Team ist dran"</b> = die Team-Adresse aus der
+  Tabelle oben. Voraussetzung ist ein konfigurierter SMTP-Server
+  (<code>--smtp-server</code>). „Freigabe" meint die endgültige Genehmigung.</div>
+<div class="tablewrap">
+<table class="kt" id="notifytable">
+  <thead><tr><th style="width:150px">Interne Rolle</th><th>Verteiler-Adresse</th>
+    <th class="num nosort">Anlage</th><th class="num nosort">Ablehnung</th>
+    <th class="num nosort">Freigabe</th><th class="num nosort">Team ist dran</th></tr></thead>
+  <tbody id="ntbody"></tbody>
+</table>
+</div>
+<button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Mail-Regeln speichern</button>
+<span id="notifySaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 <div class="sechead" style="margin-top:20px">Cluster-Selektor (Filter nach vSphere-Tags)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   Bis zu 3 Stufen, jede Stufe eine Tag-Kategorie. In der Kapazitätsübersicht
@@ -1636,6 +1697,15 @@ const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 // Rollen-Bezeichnungen sind frei wählbar (Verwaltung); Schlüssel bleiben fest.
 let ROLE_NAMES = __ROLENAMES__;
 const ROLE_ORDER = ["anforderer", "reviewer", "admin", "auditor"];
+let NOTIFY = __NOTIFY__;    // Mail-Regeln je interner Rolle + Team-Adressen
+// Welche Ereignisse je Rolle wählbar sind (Rest = "–"); Reihenfolge = Spalten
+const NOTIFY_EVENTS = [["created","Anlage"],["rejected","Ablehnung"],["approved","Freigabe"],["team_turn","Team ist dran"]];
+const NOTIFY_ROLE_EVENTS = {
+  anforderer: ["created","rejected","approved"],
+  admin:      ["created","rejected","approved","team_turn"],
+  auditor:    ["created","rejected","approved","team_turn"],
+  reviewer:   ["team_turn"],
+};
 // Löschen von Reservierungsanfragen ist deaktiviert – stattdessen Storno.
 function canDel(r) { return false; }
 // Storno: Admin, jemand aus derselben Abteilung oder der Anforderer selbst
@@ -2134,7 +2204,7 @@ function setView(v) {
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); }
   if (v === "log") loadLog();
   render();
 }
@@ -2320,16 +2390,21 @@ function saveTeamRename(i) {
                  TEAM_EDIT = -1; render(); })
     .catch(() => alert("Umbenennen fehlgeschlagen (Name evtl. schon vergeben)."));
 }
+function teamMail(t) { return ((NOTIFY.team_email || {})[t]) || ""; }
 function renderTeams() {
   const rows = TEAMS.map((t, i) => {
+    const mailCell = `<td><input class="filterbox" style="width:100%" id="teamMail${i}"
+         data-team="${esc(t)}" placeholder="team@firma.de" value="${esc(teamMail(t))}"></td>`;
     if (i === TEAM_EDIT) {
       return `<tr><td class="num">${i + 1}</td>
         <td><input class="filterbox" style="width:100%" id="teamEdit" value="${esc(t)}"
              onkeydown="if(event.key==='Enter')saveTeamRename(${i});if(event.key==='Escape')cancelEditTeam()"></td>
+        ${mailCell}
         <td><button class="btn approve" onclick="saveTeamRename(${i})">✓ Speichern</button>
             <button class="btn" onclick="cancelEditTeam()">Abbrechen</button></td></tr>`;
     }
     return `<tr><td class="num">${i + 1}</td><td>${esc(t)}</td>
+     ${mailCell}
      <td><button class="edit" title="nach oben" ${i === 0 ? "disabled" : ""} onclick="moveTeam(${i},-1)">↑</button>
          <button class="edit" title="nach unten" ${i === TEAMS.length - 1 ? "disabled" : ""} onclick="moveTeam(${i},1)">↓</button>
          <button class="edit" title="Team umbenennen" onclick="editTeam(${i})">✎ Umbenennen</button>
@@ -2338,9 +2413,63 @@ function renderTeams() {
   document.getElementById("tmbody").innerHTML =
     `<tr><td></td><td><input class="filterbox" style="width:100%" id="newTeam"
          placeholder="Neues Team, z. B. Team Betrieb"
-         onkeydown="if(event.key==='Enter')addTeam()"></td>
+         onkeydown="if(event.key==='Enter')addTeam()"></td><td></td>
      <td><button class="btn approve" onclick="addTeam()">+ Hinzufügen</button></td></tr>` +
-    (rows || `<tr><td colspan="3" style="color:var(--muted)">Keine Teams – einstufig (Admin genehmigt direkt).</td></tr>`);
+    (rows || `<tr><td colspan="4" style="color:var(--muted)">Keine Teams – einstufig (Admin genehmigt direkt).</td></tr>`);
+}
+
+// ---- Mail-Benachrichtigungen (Matrix Rolle × Ereignis) ----
+async function apiNotify(method, body) {
+  const r = await fetch("api/notify", { method: method,
+    headers: {"Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function loadNotify() {
+  apiNotify("GET").then(d => { if (d && d.notify) NOTIFY = d.notify;
+                               if (VIEW === "adm") render(); }).catch(() => {});
+}
+function renderNotify() {
+  const rows = ROLE_ORDER.map(role => {
+    const rc = (NOTIFY.role || {})[role] || {};
+    const allowed = NOTIFY_ROLE_EVENTS[role] || [];
+    const addr = role === "anforderer"
+        ? `<span style="color:var(--muted)">= Antragsteller (automatisch)</span>`
+      : role === "reviewer"
+        ? `<span style="color:var(--muted)">pro Team (Tabelle oben)</span>`
+        : `<input class="filterbox" style="width:100%" id="nt_email_${role}"
+             placeholder="verteiler@firma.de" value="${esc(rc.email || "")}">`;
+    const cells = NOTIFY_EVENTS.map(([ev]) => allowed.includes(ev)
+        ? `<td class="num"><input type="checkbox" id="nt_${role}_${ev}" ${rc[ev] ? "checked" : ""}></td>`
+        : `<td class="num" style="color:var(--muted)">–</td>`).join("");
+    return `<tr><td>${esc(ROLE_NAMES[role] || role)} <span style="color:var(--muted)">(${role})</span></td>
+      <td>${addr}</td>${cells}</tr>`;
+  }).join("");
+  document.getElementById("ntbody").innerHTML = rows;
+}
+function saveNotify() {
+  const body = { role: {}, team_email: {} };
+  ROLE_ORDER.forEach(role => {
+    const rc = {};
+    (NOTIFY_ROLE_EVENTS[role] || []).forEach(ev => {
+      const el = document.getElementById("nt_" + role + "_" + ev);
+      if (el) rc[ev] = el.checked;
+    });
+    const em = document.getElementById("nt_email_" + role);
+    if (em) rc.email = em.value.trim();
+    body.role[role] = rc;
+  });
+  document.querySelectorAll('#tmbody input[id^="teamMail"]').forEach(inp => {
+    const t = inp.getAttribute("data-team"); const v = (inp.value || "").trim();
+    if (t && v) body.team_email[t] = v;
+  });
+  apiNotify("PUT", body).then(d => {
+    if (d && d.notify) NOTIFY = d.notify;
+    const st = document.getElementById("notifySaved");
+    if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
+    render();
+  }).catch(() => alert("Speichern der Mail-Regeln fehlgeschlagen."));
 }
 
 // ---- Cluster-Selektor konfigurieren ----
@@ -2600,7 +2729,7 @@ function render() {
   if (VIEW === "vlan") { renderVlan(); return; }
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderSelector(); renderTokenTable(); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderSelector(); renderTokenTable(); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -2937,7 +3066,7 @@ def _html_escape(s):
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
-                contact="", selector=None, backup=False):
+                contact="", selector=None, backup=False, notify=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -2965,6 +3094,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__SELECTOR__", json_for_html(selector or []))
             .replace("__BACKUP__", "true" if backup else "false")
             .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
+            .replace("__NOTIFY__", json_for_html(notify or DEFAULT_NOTIFY))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -2996,12 +3126,13 @@ def serve(args, password):
     # ---- Datenspeicher (JSON-Dateien oder SQLite) ----
     _coll_paths = {"res": args.res_file, "roles": args.roles_file,
                    "teams": args.teams_file, "selector": args.selector_file,
-                   "rolenames": args.rolenames_file, "tokens": args.tokens_file}
+                   "rolenames": args.rolenames_file, "tokens": args.tokens_file,
+                   "notify": args.notify_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
-        for _n in ("roles", "teams", "selector", "rolenames", "tokens"):
+        for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
                 try:
@@ -3119,6 +3250,35 @@ def serve(args, password):
         store.save("rolenames", role_names)
 
     role_names = load_rolenames()
+
+    # ---- Mail-Benachrichtigungsregeln (je interner Rolle + Team-Adressen) ----
+    notify_lock = threading.Lock()
+
+    def _merge_notify(raw):
+        cfg = {"role": {}, "team_email": {}}
+        rawrole = (raw or {}).get("role") if isinstance(raw, dict) else None
+        rawrole = rawrole if isinstance(rawrole, dict) else {}
+        for role, events in NOTIFY_ROLE_EVENTS.items():
+            base = dict(DEFAULT_NOTIFY["role"][role])
+            got = rawrole.get(role) if isinstance(rawrole.get(role), dict) else {}
+            for ev in events:
+                base[ev] = bool(got.get(ev, base.get(ev, False)))
+            if role in ("admin", "auditor"):
+                base["email"] = str(got.get("email") or "").strip()[:200]
+            cfg["role"][role] = base
+        rawmail = (raw or {}).get("team_email") if isinstance(raw, dict) else None
+        if isinstance(rawmail, dict):
+            for k, v in rawmail.items():
+                cfg["team_email"][str(k)] = str(v or "").strip()[:200]
+        return cfg
+
+    def load_notify():
+        return _merge_notify(store.load("notify", None))
+
+    def save_notify():
+        store.save("notify", notify_cfg)
+
+    notify_cfg = load_notify()
 
     def current_team(r):
         """Team, das als Nächstes freigeben muss – None, wenn keine Teams
@@ -3441,18 +3601,50 @@ def serve(args, password):
                 f"{r.get('ram_gb', 0)} GB RAM"
                 + (f" / {stor} GB Storage" if stor else "") + ")")
 
-    def notify_mail(r, action, admin):
-        """Report-Mail zu Genehmigung/Ablehnung im Hintergrund verschicken."""
+    def _split_addrs(s):
+        return [a for a in re.split(r"[,;\s]+", str(s or "")) if "@" in a]
+
+    def mail_recipients(kind, r, team=None):
+        """Empfänger für ein Ereignis nach den Mail-Regeln (Modell Gemischt)."""
+        with notify_lock:
+            roles = dict(notify_cfg.get("role") or {})
+            team_email = dict(notify_cfg.get("team_email") or {})
+        to = []
+        # Anforderer -> der Antragsteller selbst
+        if kind in ("created", "rejected", "approved") \
+                and (roles.get("anforderer") or {}).get(kind):
+            to += _split_addrs(r.get("von"))
+        # Admin / Auditor -> feste Verteiler-Adresse (Admin fällt auf --smtp-to zurück)
+        for role in ("admin", "auditor"):
+            rc = roles.get(role) or {}
+            if rc.get(kind):
+                em = rc.get("email") or (args.smtp_to if role == "admin" else "")
+                to += _split_addrs(em)
+        # Team ist dran -> Adresse des aktuell zuständigen Teams
+        if kind == "team_turn" and (roles.get("reviewer") or {}).get("team_turn") and team:
+            to += _split_addrs(team_email.get(team))
+        return to
+
+    def mail_event(kind, r, team=None, actor=""):
+        """Ereignis-Mail nach den Mail-Regeln im Hintergrund verschicken."""
         if not args.smtp_server:
             return
+        to = mail_recipients(kind, r, team)
+        if not to:
+            return
+        name, cluster = r.get("name", "?"), r.get("cluster", "?")
+        if kind == "team_turn":
+            action = f"wartet auf Freigabe durch {team}"
+            subject = f"Kapazitätsreservierung {action}: {name} ({cluster})"
+        else:
+            action = {"created": "beantragt", "rejected": "abgelehnt",
+                      "approved": "genehmigt"}.get(kind, kind)
+            subject = f"Kapazitätsreservierung {action}: {name} ({cluster})"
+        body = reservation_mail_body(r, action, actor or "System", args.res_ttl_days)
 
         def worker():
             try:
-                send_mail(args,
-                          f"Kapazitätsreservierung {action}: {r.get('name', '?')} "
-                          f"({r.get('cluster', '?')})",
-                          reservation_mail_body(r, action, admin, args.res_ttl_days),
-                          extra_to=(r.get("von") or "",))
+                send_mail(args, subject, body, to_override=to)
             except Exception as e:
                 print(f"Mail-Versand fehlgeschlagen: {e}", file=sys.stderr)
         threading.Thread(target=worker, daemon=True).start()
@@ -3679,7 +3871,8 @@ def serve(args, password):
                                        userinfo=userinfo, teams=approval_teams,
                                        rolenames=role_names, contact=args.contact_info,
                                        selector=cluster_selector,
-                                       backup=bool(args.backup_target)),
+                                       backup=bool(args.backup_target),
+                                       notify=notify_cfg),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 if not self._require():
@@ -3760,6 +3953,11 @@ def serve(args, password):
                     return
                 with rolenames_lock:
                     self._json({"rolenames": dict(role_names)})
+            elif route == "/api/notify":
+                if not self._require("admin"):
+                    return
+                with notify_lock:
+                    self._json({"notify": json.loads(json.dumps(notify_cfg))})
             elif route == "/api/log":
                 if not self._require("admin"):
                     return
@@ -3876,6 +4074,10 @@ def serve(args, password):
                     res_put(entry)
                     self._json(visible_res(s))
                 audit(s["user"], "Antrag erstellt", res_detail(entry))
+                mail_event("created", entry, actor=s["user"] or "")
+                if approval_teams:               # erstes Team ist ab jetzt dran
+                    mail_event("team_turn", entry, team=current_team(entry),
+                               actor=s["user"] or "")
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/approve")):
                 s = self._require("admin", "reviewer")
@@ -3936,7 +4138,13 @@ def serve(args, password):
                             else "Antrag freigegeben")
                     audit(s["user"], verb, res_detail(notify) + f" – {action}"
                           + (f", Kommentar: {comment}" if comment else ""))
-                    notify_mail(notify, action, s["user"] or "unbekannt")
+                    if notify.get("approved"):    # letzte Stufe -> endgültig genehmigt
+                        mail_event("approved", notify, actor=s["user"] or "")
+                    else:                          # Zwischenstufe -> nächstes Team ist dran
+                        nt = current_team(notify)
+                        if nt:
+                            mail_event("team_turn", notify, team=nt,
+                                       actor=s["user"] or "")
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/reject")):
                 s = self._require("admin", "reviewer")
@@ -3980,7 +4188,7 @@ def serve(args, password):
                           + (f" (Stufe {notify.get('rejected_team')})"
                              if notify.get("rejected_team") else "")
                           + (f" – Kommentar: {comment}" if comment else ""))
-                    notify_mail(notify, "abgelehnt", s["user"] or "unbekannt")
+                    mail_event("rejected", notify, actor=s["user"] or "")
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/cancel")):
                 # Storno: jemand aus derselben Abteilung (oder der Anforderer
@@ -4025,7 +4233,6 @@ def serve(args, password):
                 if notify:
                     audit(s["user"], "Antrag storniert", res_detail(notify)
                           + (f" – Kommentar: {comment}" if comment else ""))
-                    notify_mail(notify, "storniert", s["user"] or "unbekannt")
             elif self.path == "/api/backup":
                 if not self._require("admin"):
                     return
@@ -4107,6 +4314,12 @@ def serve(args, password):
                         return
                     approval_teams[approval_teams.index(old)] = new
                     save_teams()
+                    # Team-Mail-Adresse auf den neuen Namen umziehen
+                    with notify_lock:
+                        te = notify_cfg.get("team_email") or {}
+                        if old in te:
+                            te[new] = te.pop(old)
+                            save_notify()
                     # Zugewiesene Reviewer auf den neuen Team-Namen umziehen
                     moved = 0
                     for entry in roles.values():
@@ -4161,6 +4374,14 @@ def serve(args, password):
                 with teams_lock:
                     approval_teams[:] = new   # in-place, damit Closures es sehen
                     save_teams()
+                # verwaiste Team-Mail-Adressen entfernen
+                with notify_lock:
+                    te = notify_cfg.get("team_email") or {}
+                    orphan = [k for k in te if k not in new]
+                    for k in orphan:
+                        te.pop(k, None)
+                    if orphan:
+                        save_notify()
                 audit(s["user"], "Genehmigungs-Teams geändert",
                       " → ".join(new) if new else "(keine – einstufig)")
                 self._json({"teams": list(approval_teams)})
@@ -4200,6 +4421,32 @@ def serve(args, password):
                 audit(s["user"], "Rollen-Bezeichnungen geändert",
                       ", ".join(f"{k}={result[k]}" for k in ROLE_KEYS))
                 self._json({"rolenames": result})
+            elif self.path == "/api/notify":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, dict):
+                    self._json({"error": "Objekt mit Mail-Regeln erwartet"}, 400)
+                    return
+                # team_email nur für tatsächlich existierende Teams behalten
+                clean = _merge_notify(body)
+                with teams_lock:
+                    valid = set(approval_teams)
+                clean["team_email"] = {k: v for k, v in clean["team_email"].items()
+                                       if k in valid and v}
+                with notify_lock:
+                    notify_cfg.clear()
+                    notify_cfg.update(clean)
+                    save_notify()
+                    result = json.loads(json.dumps(notify_cfg))
+                on = [f"{role}:{ev}" for role, evs in NOTIFY_ROLE_EVENTS.items()
+                      for ev in evs if (result["role"].get(role) or {}).get(ev)]
+                audit(s["user"], "Mail-Regeln geändert",
+                      (", ".join(on) or "keine")
+                      + (f"; Team-Adressen: {len(result['team_email'])}"
+                         if result["team_email"] else ""))
+                self._json({"notify": result})
             else:
                 self.send_error(404)
 
@@ -4435,6 +4682,10 @@ def main():
                     help="Datei mit den frei wählbaren Rollen-Bezeichnungen "
                          "(Standard: data/kapa_rollennamen.json); Pflege über die "
                          "Verwaltungsseite")
+    ap.add_argument("--notify-file", default="kapa_mail.json",
+                    help="Datei mit den Mail-Benachrichtigungsregeln je Rolle "
+                         "(Standard: data/kapa_mail.json); Pflege über die "
+                         "Verwaltungsseite")
     # Leere Werte von Langoptionen verwerfen, BEVOR geparst wird. Grund: Die
     # systemd-Unit baut Argumente wie "--backup-target ${BACKUP_TARGET}" aus
     # kapa.env; ist die Variable leer, käme ein leeres Argument an und würde den
@@ -4459,6 +4710,7 @@ def main():
     args.selector_file = data_path(args.selector_file, base)
     args.db_file = data_path(args.db_file, base)
     args.rolenames_file = data_path(args.rolenames_file, base)
+    args.notify_file = data_path(args.notify_file, base)
     if args.json:
         args.json = data_path(args.json, base)
 

@@ -224,9 +224,19 @@ Detailkarte eines Clusters; Export/Import als JSON.
   abgelehnt hat — für Anforderer ist diese Information verborgen (Spalte und
   Datenfeld werden serverseitig entfernt); Admins und technische Prüfung
   sehen sie.
-- **Mail-Reports**: Mit `--smtp-server` verschickt das Dashboard bei jeder
-  Genehmigung/Ablehnung eine Mail mit den Reservierungsdaten und dem
-  ausführenden Admin an `--smtp-to` sowie automatisch an den Anforderer.
+- **Mail-Benachrichtigungen** (SMTP-Server über `--smtp-server` vorausgesetzt):
+  In der **Verwaltung** legst du je interner Rolle fest, bei welchem Ereignis
+  eine Mail rausgeht — **Anlage**, **Ablehnung**, **Freigabe** (endgültige
+  Genehmigung) und **„Team ist dran"** (ein Team ist im Freigabe-Workflow an der
+  Reihe). Empfänger:
+  - **Anforderer** → der jeweilige Antragsteller (automatisch),
+  - **Admin/Auditor** → je eine frei eingetragene Verteiler-Adresse
+    (Admin fällt auf `--smtp-to` zurück, falls das Feld leer bleibt),
+  - **„Team ist dran"** → die pro Genehmigungs-Team hinterlegte Adresse.
+
+  Die Mail enthält die Reservierungsdaten; der Versand läuft asynchron und
+  best-effort (Fehler nur im Log). Beim **Anlegen** eines Antrags wird zusätzlich
+  automatisch das erste Team benachrichtigt, nach jeder Freigabe das nächste.
 - **Serve-Modus**: Reservierungen liegen zentral auf dem Server in
   `data/kapa_reservierungen.json` — alle Nutzer sehen denselben Stand.
 - **Statisches HTML**: Speicherung lokal im Browser (localStorage).
