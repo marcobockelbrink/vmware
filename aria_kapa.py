@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.15"
+VERSION = "1.15.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2747,7 +2747,9 @@ function renderAdmTable() {
     const warn = orphan
       ? ' <span class="st rej" title="Dieses Team gibt es nicht (mehr) – bitte neu zuweisen">⚠ unbekannt</span>'
       : (needsTeam && !r.abteilung ? ' <span class="st pend" title="Ohne Team: sieht nur eigene Anfragen bzw. kann nichts freigeben">⚠ kein Team</span>' : "");
-    return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
+    const mailCell = isGroup ? esc(u)
+      : `<span title="${r.mail ? 'AD-Mail: ' + esc(r.mail) : 'keine AD-Mail aufgelöst (nur mit --ad-mail-attribute)'}">${esc(u)}${r.mail ? ' <span style="color:var(--muted)" title="AD-Mail: ' + esc(r.mail) + '">✉</span>' : ''}</span>`;
+    return `<tr><td>${esc(typ)}</td><td>${mailCell}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
      <td>${esc(r.abteilung || "–")}${warn}</td>
      <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
@@ -3533,6 +3535,40 @@ def serve(args, password):
         with roles_lock:
             return any(e.get("kind") == "group" for e in roles.values())
 
+    # AD-Mailadresse eines Benutzers (aus --ad-mail-attribute) auflösen, gecacht.
+    # Dient auch der Sichtkontrolle in der Verwaltung (Mouseover je Benutzer).
+    user_mail_cache = {}
+
+    def resolve_user_mail(upn):
+        if not (args.ad_mail_attribute and args.ad_bind_dn and upn):
+            return ""
+        if upn not in user_mail_cache:
+            m = ""
+            try:
+                m = ldap_user_attr(args.ad_url, args.ad_bind_dn,
+                                   args.ad_bind_password, args.ad_base_dn, upn,
+                                   args.ad_mail_attribute,
+                                   insecure=args.ad_insecure) or ""
+            except Exception as e:
+                print(f"AD-Mail für {upn} nicht auflösbar: {e}", file=sys.stderr)
+            user_mail_cache[upn] = m
+        return user_mail_cache[upn]
+
+    def roles_with_mail():
+        """Kopie der Rollen; Benutzer-Einträge um die aufgelöste AD-Mail
+        ergänzt (nur wenn --ad-mail-attribute gesetzt ist)."""
+        with roles_lock:
+            items = list(roles.items())
+        out = {}
+        for k, v in items:
+            e = dict(v)
+            if e.get("kind", "user") != "group":
+                m = resolve_user_mail(k)
+                if m:
+                    e["mail"] = m
+            out[k] = e
+        return out
+
     if auth_enabled:
         if not args.ad_url.startswith("ldaps://"):
             print("WARNUNG: --ad-url ohne ldaps:// – Passwörter gehen unverschlüsselt "
@@ -4096,8 +4132,7 @@ def serve(args, password):
             elif route == "/api/roles":
                 if not self._require("admin"):
                     return
-                with roles_lock:
-                    self._json(dict(roles))
+                self._json(roles_with_mail())
             elif route == "/api/teams":
                 if not self._require("admin"):
                     return
@@ -4464,7 +4499,7 @@ def serve(args, password):
                 with roles_lock:
                     roles[key] = {"role": role, "abteilung": dept, "kind": kind}
                     save_roles()
-                    self._json(dict(roles))
+                self._json(roles_with_mail())
                 audit(self._session()["user"],
                       "AD-Gruppe zugewiesen" if kind == "group" else "Rolle zugewiesen",
                       f"{key} -> {role}" + (f" ({dept})" if dept else ""))
@@ -4506,10 +4541,9 @@ def serve(args, password):
                     for sess in sessions.values():
                         if sess.get("role") == "reviewer" and sess.get("abteilung") == old:
                             sess["abteilung"] = new
-                    result_roles = dict(roles)
                 audit(s["user"], "Team umbenannt",
                       f"„{old}“ → „{new}“" + (f" ({moved} Reviewer übernommen)" if moved else ""))
-                self._json({"teams": list(approval_teams), "roles": result_roles})
+                self._json({"teams": list(approval_teams), "roles": roles_with_mail()})
             else:
                 self.send_error(404)
 
@@ -4649,7 +4683,7 @@ def serve(args, password):
                 with roles_lock:
                     removed = roles.pop(user, None)
                     save_roles()
-                    self._json(dict(roles))
+                self._json(roles_with_mail())
                 if removed:
                     audit(s["user"], "Rolle entfernt",
                           f"{user} (war {removed.get('role')})")
