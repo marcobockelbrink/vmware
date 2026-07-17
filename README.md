@@ -338,7 +338,12 @@ curl -H "Authorization: Bearer kapa_..." \
 
 Endpunkte: `/api/v1/reservations` (Filter: `cluster`, `status`, `abteilung`;
 `format=csv`), `/api/v1/data` (Cluster-Kapazitäten), `/api/v1/status`.
-Details und Beispiele: [`config/API.md`](config/API.md).
+
+**Interaktive Doku im Dashboard**: unter **`/api/v1/docs`** (auch verlinkt im Tab
+„Verwaltung → API-Tokens") – eine selbst-enthaltene, offline lauffähige
+Swagger-artige Seite mit „Ausführen"-Knopf je Endpunkt. Die maschinenlesbare
+**OpenAPI-3.0-Spec** liegt unter **`/api/v1/openapi.json`** und lässt sich in
+Swagger Editor, Postman o. Ä. importieren. Textfassung: [`config/API.md`](config/API.md).
 
 ## Rollenkonzept und AD-Anmeldung
 

@@ -1,5 +1,9 @@
 # API für externe Anwendungen (v1, nur lesend)
 
+> **Interaktiv im Dashboard:** `/api/v1/docs` (Swagger-artige Seite mit
+> „Ausführen", offline lauffähig) · **OpenAPI-Spec:** `/api/v1/openapi.json`
+> (Import in Swagger Editor/Postman). Diese Datei ist die Textfassung.
+
 Das Dashboard stellt unter `/api/v1/` eine stabile, lesende REST-API bereit.
 Externe Anwendungen authentifizieren sich mit einem **Bearer-Token**, das
 Admins im Tab „Verwaltung" erzeugen (Abschnitt „API-Tokens"). Das Token wird

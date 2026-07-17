@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.18.1"
+VERSION = "1.19"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1390,6 +1390,232 @@ def sample_data():
 
 # ------------------------------------------------------------------ Dashboard --
 
+def openapi_spec():
+    """OpenAPI-3.0-Beschreibung der lesenden v1-API. Importierbar in Swagger
+    Editor/Postman; die eingebaute Seite /api/v1/docs rendert sie direkt."""
+    reservation = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Eindeutige ID"},
+            "name": {"type": "string", "description": "Bezeichnung / Projekt"},
+            "change": {"type": "string", "description": "Change-Nummer / Jira-Ticket (optional)"},
+            "cluster": {"type": "string"},
+            "vcpu": {"type": "integer"},
+            "ram_gb": {"type": "integer"},
+            "storage_gb": {"type": "integer", "description": "nur informativ"},
+            "von": {"type": "string", "description": "Anforderer"},
+            "abteilung": {"type": "string", "description": "Team/Abteilung"},
+            "created": {"type": "string", "description": "gilt ab (ISO-Datum)"},
+            "approvals": {"type": "array", "description": "bisherige Team-Freigaben (Prüfreihenfolge)",
+                          "items": {"type": "object", "properties": {
+                              "team": {"type": "string"}, "by": {"type": "string"},
+                              "on": {"type": "string"}, "comment": {"type": "string"}}}},
+            "approved": {"type": "boolean", "description": "vollständig genehmigt (alle Stufen)"},
+            "approved_on": {"type": "string"}, "approved_by": {"type": "string"},
+            "rejected": {"type": "boolean"}, "rejected_on": {"type": "string"},
+            "rejected_by": {"type": "string"}, "rejected_team": {"type": "string"},
+            "cancelled": {"type": "boolean"}, "cancelled_on": {"type": "string"},
+            "cancelled_by": {"type": "string"}, "comment": {"type": "string"},
+        },
+    }
+    cluster = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "hostCount": {"type": "integer"}, "cores": {"type": "integer"},
+            "vcpuCap": {"type": "number"}, "vcpuUsed": {"type": "number"},
+            "vcpuFree": {"type": "number", "description": "vor Abzug genehmigter Reservierungen"},
+            "ramCap": {"type": "number"}, "ramUsed": {"type": "number"}, "ramFree": {"type": "number"},
+            "storageCap": {"type": "number"}, "storageUsed": {"type": "number"}, "storageFree": {"type": "number"},
+            "vmCount": {"type": "integer"}, "vmOff": {"type": "integer"},
+            "portgroups": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "vlan": {"type": "string"}}}},
+        },
+    }
+    return {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "VMware Kapazitätsplanung – API",
+            "version": VERSION,
+            "description": "Stabile, **nur lesende** REST-API. Authentifizierung "
+                           "per Bearer-Token (Admins erzeugen es im Tab „Verwaltung“) "
+                           "oder per Browser-Session.",
+        },
+        "servers": [{"url": "/", "description": "dieser Server (hinter einem "
+                     "Proxy-Unterpfad wie /capa entsprechend anpassen)"}],
+        "components": {
+            "securitySchemes": {
+                "bearerAuth": {"type": "http", "scheme": "bearer",
+                               "description": "Header: Authorization: Bearer kapa_…"},
+                "cookieAuth": {"type": "apiKey", "in": "cookie", "name": "kapa_session"},
+            },
+            "schemas": {"Reservation": reservation, "Cluster": cluster,
+                        "Status": {"type": "object", "properties": {
+                            "version": {"type": "string"}, "updated": {"type": "string"},
+                            "refreshing": {"type": "boolean"},
+                            "next": {"type": "integer", "nullable": True,
+                                     "description": "Sekunden bis zur nächsten Aktualisierung"}}},
+                        "Data": {"type": "object", "properties": {
+                            "updated": {"type": "string"},
+                            "clusters": {"type": "array", "items": {"$ref": "#/components/schemas/Cluster"}}}}},
+        },
+        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "paths": {
+            "/api/v1/status": {"get": {
+                "summary": "Status & Aktualität",
+                "description": "Version, Zeitpunkt des letzten Aria-Abrufs, ob gerade "
+                               "aktualisiert wird und Sekunden bis zum nächsten Abruf.",
+                "responses": {"200": {"description": "OK", "content": {"application/json": {
+                    "schema": {"$ref": "#/components/schemas/Status"}}}},
+                    "401": {"description": "Token/Anmeldung fehlt oder ungültig"}}}},
+            "/api/v1/data": {"get": {
+                "summary": "Cluster-Kapazitäten",
+                "description": "Cluster-Kennzahlen aus dem letzten Aria-Abruf. "
+                               "vcpuFree/ramFree sind VOR Abzug genehmigter Reservierungen.",
+                "responses": {"200": {"description": "OK", "content": {"application/json": {
+                    "schema": {"$ref": "#/components/schemas/Data"}}}},
+                    "401": {"description": "Token/Anmeldung fehlt oder ungültig"}}}},
+            "/api/v1/reservations": {"get": {
+                "summary": "Reservierungen (Kapazitätsanfragen)",
+                "description": "Alle Reservierungen. Kombinierbare Filter; als CSV mit "
+                               "format=csv (Semikolon, Excel-tauglich).",
+                "parameters": [
+                    {"name": "cluster", "in": "query", "schema": {"type": "string"},
+                     "description": "nur dieses Cluster"},
+                    {"name": "abteilung", "in": "query", "schema": {"type": "string"},
+                     "description": "nur dieses Team/diese Abteilung"},
+                    {"name": "status", "in": "query", "schema": {"type": "string",
+                     "enum": ["beantragt", "in Prüfung", "genehmigt", "abgelehnt", "storniert"]}},
+                    {"name": "format", "in": "query", "schema": {"type": "string",
+                     "enum": ["json", "csv"], "default": "json"}},
+                ],
+                "responses": {"200": {"description": "OK", "content": {
+                    "application/json": {"schema": {"type": "array",
+                        "items": {"$ref": "#/components/schemas/Reservation"}}},
+                    "text/csv": {"schema": {"type": "string"}}}},
+                    "401": {"description": "Token/Anmeldung fehlt oder ungültig"}}}},
+        },
+    }
+
+
+# Selbst-enthaltene, offline lauffähige API-Doku (kein CDN/Swagger-UI nötig);
+# rendert /api/v1/openapi.json und bietet ein einfaches „Ausführen" je Endpunkt.
+API_DOCS_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API-Dokumentation – VMware Kapazitätsplanung</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --get:#0ea5e9; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font:14px/1.55 "Segoe UI",system-ui,sans-serif;
+         margin:0; padding:24px; }
+  .wrap { max-width:960px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:var(--muted); margin-bottom:20px; }
+  a { color:var(--accent); }
+  .authbox { background:var(--card); border:1px solid var(--line); border-radius:12px;
+             padding:14px 16px; margin-bottom:20px; }
+  .authbox label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  .authbox input { width:100%; background:#0b1220; border:1px solid var(--line); color:var(--text);
+                   border-radius:8px; padding:9px 12px; font-size:13px; font-family:monospace; }
+  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+  .ep { background:var(--card); border:1px solid var(--line); border-radius:12px;
+        margin-bottom:14px; overflow:hidden; }
+  .ephead { display:flex; align-items:center; gap:10px; padding:12px 16px; cursor:pointer; }
+  .method { font-weight:700; font-size:12px; padding:3px 8px; border-radius:6px;
+            background:rgba(14,165,233,.15); color:var(--get); letter-spacing:.5px; }
+  .path { font-family:monospace; font-size:14px; }
+  .summary { color:var(--muted); margin-left:auto; font-size:13px; }
+  .epbody { padding:0 16px 16px; border-top:1px solid var(--line); }
+  .epbody p { color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-size:13px; margin:8px 0; }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  td input { background:#0b1220; border:1px solid var(--line); color:var(--text);
+             border-radius:6px; padding:5px 8px; font-size:13px; width:100%; }
+  .btn { background:var(--accent); color:#08131f; border:none; border-radius:8px;
+         padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; margin-top:6px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:12px;
+        overflow:auto; font-size:12px; max-height:360px; }
+  .status { font-weight:600; margin:8px 0 4px; }
+  .foot { color:var(--muted); font-size:12px; margin-top:24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>API-Dokumentation <span style="color:var(--muted);font-weight:400">· v__VERSION__</span></h1>
+  <div class="sub">Lesende REST-API unter <code>/api/v1/</code> ·
+    <a href="openapi.json">OpenAPI-Spec (JSON)</a> – importierbar in Swagger Editor/Postman.</div>
+
+  <div class="authbox">
+    <label for="tok">Bearer-Token (im Dashboard unter „Verwaltung → API-Tokens" erzeugen)</label>
+    <input id="tok" placeholder="kapa_…" autocomplete="off" spellcheck="false">
+    <div class="hint">Wird nur lokal im Browser gespeichert und bei „Ausführen" als
+      <code>Authorization: Bearer …</code> mitgeschickt. Angemeldete Admins können auch ohne
+      Token testen (Session-Cookie).</div>
+  </div>
+
+  <div id="eps"></div>
+  <div class="foot">Self-contained – kein externes Swagger-UI/CDN. Details je Feld: siehe OpenAPI-Spec.</div>
+</div>
+<script>
+const BASE = location.pathname.replace(/\/docs\/?$/, "");   // /api/v1  (auch hinter Proxy)
+const tokEl = document.getElementById("tok");
+try { tokEl.value = localStorage.getItem("kapa_api_token") || ""; } catch (e) {}
+tokEl.addEventListener("input", () => { try { localStorage.setItem("kapa_api_token", tokEl.value); } catch (e) {} });
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+fetch("openapi.json").then(r => r.json()).then(spec => {
+  const box = document.getElementById("eps");
+  Object.keys(spec.paths).forEach(p => {
+    const op = spec.paths[p].get; if (!op) return;
+    const id = p.replace(/\W+/g, "_");
+    const params = op.parameters || [];
+    const prows = params.map(pa => `<tr><td style="width:130px"><code>${esc(pa.name)}</code></td>
+      <td>${esc(pa.description || "")}${pa.schema && pa.schema.enum ? ' <span style="color:var(--muted)">('+pa.schema.enum.map(esc).join(" | ")+')</span>' : ''}</td>
+      <td style="width:180px"><input data-p="${esc(pa.name)}" data-ep="${id}" placeholder="${pa.schema && pa.schema.enum ? esc(pa.schema.enum[0]) : ''}"></td></tr>`).join("");
+    const ptable = params.length ? `<table><tr><th>Parameter</th><th>Bedeutung</th><th>Wert (optional)</th></tr>${prows}</table>` : "";
+    box.insertAdjacentHTML("beforeend", `<div class="ep">
+      <div class="ephead" onclick="var b=this.nextElementSibling; b.style.display = b.style.display==='none'?'':'none';">
+        <span class="method">GET</span><span class="path">${esc(p)}</span>
+        <span class="summary">${esc(op.summary || "")}</span></div>
+      <div class="epbody" style="display:none">
+        <p>${esc(op.description || "")}</p>
+        ${ptable}
+        <button class="btn" onclick="run('${id}','${esc(p)}')">Ausführen</button>
+        <div class="status" id="st_${id}"></div>
+        <pre id="out_${id}" style="display:none"></pre>
+      </div></div>`);
+  });
+}).catch(() => { document.getElementById("eps").textContent = "OpenAPI-Spec nicht ladbar."; });
+
+function run(id, path) {
+  const st = document.getElementById("st_" + id), out = document.getElementById("out_" + id);
+  const qs = [];
+  document.querySelectorAll(`input[data-ep="${id}"]`).forEach(i => {
+    if (i.value.trim()) qs.push(encodeURIComponent(i.dataset.p) + "=" + encodeURIComponent(i.value.trim()));
+  });
+  const url = BASE + path.replace(/^\/api\/v1/, "") + (qs.length ? "?" + qs.join("&") : "");
+  const h = {};
+  if (tokEl.value.trim()) h["Authorization"] = "Bearer " + tokEl.value.trim();
+  st.textContent = "… " + url;
+  fetch(url, { headers: h }).then(async r => {
+    const ct = r.headers.get("content-type") || "";
+    const body = await r.text();
+    st.textContent = "HTTP " + r.status + " · " + url;
+    out.style.display = "";
+    out.textContent = ct.includes("json") ? JSON.stringify(JSON.parse(body), null, 2) : body;
+  }).catch(e => { st.textContent = "Fehler: " + e.message; out.style.display = "none"; });
+}
+</script>
+</body>
+</html>"""
+
+
 LOGIN_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -1761,6 +1987,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 </div>
 <div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  📖 <a href="api/v1/docs" target="_blank" rel="noopener">API-Dokumentation öffnen</a>
+  (interaktiv, mit „Ausführen") · <a href="api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI-Spec</a>
+  zum Import in Swagger/Postman.</div>
 <div class="tablewrap">
 <table class="kt" id="ttable">
   <thead><tr><th>Anwendung</th><th>Token-Anfang</th><th>erstellt</th><th>von</th>
@@ -4269,6 +4499,12 @@ def serve(args, password):
                 with res_lock:
                     prune_reservations()
                     self._json(visible_res(s))
+            elif route == "/api/v1/openapi.json":
+                self._send(json.dumps(openapi_spec(), ensure_ascii=False, indent=2),
+                           "application/json; charset=utf-8")
+            elif route in ("/api/v1/docs", "/api/v1/docs/"):
+                self._send(API_DOCS_HTML.replace("__VERSION__", VERSION),
+                           "text/html; charset=utf-8")
             elif route in ("/api/v1/reservations", "/api/v1/data", "/api/v1/status"):
                 # Stabile v1-API für externe Anwendungen: Bearer-Token oder Session
                 tok = self._bearer()
