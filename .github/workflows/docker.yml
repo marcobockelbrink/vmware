@@ -1,0 +1,54 @@
+# Baut das Container-Image und veröffentlicht es als GitHub Package (GHCR).
+# Läuft automatisch bei jedem Release-Tag (v*); manueller Start über
+# "Run workflow" ist möglich (optional mit Versionsnummer für den Image-Tag).
+#
+# Ergebnis:  ghcr.io/marcobockelbrink/kapa-dashboard:latest  und  :<version>
+name: Docker-Image (GHCR)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Zusätzlicher Versions-Tag (z. B. 1.30) – leer = nur latest"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU + Buildx für Multi-Arch (RHEL-Hosts amd64, Dev-Macs arm64)
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/kapa-dashboard
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

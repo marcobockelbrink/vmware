@@ -3,11 +3,14 @@
 # (funktioniert genauso mit "podman compose")
 services:
   kapa:
-    build:
-      # Context ist die Projektwurzel, damit aria_kapa.py kopiert werden kann.
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile
-    image: kapa-dashboard:latest
+    # Fertiges Image von GitHub Packages (bei jedem Release automatisch gebaut).
+    # Für Produktion besser eine feste Version taggen, z. B. :1.30
+    image: ghcr.io/marcobockelbrink/kapa-dashboard:latest
+    # Alternativ selbst bauen: image-Zeile oben entfernen und einkommentieren –
+    # Context ist die Projektwurzel, damit aria_kapa.py kopiert werden kann.
+    #build:
+    #  context: ../..
+    #  dockerfile: deploy/docker/Dockerfile
     # Nur an localhost binden – davor gehört ein Reverse Proxy mit TLS.
     ports:
       - "127.0.0.1:8080:8080"

@@ -8,10 +8,25 @@ externen Abhängigkeiten. Es läuft als **nicht-root** (UID 1001).
 > verfügbar – dort ist das [RPM](../rpm/) der richtige Weg. Dieses Image ist für
 > Test-/Dev-Umgebungen oder andere Hosts gedacht.
 
-## Bauen
+## Fertiges Image von GitHub Packages (GHCR)
 
-Der Build-**Context ist die Projektwurzel** (dort liegt `aria_kapa.py`); die
-Dockerfile kopiert ausschließlich dieses Skript ins Image:
+Bei jedem Release wird das Image automatisch gebaut (GitHub Actions,
+amd64 + arm64) und als GitHub Package veröffentlicht:
+
+```bash
+docker pull ghcr.io/marcobockelbrink/kapa-dashboard:latest
+# oder eine feste Version (empfohlen für Produktion, gezielte Rollbacks):
+docker pull ghcr.io/marcobockelbrink/kapa-dashboard:1.30
+```
+
+Solange das Package **privat** ist, vorher am Registry anmelden (PAT mit
+`read:packages`): `docker login ghcr.io -u <github-user>`. Öffentlich schalten
+geht auf GitHub unter *Package → Package settings → Change visibility*.
+
+## Selbst bauen
+
+Alternativ lokal bauen. Der Build-**Context ist die Projektwurzel** (dort liegt
+`aria_kapa.py`); die Dockerfile kopiert ausschließlich dieses Skript ins Image:
 
 ```bash
 # aus der Projektwurzel
@@ -35,8 +50,10 @@ docker run -d --name kapa \
   -e ARIA_PASSWORD='DAS-ARIA-PASSWORT' \
   -v kapa-data:/opt/kapa/data \
   -v "$PWD/kapa.ini:/etc/kapa/kapa.ini:ro" \
-  kapa-dashboard:latest
+  ghcr.io/marcobockelbrink/kapa-dashboard:latest
 ```
+
+(Beim selbst gebauten Image entsprechend `kapa-dashboard:latest`.)
 
 Der Dienst lauscht im Container auf `0.0.0.0:8080`; nach außen wird er nur an
 `127.0.0.1` gemappt – **davor gehört ein Reverse Proxy mit TLS** (das Dashboard

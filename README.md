@@ -610,5 +610,8 @@ Verpackungen:
   `httpd_can_network_connect`.
 - **[`deploy/docker/`](deploy/docker/)** — Container-Image auf Basis von Red Hat
   UBI 9 (läuft als nicht-root, auch mit Podman) samt `docker-compose.yml`.
+  Bei jedem Release wird das Image automatisch gebaut und als **GitHub Package**
+  veröffentlicht: `docker pull ghcr.io/marcobockelbrink/kapa-dashboard:latest`
+  (amd64 + arm64, feste Versions-Tags wie `:1.30` für Rollbacks).
 
 Details und die Auswahlhilfe stehen in [`deploy/README.md`](deploy/README.md).
