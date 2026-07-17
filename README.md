@@ -8,6 +8,51 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 *Kapazitätsübersicht mit Demo-Daten: freie vCPU-, RAM- und Storage-Kapazität je
 Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
 
+## Funktionsüberblick
+
+Ein einzelnes Python-Skript (nur Standardbibliothek, **kein pip, kein Build**),
+das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
+
+**Kapazität & Auswertung**
+- Freie **vCPU / RAM / Storage** je Cluster mit Auslastungsbalken; frei = Kapazität − belegt − genehmigte Reservierungen
+- **N+1-Ausfallreserve** (`--failover-hosts`), **vSAN-Faktor** für nutzbare Netto-Kapazität, VM-**Ausschluss per Tag**
+- **Storage-Drilldown** je LUN/Datastore (sortierbar), **vSphere-Tags** je Cluster
+- **Cluster-Selektor**: bis zu 3 kaskadierende Tag-Filter; **Filter-/Suchfelder**, **sortierbare Tabellen**
+- **Auto-Aktualisierung** mit geschätztem Prozent-Fortschritt; Export als **CSV/JSON**
+
+**Netzwerk & VLAN**
+- **Netzwerk-Reiter** je Cluster: Portgruppen mit VLAN-Nummern, direkt durchsuchbar
+- **VLAN-Suche** über alle Cluster (IP/Netz/Name → an welchem Cluster hängt es)
+- **Uplink-/Trunk-Portgruppen** (VLAN 0-4094) werden ausgeblendet (`--show-uplink-portgroups`)
+
+**Reservierungen & Genehmigungs-Workflow**
+- Kapazitätsanfragen mit optionalem **Change/Jira-Ticket**; eigene Reservierungsseite mit **Suchmaske** und Summenzeile
+- **Mehrstufige Genehmigung** über Teams (Prüfreihenfolge), Freigabe/Ablehnung/Storno, Status-Historie
+- Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt
+
+**Rollen, AD & Sicherheit**
+- Rollen **Admin / Reviewer / Anforderer / Auditor**, frei benennbar; team-basierte Sichtbarkeit
+- **AD-Anmeldung** (LDAP, nur Stdlib), **AD-Gruppen** als Berechtigungssubjekt, Empfänger-Mail aus wählbarem **AD-Attribut**
+- Härtung: CSP/Security-Header, `Secure`-Cookies, **Login-Bremse**, Stored-XSS-sicheres Rendering
+
+**Mail-Benachrichtigungen**
+- Pro interner Rolle konfigurierbar: **Anlage / Ablehnung / Freigabe / „Team ist dran"**
+- Empfänger gemischt: Antragsteller automatisch, Admin/Auditor per Verteiler, Teams per eigener Adresse
+- Dezente **HTML-Mails** (+ Klartext-Fallback)
+
+**Verwaltung (Admin-UI)**
+- Unter-Reiter **Benutzer & Rollen / Mail / Backup & Konfiguration**
+- **Schreibgeschütztes Konfig-Sheet** (alle gesetzten Werte, Passwörter nur als „gesetzt: ja/nein")
+- **API-Tokens** für die lesende v1-REST-API, Backup-auf-Knopfdruck
+
+**Betrieb & Technik**
+- Datenhaltung als **JSON-Dateien oder SQLite** (`--storage`), **atomare** Schreibvorgänge
+- **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend)
+- **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**
+- Auslieferung als **systemd + nginx**, **RPM**, **Ansible** oder **Container**
+
+Details zu jedem Bereich in den folgenden Abschnitten.
+
 ## Dashboard
 
 - **Kompakte Tabellenansicht**: pro Cluster die freien **vCPU-, RAM- und
