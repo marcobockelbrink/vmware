@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.28"
+VERSION = "1.29"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -894,38 +894,96 @@ def reservation_mail_body(r, action, admin, res_ttl):
             f"{action} von {admin} am {datetime.now().strftime('%d.%m.%Y %H:%M')}\n")
 
 
-def reservation_mail_html(r, action, admin, res_ttl):
-    """Dezente HTML-Fassung – neutral (Grautöne), ohne Farben/Bilder."""
-    esc = _html_escape
+# Im Mail-Template (und Betreff) nutzbare Variablen: {{name}} usw.
+MAIL_VARS = [
+    ("action", "Ereignis (beantragt / genehmigt / abgelehnt / wartet auf Freigabe …)"),
+    ("name", "Bezeichnung / Projekt"),
+    ("id", "Kapa-ID"),
+    ("change", "Change / Jira-Ticket"),
+    ("cluster", "Ziel-Cluster"),
+    ("source", "vROps-Quelle"),
+    ("vcpu", "vCPU-Anzahl"),
+    ("ram_gb", "RAM (inkl. „GB“)"),
+    ("storage_gb", "Storage (inkl. „GB“)"),
+    ("von", "Anforderer"),
+    ("team", "Team / Abteilung des Anforderers"),
+    ("created", "Gilt ab (Anlagedatum)"),
+    ("valid_until", "Gültig bis"),
+    ("approvals", "Freigaben (Liste der Team-Freigaben)"),
+    ("comment", "letzter Kommentar"),
+    ("admin", "ausführende Person"),
+    ("date", "Zeitpunkt der Mail"),
+    ("current_team", "aktuell zuständiges Team (bei „Team ist dran“)"),
+]
+
+DEFAULT_MAIL_SUBJECT = "Kapazitätsreservierung {{action}}: {{name}} ({{cluster}})"
+
+_ML = ("padding:7px 14px 7px 0;color:#6b7280;white-space:nowrap;"
+       "border-bottom:1px solid #eef0f3;vertical-align:top")
+_MV = "padding:7px 0;border-bottom:1px solid #eef0f3;vertical-align:top"
+DEFAULT_MAIL_TEMPLATE = (
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,'
+    'Helvetica,Arial,sans-serif;color:#1f2937;font-size:14px;line-height:1.5;max-width:600px">\n'
+    '  <div style="font-size:17px;font-weight:600;margin:0 0 2px">Kapazitätsreservierung {{action}}</div>\n'
+    '  <div style="color:#6b7280;font-size:13px;margin:0 0 16px">{{name}} &middot; {{cluster}}</div>\n'
+    '  <table style="border-collapse:collapse;width:100%;border-top:1px solid #eef0f3">\n'
+    f'    <tr><td style="{_ML}">ID</td><td style="{_MV}">{{{{id}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Change / Jira</td><td style="{_MV}">{{{{change}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Cluster</td><td style="{_MV}">{{{{cluster}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">vCPU</td><td style="{_MV}">{{{{vcpu}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">RAM</td><td style="{_MV}">{{{{ram_gb}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Storage</td><td style="{_MV}">{{{{storage_gb}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Team</td><td style="{_MV}">{{{{team}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Beantragt</td><td style="{_MV}">von {{{{von}}}} am {{{{created}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Gültig bis</td><td style="{_MV}">{{{{valid_until}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Freigaben</td><td style="{_MV}">{{{{approvals}}}}</td></tr>\n'
+    f'    <tr><td style="{_ML}">Kommentar</td><td style="{_MV}">{{{{comment}}}}</td></tr>\n'
+    '  </table>\n'
+    '  <div style="color:#9ca3af;font-size:12px;margin-top:16px">{{action}} von {{admin}} am {{date}}</div>\n'
+    '  <div style="color:#c3c8d0;font-size:11px;margin-top:4px">VMware Kapazitätsplanung</div>\n'
+    '</div>')
+
+
+def _mail_values(r, action, admin, res_ttl, team=None, html=True):
+    """Werte für die Vorlagen-Variablen. html=True escaped für die HTML-Mail,
+    html=False für den (plain) Betreff."""
+    e = _html_escape if html else (lambda x: str(x if x is not None else ""))
     approvals = r.get("approvals") or []
-    freigaben = "<br>".join(
-        f"{esc(a.get('team') or '?')} · {esc(str(a.get('by') or '?'))} "
-        f"am {esc(str(a.get('on') or '?'))}" for a in approvals) or "–"
-    rows = _res_rows(r, res_ttl) + [("Freigaben", None), ("Kommentar", r.get("comment") or "–")]
-    tr = []
-    for label, value in rows:
-        v = freigaben if label == "Freigaben" else esc(str(value))
-        tr.append(
-            '<tr>'
-            '<td style="padding:7px 14px 7px 0;color:#6b7280;white-space:nowrap;'
-            'border-bottom:1px solid #eef0f3;vertical-align:top">' + esc(label) + '</td>'
-            '<td style="padding:7px 0;border-bottom:1px solid #eef0f3;'
-            'vertical-align:top">' + v + '</td></tr>')
-    now = datetime.now().strftime('%d.%m.%Y %H:%M')
-    return (
-        '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,'
-        'Helvetica,Arial,sans-serif;color:#1f2937;font-size:14px;line-height:1.5;'
-        'max-width:600px">'
-        '<div style="font-size:17px;font-weight:600;margin:0 0 2px">'
-        f'Kapazitätsreservierung {esc(action)}</div>'
-        '<div style="color:#6b7280;font-size:13px;margin:0 0 16px">'
-        f'{esc(r.get("name") or "?")} &middot; {esc(r.get("cluster") or "?")}</div>'
-        '<table style="border-collapse:collapse;width:100%;border-top:1px solid #eef0f3">'
-        + "".join(tr) + '</table>'
-        '<div style="color:#9ca3af;font-size:12px;margin-top:16px">'
-        f'{esc(action)} von {esc(str(admin or "System"))} am {now}</div>'
-        '<div style="color:#c3c8d0;font-size:11px;margin-top:4px">'
-        'VMware Kapazitätsplanung</div></div>')
+    if html:
+        appr = "<br>".join(
+            f"{_html_escape(a.get('team') or '?')} · {_html_escape(str(a.get('by') or '?'))} "
+            f"am {_html_escape(str(a.get('on') or '?'))}" for a in approvals) or "–"
+    else:
+        appr = ", ".join(f"{a.get('team') or '?'}: {a.get('by') or '?'}"
+                         for a in approvals) or "–"
+    return {
+        "action": e(action), "id": e(r.get("id") or "–"), "name": e(r.get("name") or "?"),
+        "change": e(r.get("change") or "–"), "cluster": e(r.get("cluster") or "?"),
+        "source": e(r.get("source") or "–"), "vcpu": e(r.get("vcpu", 0)),
+        "ram_gb": e(f"{r.get('ram_gb', 0)} GB"),
+        "storage_gb": e(f"{r.get('storage_gb') or 0} GB"),
+        "von": e(r.get("von") or "–"), "team": e(r.get("abteilung") or "–"),
+        "created": e(r.get("created") or "–"),
+        "valid_until": e(_res_valid_date(r, res_ttl) or "–"),
+        "approvals": appr, "comment": e(r.get("comment") or "–"),
+        "admin": e(admin or "System"),
+        "date": e(datetime.now().strftime("%d.%m.%Y %H:%M")),
+        "current_team": e(team or "–"),
+    }
+
+
+def render_template(tpl, values):
+    """Platzhalter {{var}} in einer Vorlage durch die Werte ersetzen."""
+    out = tpl
+    for k, v in values.items():
+        out = out.replace("{{" + k + "}}", str(v))
+    return out
+
+
+def reservation_mail_html(r, action, admin, res_ttl, template=None, team=None):
+    """HTML-Mail aus der (ggf. angepassten) Vorlage rendern."""
+    return render_template(template or DEFAULT_MAIL_TEMPLATE,
+                           _mail_values(r, action, admin, res_ttl, team, html=True))
 
 # ------------------------------------------------------------- Datenabfrage --
 
@@ -2110,6 +2168,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Mail-Regeln speichern</button>
 <span id="notifySaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+
+<div class="sechead" style="margin-top:22px">Mail-Vorlage (HTML)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Betreff und HTML-Text der Reservierungs-Mails. Verfügbare Variablen unten
+  einfach anklicken, um sie an der Cursor-Position einzufügen. Leer lassen =
+  eingebaute Standardvorlage. „Vorschau" rendert die Vorlage mit Beispieldaten.</div>
+<div id="mailVars" style="margin-bottom:10px"></div>
+<label style="font-size:12px;color:var(--muted)">Betreff</label>
+<input id="tplSubject" class="filterbox" style="width:100%;margin-bottom:10px" placeholder="Standardbetreff" onfocus="MAIL_TPL_FOCUS='tplSubject'">
+<label style="font-size:12px;color:var(--muted)">HTML-Text</label>
+<textarea id="tplHtml" style="width:100%;min-height:220px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5" placeholder="Standardvorlage (leer lassen)" onfocus="MAIL_TPL_FOCUS='tplHtml'"></textarea>
+<div style="margin-top:8px">
+  <button class="btn approve" onclick="saveMailTemplate()">✓ Vorlage speichern</button>
+  <button class="btn" onclick="previewMail()">Vorschau</button>
+  <button class="btn" onclick="resetMailTemplate()">Standard einsetzen</button>
+  <span id="tplSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div>
+<div id="mailPreview" style="display:none;margin-top:12px">
+  <div class="hint" style="color:var(--muted);margin-bottom:4px">Vorschau (Beispieldaten) · Betreff: <b id="previewSubject"></b></div>
+  <iframe id="previewFrame" sandbox="" style="width:100%;height:360px;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
+</div>
+
 <div class="sechead" style="margin-top:20px">SMTP / Versand (aus der Konfiguration)</div>
 <div id="configMail"></div>
 </div><!-- admGrpMail -->
@@ -2252,6 +2332,9 @@ const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 let ROLE_NAMES = __ROLENAMES__;
 const ROLE_ORDER = ["anforderer", "reviewer", "admin", "auditor"];
 let NOTIFY = __NOTIFY__;    // Mail-Regeln je interner Rolle + Team-Adressen
+let MAIL_VARS = [];        // verfügbare {{var}} für die Mail-Vorlage
+let MAIL_DEF_TPL = "";     // eingebaute Standard-HTML-Vorlage
+let MAIL_DEF_SUBJ = "";    // eingebauter Standardbetreff
 let PREFS = __PREFS__;      // persönliche UI-Einstellungen (serverseitig je Benutzer)
 
 // ---- Spalten ein-/ausblenden je Tabelle, pro Benutzer gespeichert ----
@@ -3134,6 +3217,9 @@ async function apiNotify(method, body) {
 }
 function loadNotify() {
   apiNotify("GET").then(d => { if (d && d.notify) NOTIFY = d.notify;
+                               if (d && d.vars) MAIL_VARS = d.vars;
+                               if (d && d.default_template) MAIL_DEF_TPL = d.default_template;
+                               if (d && d.default_subject) MAIL_DEF_SUBJ = d.default_subject;
                                if (VIEW === "adm") render(); }).catch(() => {});
 }
 function renderNotify() {
@@ -3154,7 +3240,7 @@ function renderNotify() {
   }).join("");
   document.getElementById("ntbody").innerHTML = rows;
 }
-function saveNotify() {
+function collectNotifyBody() {
   const body = { role: {}, team_email: {} };
   ROLE_ORDER.forEach(role => {
     const rc = {};
@@ -3170,12 +3256,69 @@ function saveNotify() {
     const t = inp.getAttribute("data-team"); const v = (inp.value || "").trim();
     if (t && v) body.team_email[t] = v;
   });
+  const s = document.getElementById("tplSubject"), h = document.getElementById("tplHtml");
+  body.template_subject = s ? s.value.trim() : (NOTIFY.template_subject || "");
+  body.template_html = h ? h.value : (NOTIFY.template_html || "");
+  return body;
+}
+function saveNotify() {
+  const body = collectNotifyBody();
   apiNotify("PUT", body).then(d => {
     if (d && d.notify) NOTIFY = d.notify;
     const st = document.getElementById("notifySaved");
     if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     render();
   }).catch(() => notify("Speichern der Mail-Regeln fehlgeschlagen."));
+}
+
+// ---- Editierbare Mail-Vorlage (Betreff + HTML) ----
+function renderMailTemplate() {
+  const vb = document.getElementById("mailVars");
+  if (vb) vb.innerHTML = (MAIL_VARS || []).map(([k, d]) =>
+    `<button class="btn" style="margin:0 6px 6px 0;font-family:monospace" title="${esc(d)}"
+       onclick="insertMailVar('{{${k}}}')">{{${esc(k)}}}</button>`).join("") || "";
+  const s = document.getElementById("tplSubject");
+  const h = document.getElementById("tplHtml");
+  if (s && document.activeElement !== s) s.value = NOTIFY.template_subject || "";
+  if (h && document.activeElement !== h) h.value = NOTIFY.template_html || "";
+  if (s) s.placeholder = MAIL_DEF_SUBJ || "Standardbetreff";
+}
+let MAIL_TPL_FOCUS = "tplHtml";
+function insertMailVar(v) {
+  const el = document.getElementById(MAIL_TPL_FOCUS) || document.getElementById("tplHtml");
+  if (!el) return;
+  const s = el.selectionStart || 0, e = el.selectionEnd || 0;
+  el.value = el.value.slice(0, s) + v + el.value.slice(e);
+  el.focus(); el.selectionStart = el.selectionEnd = s + v.length;
+}
+function saveMailTemplate() {
+  const body = collectNotifyBody();
+  apiNotify("PUT", body).then(d => {
+    if (d && d.notify) NOTIFY = d.notify;
+    const st = document.getElementById("tplSaved");
+    if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
+  }).catch(() => notify("Speichern der Mail-Vorlage fehlgeschlagen."));
+}
+function resetMailTemplate() {
+  const h = document.getElementById("tplHtml"), s = document.getElementById("tplSubject");
+  if (h) h.value = MAIL_DEF_TPL || "";
+  if (s) s.value = MAIL_DEF_SUBJ || "";
+}
+function previewMail() {
+  const th = (document.getElementById("tplHtml") || {}).value || "";
+  const ts = (document.getElementById("tplSubject") || {}).value || "";
+  fetch("api/mail-preview", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ template_html: th, template_subject: ts }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      const box = document.getElementById("mailPreview");
+      const sub = document.getElementById("previewSubject");
+      const fr = document.getElementById("previewFrame");
+      if (sub) sub.textContent = d.subject || "";
+      if (fr) fr.srcdoc = d.html || "";
+      if (box) box.style.display = "";
+    }).catch(() => notify("Vorschau fehlgeschlagen."));
 }
 
 // ---- Unter-Reiter der Verwaltung + read-only Konfiguration ----
@@ -3506,7 +3649,7 @@ function render() {
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "arch") { renderArchiveTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -4078,6 +4221,15 @@ def serve(args, password):
         if isinstance(rawmail, dict):
             for k, v in rawmail.items():
                 cfg["team_email"][str(k)] = str(v or "").strip()[:200]
+        # Editierbare Mail-Vorlage (leer = eingebaute Standardvorlage). HTML wird
+        # NICHT escaped (Layout vom Admin); die Werte-Variablen sind escaped.
+        if isinstance(raw, dict):
+            th = raw.get("template_html")
+            ts = raw.get("template_subject")
+            if isinstance(th, str) and th.strip():
+                cfg["template_html"] = th[:20000]
+            if isinstance(ts, str) and ts.strip():
+                cfg["template_subject"] = ts.strip()[:300]
         return cfg
 
     def load_notify():
@@ -4559,16 +4711,20 @@ def serve(args, password):
         to = mail_recipients(kind, r, team)
         if not to:
             return
-        name, cluster = r.get("name", "?"), r.get("cluster", "?")
         if kind == "team_turn":
             action = f"wartet auf Freigabe durch {team}"
-            subject = f"Kapazitätsreservierung {action}: {name} ({cluster})"
         else:
             action = {"created": "beantragt", "rejected": "abgelehnt",
                       "approved": "genehmigt"}.get(kind, kind)
-            subject = f"Kapazitätsreservierung {action}: {name} ({cluster})"
-        body = reservation_mail_body(r, action, actor or "System", args.res_ttl_days)
-        html = reservation_mail_html(r, action, actor or "System", args.res_ttl_days)
+        with notify_lock:
+            tpl_html = notify_cfg.get("template_html") or ""
+            tpl_subj = notify_cfg.get("template_subject") or ""
+        admin = actor or "System"
+        subject = render_template(tpl_subj or DEFAULT_MAIL_SUBJECT,
+                                  _mail_values(r, action, admin, args.res_ttl_days, team, html=False))
+        html = reservation_mail_html(r, action, admin, args.res_ttl_days,
+                                     tpl_html or None, team)
+        body = reservation_mail_body(r, action, admin, args.res_ttl_days)
 
         def worker():
             try:
@@ -4953,7 +5109,10 @@ def serve(args, password):
                 if not self._require("admin"):
                     return
                 with notify_lock:
-                    self._json({"notify": json.loads(json.dumps(notify_cfg))})
+                    self._json({"notify": json.loads(json.dumps(notify_cfg)),
+                                "default_template": DEFAULT_MAIL_TEMPLATE,
+                                "default_subject": DEFAULT_MAIL_SUBJECT,
+                                "vars": MAIL_VARS})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -5475,8 +5634,30 @@ def serve(args, password):
                 audit(s["user"], "Mail-Regeln geändert",
                       (", ".join(on) or "keine")
                       + (f"; Team-Adressen: {len(result['team_email'])}"
-                         if result["team_email"] else ""))
+                         if result["team_email"] else "")
+                      + ("; Vorlage angepasst" if result.get("template_html") else ""))
                 self._json({"notify": result})
+            elif self.path == "/api/mail-preview":
+                if not self._require("admin"):
+                    return
+                body = self._body() or {}
+                th = str(body.get("template_html") or "")[:20000] or DEFAULT_MAIL_TEMPLATE
+                ts = str(body.get("template_subject") or "")[:300] or DEFAULT_MAIL_SUBJECT
+                sample = {"id": "KAPA-1a2b3c", "name": "SAP HANA Erweiterung",
+                          "change": "CHB0012345", "cluster": "Cluster-03",
+                          "source": "RZ-Nord", "vcpu": 32, "ram_gb": 256,
+                          "storage_gb": 2000, "von": "anna.schmidt@firma.local",
+                          "abteilung": "Team Netzwerk", "created": "2026-07-15",
+                          "approvals": [{"team": "Team Netzwerk", "by": "jan.krause",
+                                         "on": "2026-07-16"}],
+                          "comment": "bitte zeitnah umsetzen"}
+                self._json({
+                    "subject": render_template(ts, _mail_values(
+                        sample, "genehmigt", "tom.weber", args.res_ttl_days,
+                        "Team Security", html=False)),
+                    "html": render_template(th, _mail_values(
+                        sample, "genehmigt", "tom.weber", args.res_ttl_days,
+                        "Team Security", html=True))})
             elif self.path == "/api/prefs":
                 s = self._require()
                 if not s:

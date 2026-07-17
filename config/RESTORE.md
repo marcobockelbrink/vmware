@@ -10,7 +10,7 @@ Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 | `kapa_selektor.json` | Cluster-Selektor (Tag-Filter-Stufen) | Ja |
 | `kapa_rollennamen.json` | Frei gewählte Rollen-Bezeichnungen | Ja |
 | `kapa_tokens.json` | API-Tokens (nur Hashes) | Ja |
-| `kapa_mail.json` | Mail-Benachrichtigungsregeln je Rolle | Ja |
+| `kapa_mail.json` | Mail-Benachrichtigungsregeln je Rolle **+ editierbare Mail-Vorlage** (Betreff/HTML) | Ja |
 | `kapa_prefs.json` | Persönliche UI-Einstellungen je Benutzer (Tabellenspalten) | Nein (Komfort) |
 | `kapa.db` (+ `-wal`/`-shm`) | Bei `storage = sqlite`: alle obigen Sammlungen in einer DB | **Ja** (statt der JSONs) |
 | `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |

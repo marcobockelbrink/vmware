@@ -41,6 +41,9 @@ das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
 - Pro interner Rolle konfigurierbar: **Anlage / Ablehnung / Freigabe / „Team ist dran"**
 - Empfänger gemischt: Antragsteller automatisch, Admin/Auditor per Verteiler, Teams per eigener Adresse
 - Dezente **HTML-Mails** (+ Klartext-Fallback)
+- **Editierbare Mail-Vorlage** (Verwaltung → Mail): Betreff + HTML frei anpassbar mit
+  `{{platzhaltern}}` (Klick fügt sie an der Cursor-Position ein), **Live-Vorschau** mit
+  Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
 **Verwaltung (Admin-UI)**
 - Unter-Reiter **Benutzer & Rollen / Mail / Backup & Konfiguration**
@@ -316,6 +319,16 @@ Detailkarte eines Clusters; Export/Import als JSON.
   Die Mail enthält die Reservierungsdaten; der Versand läuft asynchron und
   best-effort (Fehler nur im Log). Beim **Anlegen** eines Antrags wird zusätzlich
   automatisch das erste Team benachrichtigt, nach jeder Freigabe das nächste.
+
+  **Mail-Vorlage editieren:** Im selben Reiter lassen sich **Betreff** und
+  **HTML-Text** der Mails frei anpassen. Verfügbare Variablen (z. B. `{{name}}`,
+  `{{cluster}}`, `{{vcpu}}`, `{{ram_gb}}`, `{{approvals}}`, `{{von}}`, `{{action}}`)
+  werden als anklickbare Chips angezeigt und an der Cursor-Position eingefügt; die
+  Werte werden serverseitig HTML-escaped eingesetzt (Layout-HTML des Admins bleibt
+  erhalten). „**Vorschau**" rendert die Vorlage mit Beispieldaten in einem
+  isolierten `sandbox`-iframe, „**Standard einsetzen**" lädt die eingebaute Vorlage.
+  Leere Felder = eingebaute Standardvorlage. Gespeichert wird in `kapa_mail.json`
+  (kein Passwort), Änderungen landen im Audit-Log.
 - **Serve-Modus**: Reservierungen liegen zentral auf dem Server in
   `data/kapa_reservierungen.json` — alle Nutzer sehen denselben Stand.
 - **Statisches HTML**: Speicherung lokal im Browser (localStorage).
