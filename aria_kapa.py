@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.24"
+VERSION = "1.24.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1776,7 +1776,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                        border:1px solid var(--line); border-radius:8px; padding:5px 10px; background:#0b1220; }
   .colmenu > summary::-webkit-details-marker { display:none; }
   .colmenu[open] > summary { color:var(--text); }
-  .colmenu > div { position:absolute; z-index:16; top:calc(100% + 4px); left:0; min-width:180px;
+  .colmenu > div { position:absolute; z-index:16; top:calc(100% + 4px); right:0; min-width:180px;
                    background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
                    box-shadow:0 10px 30px rgba(0,0,0,.5); max-height:340px; overflow:auto; }
   .colmenu label { display:block; padding:3px 2px; white-space:nowrap; color:var(--text); cursor:pointer; }
