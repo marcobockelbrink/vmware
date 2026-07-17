@@ -14,6 +14,7 @@ Ein einzelnes Python-Skript (nur Standardbibliothek, **kein pip, kein Build**),
 das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
 
 **Kapazität & Auswertung**
+- **Mehrere benannte vROps-Quellen** (optional): 1–3 (oder mehr) Aria-Operations-Systeme, je mit/ohne Proxy, gemischt zu einer Übersicht; jeder Cluster trägt ein Quellen-Badge (Voraussetzung: eindeutige Cluster-Namen)
 - Freie **vCPU / RAM / Storage** je Cluster mit Auslastungsbalken; frei = Kapazität − belegt − genehmigte Reservierungen
 - **N+1-Ausfallreserve** (`--failover-hosts`), **vSAN-Faktor** für nutzbare Netto-Kapazität, VM-**Ausschluss per Tag**
 - **Storage-Drilldown** je LUN/Datastore (sortierbar), **vSphere-Tags** je Cluster

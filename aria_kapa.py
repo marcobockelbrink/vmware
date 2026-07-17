@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.26"
+VERSION = "1.27"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1354,6 +1354,7 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "tags": list(d.get("tags") or []),
             "portgroups": list(d.get("portgroups") or []),
             "workload": d.get("workload"),
+            "source": d.get("source"),
             "hosts": d["hosts"],
             "vms": d["vms"],
         })
@@ -1409,6 +1410,7 @@ def sample_data():
         pgs.sort(key=lambda x: x["name"].lower())
         data[cl] = {"hosts": hosts, "vms": vms, "tags": tags, "portgroups": pgs,
                     "workload": random.choice([38, 52, 61, 74, 83]),
+                    "source": "RZ-Nord" if ci <= 2 else "RZ-Sued",
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
 
@@ -1745,6 +1747,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .ctabs .tab { padding:5px 11px; font-size:12px; }
   .tagbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .tagbox h3 { font-size:12px; color:var(--muted); font-weight:600; margin-bottom:6px; }
+  .srcbadge { display:inline-block; font-size:10px; background:#0b1220; border:1px solid var(--line);
+              border-radius:6px; padding:0 6px; margin-left:6px; color:var(--muted);
+              vertical-align:middle; white-space:nowrap; }
   .tag { display:inline-block; background:#0b1220; border:1px solid var(--line);
          border-radius:6px; padding:2px 8px; margin:0 4px 4px 0;
          font-size:11px; color:var(--text); }
@@ -2542,10 +2547,11 @@ function fillClusterSelect(prefIdx) {
   const sel = document.getElementById("mCluster");
   const q = (document.getElementById("mClusterSearch").value || "").trim().toLowerCase();
   const prev = sel.value;
-  const opts = CLUSTERS.map((c, i) => ({ i: i, name: c.name }))
-                       .filter(o => !q || o.name.toLowerCase().includes(q));
+  const opts = CLUSTERS.map((c, i) => ({ i: i, name: c.name, source: c.source || "" }))
+                       .filter(o => !q || o.name.toLowerCase().includes(q)
+                                    || o.source.toLowerCase().includes(q));
   sel.innerHTML = opts.length
-    ? opts.map(o => `<option value="${o.i}">${esc(o.name)}</option>`).join("")
+    ? opts.map(o => `<option value="${o.i}">${esc(o.name)}${CLUSTERS[o.i].source ? " · " + esc(CLUSTERS[o.i].source) : ""}</option>`).join("")
     : `<option value="">(kein Cluster passt)</option>`;
   const want = (prefIdx !== undefined && prefIdx !== null) ? String(prefIdx) : prev;
   if (want !== "" && opts.some(o => String(o.i) === want)) sel.value = want;
@@ -2749,7 +2755,7 @@ function card(c, idx, isTotal) {
 
   return `<div class="card ${isTotal?'total':''}">
     <h2>${esc(c.name)}</h2>
-    <div class="meta">${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
+    <div class="meta">${c.source?`Quelle: ${esc(c.source)} · `:''}${c.hostCount} Hosts · ${fmt(c.cores)} nutzbare Cores · ${c.vmCount} VMs${c.vmOff?` (davon ${c.vmOff} aus)`:''} · ${rv.length} genehmigt${clRes.filter(isPend).length?` / ${clRes.filter(isPend).length} beantragt`:''}${clRes.filter(r=>r.rejected).length?` / ${clRes.filter(r=>r.rejected).length} abgelehnt`:''}${spare}</div>
     ${tabBar}
     ${pane}
   </div>`;
@@ -2793,10 +2799,18 @@ function rerenderCard() {
 // ---- Tabellenansicht mit Hover-Details ----
 let TOTAL = null;
 
+function srcBadge(src) {
+  return src ? ` <span class="srcbadge" title="Datenquelle (vROps)">${esc(src)}</span>` : "";
+}
+function clusterSource(name) {
+  const c = CLUSTERS.find(x => x.name === name);
+  return c ? c.source : "";
+}
 function filteredIdx() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   return CLUSTERS.map((c, i) => i)
-                 .filter(i => (!q || CLUSTERS[i].name.toLowerCase().includes(q))
+                 .filter(i => (!q || CLUSTERS[i].name.toLowerCase().includes(q)
+                              || (CLUSTERS[i].source || "").toLowerCase().includes(q))
                               && selMatch(CLUSTERS[i]));
 }
 
@@ -2821,7 +2835,7 @@ function row(c, idx, isTotal) {
   const fStor = Math.round(((c.storageFree || 0) - rvStor) * 10) / 10;
   const cStor = color(pct((c.storageUsed || 0) + rvStor, c.storageCap || 0));
   return `<tr class="${isTotal ? 'trtotal' : ''}">
-    <td class="cl" title="Details anzeigen" onclick="toggleCard(${idx},this)">${esc(c.name)}</td>
+    <td class="cl" title="Details anzeigen" onclick="toggleCard(${idx},this)">${esc(c.name)}${srcBadge(c.source)}</td>
     <td class="num">${fmt(c.hostCount)}</td>
     <td class="num">${fmt(c.vmCount)}</td>
     <td class="num free" style="color:${cCpu}">${fmt(fCpu)}</td>
@@ -3337,7 +3351,7 @@ function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0)
 function clusterTd(name) {
   const i = CLUSTERS.findIndex(c => c.name === name);
   return i >= 0
-    ? `<td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${i}, this)">${esc(name)}</td>`
+    ? `<td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${i}, this)">${esc(name)}${srcBadge(CLUSTERS[i].source)}</td>`
     : `<td>${esc(name || "–")}</td>`;
 }
 
@@ -3447,7 +3461,7 @@ function renderVlan() {
     r.pg.toLowerCase().includes(q) || String(r.vlan).toLowerCase().includes(q)) : all;
   document.getElementById("vtbody").innerHTML = hits.map(r =>
     `<tr><td>${esc(r.pg)}</td><td class="num">${esc(r.vlan || "–")}</td>
-     <td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${r.cidx}, this)">${esc(r.cluster)}</td></tr>`).join("")
+     <td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${r.cidx}, this)">${esc(r.cluster)}${srcBadge(clusterSource(r.cluster))}</td></tr>`).join("")
     || `<tr><td colspan="3" style="color:var(--muted)">${all.length
          ? "Keine Portgruppe passt zur Suche." : "Keine Portgruppen-Daten aus Aria."}</td></tr>`;
   document.getElementById("vlanCount").textContent = all.length
@@ -4214,16 +4228,17 @@ def serve(args, password):
         NIE Passwörter/Geheimnisse – nur, ob sie gesetzt sind (ja/nein)."""
         j = lambda b: "ja" if b else "nein"
         pw = lambda name: j(bool(getattr(args, name, "")))
+        aria = {}
+        for i, s in enumerate(sources):
+            nm = s["name"] or "Standard"
+            aria[f"{i + 1}. {nm}"] = (
+                (s["url"] or "–")
+                + (f" · Proxy {s['aria_proxy']}" if s["aria_proxy"] else " · direkt")
+                + f" · Benutzer {s['user'] or '–'}"
+                + " · Passwort " + j(bool(s["password"])))
+        aria["Auto-Refresh (Sek.)"] = args.refresh_interval
         return {
-            "Aria Operations": {
-                "URL": args.url or "–",
-                "Benutzer": args.user or "–",
-                "Auth-Quelle": args.auth_source or "local",
-                "Zertifikat prüfen": j(not args.insecure),
-                "Proxy": args.aria_proxy or "– (direkt)",
-                "Auto-Refresh (Sek.)": args.refresh_interval,
-                "Aria-Passwort gesetzt": j(bool(getattr(args, "password", None))),
-            },
+            "Datenquellen (vROps)": aria or {"–": "keine Quelle konfiguriert"},
             "Berechnung": {
                 "CPU-Faktor": args.cpu_factor,
                 "Failover-Hosts (N+1)": args.failover_hosts,
@@ -4577,23 +4592,46 @@ def serve(args, password):
                             "approved": True, "foreign": True})
         return out
 
+    sources = getattr(args, "sources", []) or []
+
     def do_refresh():
         state.update(refreshing=True, error=None, progress="0 %")
         t0 = time.time()
-        print(f"Aria-Abruf gestartet ({args.url or 'Demo'}) ...", file=sys.stderr)
+        n = len(sources)
+        label = ", ".join(s["name"] or s["url"] for s in sources) or "Demo"
+        print(f"Aria-Abruf gestartet ({label}) ...", file=sys.stderr)
         try:
             if args.sample:
                 time.sleep(2)  # Demo: Ladezeit simulieren
                 clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
             else:
-                api = AriaOps(args.url, args.user, password, args.auth_source,
-                              verify_tls=not args.insecure, proxy=args.aria_proxy)
-                clusters = collect(api, args.cpu_factor,
-                                   progress=lambda m: state.update(progress=m),
-                                   failover_hosts=args.failover_hosts,
-                                   exclude_tag=args.exclude_tag,
-                                   tag_property=args.tag_property,
-                                   vsan_factor=args.vsan_factor)
+                clusters, errors = [], []
+                for i, s in enumerate(sources):
+                    tag = s["name"] or s["url"]
+
+                    def prog(m, tag=tag, i=i):
+                        pref = f"Quelle {i + 1}/{n} ({tag}) · " if n > 1 else ""
+                        state.update(progress=pref + m)
+                    try:
+                        api = AriaOps(s["url"], s["user"], s["password"],
+                                      s["auth_source"], verify_tls=not s["insecure"],
+                                      proxy=s["aria_proxy"])
+                        cl = collect(api, args.cpu_factor, progress=prog,
+                                     failover_hosts=args.failover_hosts,
+                                     exclude_tag=args.exclude_tag,
+                                     tag_property=args.tag_property,
+                                     vsan_factor=args.vsan_factor)
+                        for c in cl:
+                            if s["name"]:
+                                c["source"] = s["name"]
+                        clusters += cl
+                        print(f"Quelle '{tag}': {len(cl)} Cluster", file=sys.stderr)
+                    except Exception as e:
+                        errors.append(f"{tag}: {e}")
+                        print(f"Quelle '{tag}' FEHLGESCHLAGEN: {e}", file=sys.stderr)
+                if errors and not clusters:
+                    raise RuntimeError("; ".join(errors))
+                state["error"] = "Teilausfall: " + "; ".join(errors) if errors else None
             strip_uplinks(clusters, not args.show_uplink_portgroups)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -4603,7 +4641,8 @@ def serve(args, password):
                           f, ensure_ascii=False)
             dur = time.time() - t0
             nvm = sum(c.get("vmCount", 0) for c in clusters)
-            detail = f"{len(clusters)} Cluster, {nvm} VMs in {dur:.1f} s"
+            src_note = f" aus {n} Quellen" if not args.sample and n > 1 else ""
+            detail = f"{len(clusters)} Cluster, {nvm} VMs{src_note} in {dur:.1f} s"
             print(f"Aria-Abruf beendet: {detail}", file=sys.stderr)
             audit(None, "Aria-Abruf beendet", detail)
         except Exception as e:
@@ -5505,6 +5544,48 @@ def apply_config_file(ap, path):
     ap.set_defaults(**defaults)
 
 
+def parse_sources(path):
+    """[quelle:Name]-Sektionen der INI als benannte vROps-Datenquellen einlesen.
+    Schlüssel je Quelle: url, user, auth-source, insecure, aria-proxy, password,
+    password-file. Der Sektionsname nach 'quelle:' ist der Anzeigename."""
+    import configparser
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    try:
+        with open(path, encoding="utf-8") as f:
+            cp.read_file(f)
+    except (OSError, configparser.Error):
+        return []
+    out = []
+    for section in cp.sections():
+        low = section.strip().lower()
+        if not (low.startswith("quelle:") or low.startswith("source:")):
+            continue
+        name = section.split(":", 1)[1].strip() or "vROps"
+        s = cp[section]
+        pw = (s.get("password") or "").strip()
+        pf = (s.get("password-file") or s.get("password_file") or "").strip()
+        if not pw and pf:
+            try:
+                with open(pf, encoding="utf-8") as f:
+                    pw = f.read().strip()
+            except OSError as e:
+                print(f"Quelle '{name}': Passwort-Datei {pf} unlesbar: {e}",
+                      file=sys.stderr)
+        if not pw:
+            pw = os.environ.get("ARIA_PASSWORD", "")
+        out.append({
+            "name": name,
+            "url": (s.get("url") or "").strip(),
+            "user": (s.get("user") or "").strip(),
+            "auth_source": (s.get("auth-source") or s.get("auth_source") or "local").strip(),
+            "insecure": (s.get("insecure") or "").strip().lower()
+            in ("1", "true", "yes", "ja", "on"),
+            "aria_proxy": (s.get("aria-proxy") or s.get("aria_proxy") or "").strip(),
+            "password": pw,
+        })
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="Aria Ops Kapazitätsauswertung pro Cluster")
     ap.add_argument("--version", action="version", version=f"aria_kapa {VERSION}")
@@ -5739,27 +5820,50 @@ def main():
     if not args.ad_base_dn and args.ad_domain:
         args.ad_base_dn = ",".join("DC=" + p for p in args.ad_domain.split("."))
 
+    # Datenquellen: mehrere benannte vROps aus [quelle:*]-Sektionen ODER – zur
+    # Rückwärtskompatibilität – die eine Quelle aus --url/--user (Name leer).
+    args.sources = parse_sources(pre.config) if pre.config else []
+    if not args.sources and args.url:
+        args.sources = [{"name": "", "url": args.url, "user": args.user,
+                         "auth_source": args.auth_source, "insecure": args.insecure,
+                         "aria_proxy": args.aria_proxy, "password": args.password}]
+
     if args.serve:
-        pw = None
         if not args.sample:
-            if not args.url or not args.user:
-                ap.error("--url und --user sind erforderlich (oder --sample für Demo)")
-            pw = args.password or getpass.getpass("Passwort: ")
-        serve(args, pw)
+            valid = [s for s in args.sources if s["url"] and s["user"]]
+            if not valid:
+                ap.error("Keine Datenquelle konfiguriert: --url/--user angeben, "
+                         "[quelle:*]-Sektionen in der INI pflegen oder --sample nutzen")
+            for s in valid:
+                if not s["password"]:
+                    if len(valid) == 1:
+                        s["password"] = getpass.getpass("Passwort: ")
+                    else:
+                        ap.error(f"Quelle '{s['name'] or 'vROps'}': kein Passwort "
+                                 "(password-file in der [quelle:*]-Sektion setzen)")
+            args.sources = valid
+        serve(args, args.sources[0]["password"] if args.sources else None)
         return
 
     if args.sample:
         clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
     else:
-        if not args.url or not args.user:
+        valid = [s for s in args.sources if s["url"] and s["user"]]
+        if not valid:
             ap.error("--url und --user sind erforderlich (oder --sample für Demo)")
-        pw = args.password or getpass.getpass("Passwort: ")
-        api = AriaOps(args.url, args.user, pw, args.auth_source,
-                      verify_tls=not args.insecure, proxy=args.aria_proxy)
-        clusters = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
-                           exclude_tag=args.exclude_tag,
-                           tag_property=args.tag_property,
-                           vsan_factor=args.vsan_factor)
+        clusters = []
+        for s in valid:
+            pw = s["password"] or getpass.getpass(f"Passwort {s['name'] or ''}: ")
+            api = AriaOps(s["url"], s["user"], pw, s["auth_source"],
+                          verify_tls=not s["insecure"], proxy=s["aria_proxy"])
+            cl = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
+                         exclude_tag=args.exclude_tag,
+                         tag_property=args.tag_property,
+                         vsan_factor=args.vsan_factor)
+            for c in cl:
+                if s["name"]:
+                    c["source"] = s["name"]
+            clusters += cl
         strip_uplinks(clusters, not args.show_uplink_portgroups)
 
     if args.json:

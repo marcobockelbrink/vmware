@@ -32,6 +32,28 @@ auth-source = local
 #insecure = true                 ; Self-Signed-Zertifikat akzeptieren
 #aria-proxy = http://proxy.firma.local:3128   ; optionaler Proxy (leer = direkt)
 
+# --- Mehrere vROps-Datenquellen (optional) ------------------------------------
+# Statt der einen Quelle oben lassen sich mehrere benannte vROps einbinden: je
+# eine [quelle:NAME]-Sektion. Der Name (nach "quelle:") wird im Dashboard als
+# Badge am Cluster angezeigt. Jede Quelle mit eigener URL/Benutzer/Passwort-Datei
+# und wahlweise mit oder ohne Proxy. VORAUSSETZUNG: Cluster-Namen sind über alle
+# Quellen hinweg EINDEUTIG. Sind [quelle:*]-Sektionen vorhanden, werden die
+# url/user aus [kapa] ignoriert (die übrigen [kapa]-Werte gelten weiter global).
+#
+#[quelle:RZ-Nord]
+#url = https://aria-nord.firma.de
+#user = svc-kapa-readonly
+#password-file = /etc/kapa/aria-nord.pass
+#auth-source = local
+##aria-proxy =                    ; ohne Proxy
+#
+#[quelle:RZ-Sued]
+#url = https://aria-sued.firma.de
+#user = svc-kapa-readonly
+#password-file = /etc/kapa/aria-sued.pass
+#aria-proxy = http://proxy.firma.local:3128   ; mit Proxy
+##insecure = true
+
 # --- Berechnung ---------------------------------------------------------------
 cpu-factor = 6
 failover-hosts = 1
