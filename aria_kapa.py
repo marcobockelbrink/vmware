@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.22"
+VERSION = "1.23"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1771,6 +1771,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .tab { padding:6px 14px; font-size:13px; color:var(--muted); cursor:pointer; border-radius:8px; }
   .tab.active { background:var(--card); color:var(--text); }
   .subtabs { margin-bottom:18px; }
+  .colmenu { position:relative; display:inline-block; font-size:12px; }
+  .colmenu > summary { cursor:pointer; color:var(--muted); list-style:none; user-select:none;
+                       border:1px solid var(--line); border-radius:8px; padding:5px 10px; background:#0b1220; }
+  .colmenu > summary::-webkit-details-marker { display:none; }
+  .colmenu[open] > summary { color:var(--text); }
+  .colmenu > div { position:absolute; z-index:16; top:calc(100% + 4px); left:0; min-width:180px;
+                   background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+                   box-shadow:0 10px 30px rgba(0,0,0,.5); max-height:340px; overflow:auto; }
+  .colmenu label { display:block; padding:3px 2px; white-space:nowrap; color:var(--text); cursor:pointer; }
+  .colmenu input[type=checkbox] { margin-right:6px; }
   .cl { color:var(--accent); cursor:pointer; }
   .cl:hover { text-decoration:underline; }
   .st { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
@@ -1910,6 +1920,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <div id="kapaView">
 <div class="selbar" id="clusterSelector" style="display:none"></div>
+<div style="text-align:right;margin-bottom:8px"><span id="colctl_ktable"></span></div>
 <div class="tablewrap">
 <table class="kt" id="ktable">
   <thead><tr><th>Cluster</th><th class="num">Hosts</th><th class="num">VMs</th>
@@ -1945,6 +1956,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
          placeholder="Reservierungen durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …"
          oninput="renderResTable()" autocomplete="off">
   <span id="resCount" style="color:var(--muted);font-size:13px"></span>
+  <span id="colctl_rtable" style="margin-left:auto"></span>
 </div>
 <div class="tablewrap">
 <table class="kt" id="rtable">
@@ -1954,7 +1966,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 </div>
 </div>
-<div class="tablewrap" id="appView" style="display:none">
+<div id="appView" style="display:none">
+<div style="text-align:right;margin-bottom:8px"><span id="colctl_atable"></span></div>
+<div class="tablewrap">
 <table class="kt" id="atable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th>
@@ -1963,6 +1977,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <th>von</th><th>Team</th><th>beantragt am</th><th>Fortschritt</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
+</div>
 </div>
 <div id="archView" style="display:none">
 <div class="hint" style="color:var(--muted);margin:4px 0 10px">
@@ -1974,6 +1989,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
          placeholder="Archiv durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …"
          oninput="renderArchiveTable()" autocomplete="off">
   <span id="archCount" style="color:var(--muted);font-size:13px"></span>
+  <span id="colctl_artable" style="margin-left:auto"></span>
 </div>
 <div class="tablewrap">
 <table class="kt" id="artable">
@@ -2186,6 +2202,63 @@ const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 let ROLE_NAMES = __ROLENAMES__;
 const ROLE_ORDER = ["anforderer", "reviewer", "admin", "auditor"];
 let NOTIFY = __NOTIFY__;    // Mail-Regeln je interner Rolle + Team-Adressen
+let PREFS = __PREFS__;      // persönliche UI-Einstellungen (serverseitig je Benutzer)
+
+// ---- Spalten ein-/ausblenden je Tabelle, pro Benutzer gespeichert ----
+const USE_SERVER_PREFS = SERVE && !!ME;   // sonst localStorage (Demo/ohne Login)
+let COLHIDE = (function () {
+  if (USE_SERVER_PREFS) return (PREFS && PREFS.cols) || {};
+  try { return JSON.parse(localStorage.getItem("kapa_cols") || "{}"); } catch (e) { return {}; }
+})();
+let _prefsTimer = null;
+function saveColPrefs() {
+  if (USE_SERVER_PREFS) {
+    clearTimeout(_prefsTimer);
+    _prefsTimer = setTimeout(() => {
+      fetch("api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cols: COLHIDE }) }).catch(() => {});
+    }, 400);
+  } else {
+    try { localStorage.setItem("kapa_cols", JSON.stringify(COLHIDE)); } catch (e) {}
+  }
+}
+function applyCols(tableId) {
+  const t = document.getElementById(tableId);
+  if (!t || !t.tHead || !t.tHead.rows.length) return;
+  const hid = COLHIDE[tableId] || {};
+  const n = t.tHead.rows[0].cells.length;
+  for (let i = 0; i < n; i++) {
+    const show = !hid[i];
+    t.tHead.rows[0].cells[i].style.display = show ? "" : "none";
+    if (t.tBodies[0]) Array.from(t.tBodies[0].rows).forEach(r => {
+      if (r.cells[i] && !r.cells[i].hasAttribute("colspan")) r.cells[i].style.display = show ? "" : "none";
+    });
+  }
+}
+function toggleCol(tableId, i) {
+  const h = COLHIDE[tableId] || (COLHIDE[tableId] = {});
+  if (h[i]) delete h[i]; else h[i] = true;
+  if (!Object.keys(h).length) delete COLHIDE[tableId];
+  applyCols(tableId); saveColPrefs();
+}
+function resetCols(tableId) { delete COLHIDE[tableId]; applyCols(tableId); saveColPrefs(); renderColMenu(tableId); }
+function colMenuHtml(tableId) {
+  const t = document.getElementById(tableId);
+  if (!t || !t.tHead) return "";
+  const hid = COLHIDE[tableId] || {};
+  const items = Array.from(t.tHead.rows[0].cells).map((th, i) => {
+    const label = (th.getAttribute("data-base") || th.textContent || "").trim() || ("Spalte " + (i + 1));
+    return `<label><input type="checkbox" ${hid[i] ? "" : "checked"} onchange="toggleCol('${tableId}',${i})"> ${esc(label)}</label>`;
+  }).join("");
+  const anyHidden = Object.keys(hid).length;
+  return `<details class="colmenu"><summary>⚙ Spalten${anyHidden ? " (" + anyHidden + " aus)" : ""}</summary>
+    <div>${items}<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">
+      <a href="#" onclick="resetCols('${tableId}');return false" style="color:var(--accent)">alle einblenden</a></label></div></details>`;
+}
+function renderColMenu(tableId) {
+  const box = document.getElementById("colctl_" + tableId);
+  if (box) box.innerHTML = colMenuHtml(tableId);
+}
 // Welche Ereignisse je Rolle wählbar sind (Rest = "–"); Reihenfolge = Spalten
 const NOTIFY_EVENTS = [["created","Anlage"],["rejected","Ablehnung"],["approved","Freigabe"],["team_turn","Team ist dran"]];
 const NOTIFY_ROLE_EVENTS = {
@@ -3278,7 +3351,7 @@ function renderResTable() {
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td><td class="num">${fmt(sumStorage(appr))}</td>
      <td colspan="${nCols - 7}"></td></tr>` +
     (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine aktiven Reservierungen.</td></tr>`);
-  reSort("rtable");
+  reSort("rtable"); renderColMenu("rtable"); applyCols("rtable");
 }
 
 function renderArchiveTable() {
@@ -3299,7 +3372,7 @@ function renderArchiveTable() {
   }).join("");
   document.getElementById("arbody").innerHTML =
     rows || `<tr><td colspan="14" style="color:var(--muted)">Archiv ist leer.</td></tr>`;
-  reSort("artable");
+  reSort("artable"); renderColMenu("artable"); applyCols("artable");
 }
 
 function renderAppTable() {
@@ -3335,7 +3408,7 @@ function renderAppTable() {
      <td>${action(r)}</td></tr>`).join("");
   document.getElementById("atbody").innerHTML =
     rows || `<tr><td colspan="14" style="color:var(--muted)">Keine offenen Anträge – alles genehmigt.</td></tr>`;
-  reSort("atable");
+  reSort("atable"); renderColMenu("atable"); applyCols("atable");
 }
 
 // ---- VLAN-/Portgruppen-Suche (cluster-übergreifend) ----
@@ -3402,7 +3475,7 @@ function render() {
   document.getElementById("ktbody").innerHTML =
     (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
                  : '<tr><td colspan="10" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
-  reSort("ktable");
+  reSort("ktable"); renderColMenu("ktable"); applyCols("ktable");
   if (hoverIdx !== null && hc.style.display === "block")
     hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
                    card(hoverIdx === -1 ? TOTAL : CLUSTERS[hoverIdx], hoverIdx, hoverIdx === -1);
@@ -3733,7 +3806,7 @@ def _html_escape(s):
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
-                contact="", selector=None, backup=False, notify=None):
+                contact="", selector=None, backup=False, notify=None, prefs=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -3762,6 +3835,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__BACKUP__", "true" if backup else "false")
             .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
             .replace("__NOTIFY__", json_for_html(notify or DEFAULT_NOTIFY))
+            .replace("__PREFS__", json_for_html(prefs or {}))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -3794,12 +3868,12 @@ def serve(args, password):
     _coll_paths = {"res": args.res_file, "roles": args.roles_file,
                    "teams": args.teams_file, "selector": args.selector_file,
                    "rolenames": args.rolenames_file, "tokens": args.tokens_file,
-                   "notify": args.notify_file}
+                   "notify": args.notify_file, "prefs": args.prefs_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
-        for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify"):
+        for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify", "prefs"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
                 try:
@@ -3946,6 +4020,37 @@ def serve(args, password):
         store.save("notify", notify_cfg)
 
     notify_cfg = load_notify()
+
+    # ---- Persönliche UI-Einstellungen je Benutzer (z. B. Tabellenspalten) ----
+    prefs_lock = threading.Lock()
+
+    def load_all_prefs():
+        d = store.load("prefs", None)
+        return d if isinstance(d, dict) else {}
+
+    all_prefs = load_all_prefs()
+
+    def clean_prefs(body):
+        """Nur erlaubte, kompakte Struktur speichern: cols = {tableId: {index: true}}."""
+        out = {}
+        cols = (body or {}).get("cols") if isinstance(body, dict) else None
+        if isinstance(cols, dict):
+            c = {}
+            for tid, hidden in list(cols.items())[:20]:
+                tid = str(tid)[:40]
+                if isinstance(hidden, dict):
+                    idxs = {}
+                    for k, v in list(hidden.items())[:60]:
+                        if str(k).lstrip("-").isdigit() and v:
+                            idxs[str(int(k))] = True
+                    if idxs:
+                        c[tid] = idxs
+            out["cols"] = c
+        return out
+
+    def user_prefs(user):
+        with prefs_lock:
+            return json.loads(json.dumps(all_prefs.get(user or "", {})))
 
     def current_team(r):
         """Team, das als Nächstes freigeben muss – None, wenn keine Teams
@@ -4642,7 +4747,8 @@ def serve(args, password):
                                        rolenames=role_names, contact=args.contact_info,
                                        selector=cluster_selector,
                                        backup=bool(args.backup_target),
-                                       notify=notify_cfg),
+                                       notify=notify_cfg,
+                                       prefs=user_prefs(s["user"]) if s else {}),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 s = self._require()
@@ -4742,6 +4848,11 @@ def serve(args, password):
                 if not self._require("admin"):
                     return
                 self._json({"config": public_config()})
+            elif route == "/api/prefs":
+                s = self._require()
+                if not s:
+                    return
+                self._json(user_prefs(s["user"]))
             elif route == "/api/log":
                 if not self._require("admin"):
                     return
@@ -5244,6 +5355,15 @@ def serve(args, password):
                       + (f"; Team-Adressen: {len(result['team_email'])}"
                          if result["team_email"] else ""))
                 self._json({"notify": result})
+            elif self.path == "/api/prefs":
+                s = self._require()
+                if not s:
+                    return
+                clean = clean_prefs(self._body())
+                with prefs_lock:
+                    all_prefs[s["user"] or ""] = clean
+                    store.save("prefs", all_prefs)
+                self._json(clean)
             else:
                 self.send_error(404)
 
@@ -5500,6 +5620,10 @@ def main():
                     help="Datei mit den Mail-Benachrichtigungsregeln je Rolle "
                          "(Standard: data/kapa_mail.json); Pflege über die "
                          "Verwaltungsseite")
+    ap.add_argument("--prefs-file", default="kapa_prefs.json",
+                    help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
+                         "(z. B. ein-/ausgeblendete Tabellenspalten; "
+                         "Standard: data/kapa_prefs.json)")
     # Leere Werte von Langoptionen verwerfen, BEVOR geparst wird. Grund: Die
     # systemd-Unit baut Argumente wie "--backup-target ${BACKUP_TARGET}" aus
     # kapa.env; ist die Variable leer, käme ein leeres Argument an und würde den
@@ -5525,6 +5649,7 @@ def main():
     args.db_file = data_path(args.db_file, base)
     args.rolenames_file = data_path(args.rolenames_file, base)
     args.notify_file = data_path(args.notify_file, base)
+    args.prefs_file = data_path(args.prefs_file, base)
     if args.json:
         args.json = data_path(args.json, base)
 
