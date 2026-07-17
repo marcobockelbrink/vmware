@@ -25,12 +25,12 @@ sudo dnf install ./kapa-dashboard-0.9-1.el9.noarch.rpm
 Das `%post`-Skript gibt die nächsten Schritte aus. Kurzfassung:
 
 ```bash
-# 1) Konfiguration eintragen
-sudoedit /etc/kapa/kapa.env            # Aria-URL, Benutzer, AD, SMTP …
+# 1) Konfiguration eintragen (die EINE Datei, nicht-geheim)
+sudoedit /etc/kapa/kapa.ini            # Aria-URL, Benutzer, AD, SMTP, Backup …
 
-# 2) Aria-Passwort ablegen (per systemd LoadCredential übergeben)
+# 2) Aria-Passwort als eigene .pass-Datei ablegen (Pfad steht in der INI)
 echo 'DAS-ARIA-PASSWORT' | sudo tee /etc/kapa/aria.pass >/dev/null
-sudo chmod 600 /etc/kapa/aria.pass
+sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
 
 # 3) SELinux: nginx darf zum Dienst proxien
 sudo setsebool -P httpd_can_network_connect 1
@@ -69,6 +69,6 @@ Der Dienst wird automatisch neu gestartet (`%systemd_postun_with_restart`);
 | `/opt/kapa/aria_kapa.py` | Anwendung (root:root, 0755 – Dienst kann sie nicht ändern) |
 | `/opt/kapa/data/` | Laufzeitdaten (kapa:kapa, 0750) |
 | `/usr/lib/systemd/system/kapa-dashboard.service` | systemd-Unit |
-| `/etc/kapa/kapa.env`, `kapa.ini` | Konfiguration (noreplace) |
+| `/etc/kapa/kapa.ini` | Konfiguration (noreplace) |
 | `/etc/kapa/nginx-kapa.conf.sample` | nginx-Snippet zum Einbinden |
 | `/usr/share/doc/kapa-dashboard/` | README, API.md, RESTORE.md |

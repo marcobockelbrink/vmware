@@ -56,8 +56,8 @@ aufnehmen).
 | Schritt | Modul |
 |---|---|
 | RPM installieren | `ansible.builtin.dnf` |
-| `/etc/kapa/kapa.env` aus Vorlage schreiben | `ansible.builtin.template` |
-| `/etc/kapa/aria.pass` (0600, `no_log`) ablegen | `ansible.builtin.copy` |
+| `/etc/kapa/kapa.ini` aus Vorlage schreiben | `ansible.builtin.template` |
+| `/etc/kapa/*.pass` (0640 root:kapa, `no_log`) ablegen | `ansible.builtin.copy` |
 | `httpd_can_network_connect` aktivieren | `ansible.posix.seboolean` |
 | nginx-Snippet einbinden (optional) | `ansible.builtin.copy` |
 | Dienst aktivieren/starten | `ansible.builtin.systemd` |

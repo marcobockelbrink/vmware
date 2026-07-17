@@ -17,8 +17,8 @@ Umgebungen mit Docker/Podman gedacht.
 
 ## Gemeinsame Grundlagen
 
-- **Konfiguration**: `config/kapa.env.example` (Umgebungsvariablen) bzw.
-  `config/kapa.ini.example` (INI mit allen Optionen). Secrets (Aria-/SMTP-/
+- **Konfiguration**: eine INI-Datei `config/kapa.ini.example` (alle
+  nicht-geheimen Optionen). Secrets (Aria-/SMTP-/
   Backup-Passwort) kommen per Datei (`--password-file`), Umgebungsvariable
   (`ARIA_PASSWORD` …) oder – im Container – als gemountetes Secret.
 - **Daten** liegen unter `data/` (bzw. `/opt/kapa/data`) und müssen bei

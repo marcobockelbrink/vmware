@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.17"
+VERSION = "1.18"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3692,7 +3692,7 @@ def serve(args, password):
                 "Zertifikat prüfen": j(not args.insecure),
                 "Proxy": args.aria_proxy or "– (direkt)",
                 "Auto-Refresh (Sek.)": args.refresh_interval,
-                "Aria-Passwort gesetzt": j(bool(password)),
+                "Aria-Passwort gesetzt": j(bool(getattr(args, "password", None))),
             },
             "Berechnung": {
                 "CPU-Faktor": args.cpu_factor,
@@ -4902,11 +4902,13 @@ def apply_config_file(ap, path):
         raw = raw.strip()
         if isinstance(action, argparse._StoreTrueAction):
             defaults[dest] = raw.lower() in ("1", "true", "yes", "ja", "on")
-        elif action.type is int:
+        elif callable(action.type):
+            # getippte Optionen (int, float, int_or) auch aus der INI korrekt
+            # konvertieren – sonst käme z. B. port als String an.
             try:
-                defaults[dest] = int(raw)
-            except ValueError:
-                ap.error(f"Option '{key}' in {path}: Ganzzahl erwartet, '{raw}' erhalten")
+                defaults[dest] = action.type(raw)
+            except (ValueError, argparse.ArgumentTypeError) as e:
+                ap.error(f"Option '{key}' in {path}: ungültiger Wert '{raw}' ({e})")
         else:
             defaults[dest] = raw
     ap.set_defaults(**defaults)

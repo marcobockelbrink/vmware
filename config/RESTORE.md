@@ -80,6 +80,6 @@ Dann als Admin im Dashboard: „Reservierungen importieren (JSON)".
 
 1. Repository klonen bzw. `aria_kapa.py` nach `/opt/kapa/` kopieren
 2. Installation gemäß Kommentar in `config/kapa-dashboard.service`
-   (Benutzer, `/etc/kapa/kapa.env`, `/etc/kapa/aria.pass`, nginx-Snippet)
+   (Benutzer, `/etc/kapa/kapa.ini`, `/etc/kapa/aria.pass`, nginx-Snippet)
 3. Backup wie oben nach `/opt/kapa/data` entpacken — die Rollen- und
    Reservierungsdaten sind damit sofort wieder da

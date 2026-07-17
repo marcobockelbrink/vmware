@@ -372,17 +372,31 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 - **Request-Größe** ist begrenzt (2 MiB), damit ein großer Body den Dienst
   nicht überlasten kann.
 
-## Konfigurationsdatei und SFTP-Backup
+## Konfiguration (ein einfaches Modell)
 
-Statt vieler Parameter kann alles in einer INI-Datei stehen
-(Vorlage: [`config/kapa.ini.example`](config/kapa.ini.example)):
+Es gibt bewusst **eine** Konfigurationsdatei und ein klares Prinzip — jede
+Einstellung hat **genau eine Quelle**:
+
+| Was | Wohin |
+|---|---|
+| **Alle nicht-geheimen Einstellungen** (Aria-URL/-User, Berechnung, Netzwerk, Mail-Server, Backup-Ziel, AD-Verbindung, Server-Port …) | **`kapa.ini`** (Vorlage: [`config/kapa.ini.example`](config/kapa.ini.example)) |
+| **Geheimnisse** (Passwörter, SSH-Key) | eigene **`.pass`-Dateien** (root:kapa, `0640`); die INI nennt nur den **Pfad** (`password-file`, `ad-bind-password-file`, …) |
+| **Fachdaten** (Rollen, Teams, Mail-Regeln, Selektor, Tokens) | **Admin-UI** → Data-Store unter `--data-dir` |
 
 ```bash
-python3 aria_kapa.py --config /etc/kapa/kapa.ini
+python3 aria_kapa.py --config /etc/kapa/kapa.ini --serve
 ```
 
-Kommandozeilen-Argumente überschreiben Werte aus der Datei; unbekannte
-Schlüssel werden mit Fehlermeldung abgewiesen.
+Die systemd-Unit ruft genau das auf — es gibt **keine `kapa.env`** mehr, die
+Werte überschreiben könnte. Kommandozeilen-Argumente überschreiben die INI (für
+Ad-hoc-Tests); unbekannte Schlüssel werden mit Fehlermeldung abgewiesen. Die im
+System gesetzten Werte sind im Admin-UI unter **„Backup & Konfiguration"**
+schreibgeschützt einsehbar (Passwörter nur als „gesetzt: ja/nein").
+
+> Migration von älteren Versionen (kapa.env + KAPA_EXTRA_ARGS): Werte aus der
+> `kapa.env` in die `kapa.ini` übernehmen, Passwörter in `.pass`-Dateien legen
+> und deren Pfade in der INI eintragen, dann die vereinfachte Unit einspielen.
+> `kapa.env` wird nicht mehr benötigt (Details: [`config/kapa.env.example`](config/kapa.env.example)).
 
 **SFTP-Backup**: Mit `--backup-target backup@srv:/backup/kapa` werden die
 Datendateien (Reservierungen, Rollen, Audit-Log, Cache) regelmäßig als
@@ -434,7 +448,8 @@ auslösen** – im Tab „Verwaltung" (Abschnitt „Backup") per Knopf oder dire
 | `--backup-key`, `--backup-password` | SSH-Key (empfohlen) bzw. Passwort (braucht sshpass) |
 | `--backup-port 22`, `--backup-interval 43200` | SSH-Port / Backup-Intervall in s (2×/Tag) |
 | `--backup-keep-days 30` | Rotation: ältere Archive auf dem Ziel löschen |
-| `--password-file datei` | Aria-Passwort aus Datei (systemd LoadCredential) |
+| `--password-file datei` | Aria-Passwort aus `.pass`-Datei (Pfad gehört in die INI) |
+| `--ad-bind-password-file`, `--smtp-password-file`, `--backup-password-file` | dito für AD-Service-Konto / SMTP / Backup |
 | `--log-file data/kapa_log.jsonl` | Audit-Log-Datei |
 | `--tokens-file data/kapa_tokens.json` | API-Token-Datei |
 | `--output datei.html` | Ausgabedatei (statischer Modus) |
@@ -461,25 +476,23 @@ Fertige Vorlagen liegen unter [`config/`](config/):
 
 - **`config/kapa-dashboard.service`** — systemd-Unit: läuft als eigener
   Benutzer `kapa` unter `/opt/kapa`, bindet nur an `127.0.0.1:8080`,
-  Neustart bei Fehlern, gehärtete Sandbox. Installationsschritte stehen
-  als Kommentar in der Datei.
-- **`config/kapa.env.example`** — Vorlage für `/etc/kapa/kapa.env`
-  (Mode 640): Aria-URL/-Benutzer, AD, SMTP. **Das Aria-Passwort liegt als
-  eigene Datei** `/etc/kapa/aria.pass` (root, Mode 600) und wird per
-  systemd `LoadCredential` + `--password-file` an den Dienst gereicht —
-  es taucht damit weder in `ps aux` noch in `systemctl show` auf.
-  Alternativ gehen Umgebungsvariablen (`ARIA_PASSWORD`, `SMTP_PASSWORD`,
-  `BACKUP_PASSWORD`) oder `--smtp-password-file`/`--backup-password-file`.
-  Empfehlung: eigenes Nur-Lese-Servicekonto in Aria Operations verwenden,
-  das Skript liest ausschließlich.
-- **Passwort des AD-Service-Kontos** (für AD-Gruppen bzw. `--ad-mail-attribute`)
-  genauso als Datei verstecken, nicht im Klartext in die `kapa.env`:
+  Neustart bei Fehlern, gehärtete Sandbox. Ruft schlicht
+  `--config /etc/kapa/kapa.ini --serve` auf (kein `EnvironmentFile`, keine
+  `${VARS}`). Installationsschritte stehen als Kommentar in der Datei.
+- **`config/kapa.ini.example`** — die eine Konfigurationsdatei
+  (`/etc/kapa/kapa.ini`, Mode 640): Aria, Berechnung, Netzwerk, Server, AD,
+  Mail, Backup. Empfehlung: eigenes **Nur-Lese-Servicekonto** in Aria
+  Operations verwenden – das Skript liest ausschließlich.
+- **Passwörter als eigene `.pass`-Dateien** (root:kapa, `0640`); die INI nennt
+  nur den Pfad. Beispiel Aria (analog `ad_bind.pass`, `smtp.pass`, `backup.pass`):
   ```bash
-  sudo sh -c 'echo "AD_PASSWORT" > /etc/kapa/ad_bind.pass'
-  sudo chown root:kapa /etc/kapa/ad_bind.pass && sudo chmod 640 /etc/kapa/ad_bind.pass
+  sudo sh -c 'echo "DAS-ARIA-PASSWORT" > /etc/kapa/aria.pass'
+  sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
   ```
-  dann `AD_BIND_PASSWORD_FILE=/etc/kapa/ad_bind.pass` setzen (`AD_BIND_PASSWORD`
-  leer lassen). Rangfolge überall: Parameter > Passwort-Datei > Umgebungsvariable.
+  dann in der INI `password-file = /etc/kapa/aria.pass` setzen. So taucht das
+  Passwort weder in `ps aux` noch in `systemctl show` auf. Rangfolge überall:
+  Parameter > Passwort-Datei > Umgebungsvariable (`ARIA_PASSWORD` usw. als
+  optionaler Rückfall, siehe `config/kapa.env.example`).
 - **`config/nginx-kapa.conf`** — Snippet für den bestehenden 443er-Server:
   stellt das Dashboard unter `https://<host>/capa/` bereit (Redirect
   `/capa` → `/capa/`, Prefix-Stripping, Cookie-Pfad). Die Weboberfläche

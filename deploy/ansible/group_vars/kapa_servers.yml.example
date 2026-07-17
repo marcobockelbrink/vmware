@@ -28,5 +28,12 @@ kapa_smtp_to: "vmware-team@firma.local"
 # nginx-Snippet mit ausrollen (setzt installiertes nginx voraus)
 kapa_manage_nginx: true
 
-# Weitere Optionen, z. B. INI-Datei oder Self-Signed-Zertifikate:
-# kapa_extra_args: "--config /etc/kapa/kapa.ini --insecure"
+# AD-Service-Konto (für AD-Gruppen bzw. --ad-mail-attribute), Passwort aus Vault:
+# kapa_ad_bind_dn: "CN=svc-kapa,OU=Service,DC=firma,DC=local"
+# kapa_ad_bind_password: "{{ vault_kapa_ad_bind_password }}"
+# kapa_ad_mail_attribute: "mail"
+
+# Freier INI-Block für weitere Optionen (mehrzeilig möglich):
+# kapa_ini_extra: |
+#   insecure = true
+#   cpu-factor = 7

@@ -11,24 +11,48 @@
     disable_gpg_check: true   # bei unsigniertem internem RPM; besser: RPM signieren
   notify: restart kapa-dashboard
 
-- name: Umgebungsdatei /etc/kapa/kapa.env schreiben
+- name: Konfigurationsdatei /etc/kapa/kapa.ini schreiben
   ansible.builtin.template:
-    src: kapa.env.j2
-    dest: /etc/kapa/kapa.env
+    src: kapa.ini.j2
+    dest: /etc/kapa/kapa.ini
     owner: root
     group: kapa
     mode: "0640"
   notify: restart kapa-dashboard
 
+# Geheimnisse als eigene .pass-Dateien (root:kapa, 0640 – der Dienst liest sie
+# direkt, es gibt kein systemd LoadCredential mehr). Pfade stehen in der INI.
 - name: Aria-Passwort ablegen (/etc/kapa/aria.pass)
   ansible.builtin.copy:
     content: "{{ kapa_aria_password }}\n"
     dest: /etc/kapa/aria.pass
     owner: root
-    group: root
-    mode: "0600"
+    group: kapa
+    mode: "0640"
   no_log: true
   when: kapa_aria_password | length > 0
+  notify: restart kapa-dashboard
+
+- name: AD-Service-Konto-Passwort ablegen (/etc/kapa/ad_bind.pass)
+  ansible.builtin.copy:
+    content: "{{ kapa_ad_bind_password }}\n"
+    dest: /etc/kapa/ad_bind.pass
+    owner: root
+    group: kapa
+    mode: "0640"
+  no_log: true
+  when: kapa_ad_bind_password | default('') | length > 0
+  notify: restart kapa-dashboard
+
+- name: SMTP-Passwort ablegen (/etc/kapa/smtp.pass)
+  ansible.builtin.copy:
+    content: "{{ kapa_smtp_password }}\n"
+    dest: /etc/kapa/smtp.pass
+    owner: root
+    group: kapa
+    mode: "0640"
+  no_log: true
+  when: kapa_smtp_password | default('') | length > 0
   notify: restart kapa-dashboard
 
 - name: SELinux – nginx darf zum Dienst proxien

@@ -4,21 +4,27 @@
 # Installation:
 #   sudo useradd --system --home /opt/kapa --shell /usr/sbin/nologin kapa
 #   sudo mkdir -p /opt/kapa && sudo cp aria_kapa.py /opt/kapa/
-#   # Laufzeitdaten liegen BEWUSST außerhalb von /opt/kapa unter /var/lib/kapa,
-#   # damit eine CI/CD-Pipeline (die /opt/kapa neu befüllt/bereinigt) die Daten
-#   # NICHT löscht — siehe --data-dir im ExecStart:
-#   sudo mkdir -p /var/lib/kapa && sudo chown kapa:kapa /var/lib/kapa && sudo chmod 750 /var/lib/kapa
-#   sudo mkdir -p /etc/kapa
-#   sudo cp config/kapa.env.example /etc/kapa/kapa.env   # und Werte eintragen!
-#   sudo chown root:kapa /etc/kapa/kapa.env && sudo chmod 640 /etc/kapa/kapa.env
-#   # Aria-Passwort als eigene Datei (nur root lesbar, systemd reicht sie durch):
-#   sudo sh -c 'echo "DAS-ARIA-PASSWORT" > /etc/kapa/aria.pass'
-#   sudo chmod 600 /etc/kapa/aria.pass
 #   sudo chown kapa:kapa /opt/kapa/aria_kapa.py
+#   # Laufzeitdaten BEWUSST außerhalb von /opt/kapa (CI/CD darf sie nicht löschen):
+#   sudo mkdir -p /var/lib/kapa && sudo chown kapa:kapa /var/lib/kapa && sudo chmod 750 /var/lib/kapa
+#
+#   # EINE Konfigurationsdatei (nicht-geheim), Mode 640:
+#   sudo mkdir -p /etc/kapa
+#   sudo cp config/kapa.ini.example /etc/kapa/kapa.ini   # und Werte eintragen!
+#   sudo chown root:kapa /etc/kapa/kapa.ini && sudo chmod 640 /etc/kapa/kapa.ini
+#
+#   # Geheimnisse als eigene Dateien (root:kapa, 0640) – Pfade stehen in der INI:
+#   sudo sh -c 'echo "DAS-ARIA-PASSWORT" > /etc/kapa/aria.pass'
+#   sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
+#   #  (analog ad_bind.pass / smtp.pass / backup.pass, falls genutzt)
+#
 #   sudo cp config/kapa-dashboard.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now kapa-dashboard
 # Logs: journalctl -u kapa-dashboard -f
+#
+# Hinweis: Es gibt bewusst KEINE kapa.env mehr. Alle nicht-geheimen Werte stehen
+# in kapa.ini, Passwörter in eigenen .pass-Dateien (deren Pfad die INI nennt).
 # =============================================================================
 
 [Unit]
@@ -33,33 +39,13 @@ User=kapa
 Group=kapa
 WorkingDirectory=/opt/kapa
 
-# Umgebung (ARIA_URL, ARIA_USER, SMTP_*, ...) — Mode 640 unter /etc/kapa/kapa.env
-EnvironmentFile=/etc/kapa/kapa.env
-
-# Aria-Passwort als Datei: systemd kopiert /etc/kapa/aria.pass (root, 600)
-# beim Start in ein privates Credentials-Verzeichnis des Dienstes.
-# Taucht damit weder in ps aux noch in systemctl show auf.
-LoadCredential=aria-password:/etc/kapa/aria.pass
-
-ExecStart=/usr/bin/python3 /opt/kapa/aria_kapa.py --serve \
-    --bind 127.0.0.1 --port 8080 \
-    --data-dir /var/lib/kapa \
-    --exclude-tag ${EXCLUDE_TAG} \
-    --url ${ARIA_URL} --user ${ARIA_USER} --auth-source ${ARIA_AUTH_SOURCE} \
-    --aria-proxy ${ARIA_PROXY} \
-    --password-file ${CREDENTIALS_DIRECTORY}/aria-password \
-    --ad-url ${AD_URL} --ad-domain ${AD_DOMAIN} --admin-user ${ADMIN_USER} \
-    --ad-bind-dn ${AD_BIND_DN} --ad-base-dn ${AD_BASE_DN} \
-    --ad-bind-password-file ${AD_BIND_PASSWORD_FILE} \
-    --ad-mail-attribute ${AD_MAIL_ATTRIBUTE} \
-    --smtp-server ${SMTP_SERVER} --smtp-from ${SMTP_FROM} --smtp-to ${SMTP_TO} \
-    --backup-target ${BACKUP_TARGET} --backup-port ${BACKUP_PORT} --backup-key ${BACKUP_KEY} \
-    $KAPA_EXTRA_ARGS
+ExecStart=/usr/bin/python3 /opt/kapa/aria_kapa.py --config /etc/kapa/kapa.ini --serve
 
 Restart=on-failure
 RestartSec=10
 
-# Härtung: nur /var/lib/kapa (die Laufzeitdaten) ist beschreibbar, sonst read-only
+# Härtung: nur /var/lib/kapa (die Laufzeitdaten) ist beschreibbar, sonst read-only.
+# /etc/kapa (INI + .pass) bleibt lesbar (ProtectSystem=strict macht es nur read-only).
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

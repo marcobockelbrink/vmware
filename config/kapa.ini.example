@@ -1,32 +1,33 @@
 # =============================================================================
-# Konfigurationsdatei für aria_kapa.py — Vorlage
+# Konfigurationsdatei für aria_kapa.py — die EINZIGE Stelle für alle
+# nicht-geheimen Einstellungen.  Vorlage -> /etc/kapa/kapa.ini
 # =============================================================================
 # Verwendung:  python3 aria_kapa.py --config /etc/kapa/kapa.ini --serve
-# Schlüssel entsprechen den Kommandozeilen-Optionen (mit - oder _).
+# Schlüssel = Kommandozeilen-Optionen (mit - oder _).
 #
-# RANGFOLGE (wichtig!):  Kommandozeile  >  diese INI  >  eingebauter Standard
+# KONFIGURATIONS-MODELL (bewusst einfach gehalten):
+#   * Geheimnisse (Passwörter/Keys)  -> eigene Dateien, hier nur der PFAD
+#                                        (password-file, ad-bind-password-file, …)
+#   * Alles andere                   -> genau hier in dieser INI
+#   * Fachdaten (Rollen, Teams,       -> Admin-UI, gespeichert unter data-dir
+#     Mail-Regeln, Selektor, Tokens)
+#   => Jede Einstellung hat GENAU EINE Quelle. Keine Doppelpflege in env/INI.
 #
-# ACHTUNG beim Betrieb mit systemd: Die Unit baut aus kapa.env
-# Kommandozeilen-Argumente (z. B. --url ${ARIA_URL}). Diese schlagen die INI —
-# und zwar AUCH, wenn die Variable in kapa.env leer ist! Ein leeres Argument
-# überschreibt den INI-Wert mit "leer".
-#   => Eine Option entweder in kapa.env ODER hier pflegen, nicht in beiden.
-#   => In der INI gehören die Optionen, die die Unit NICHT übergibt, z. B.
-#      cpu-factor, failover-hosts, res-ttl-days, contact-info, tag-property,
-#      backup-interval, backup-keep-days.
-#      Eingebunden wird sie über:  KAPA_EXTRA_ARGS=--config /etc/kapa/kapa.ini
+# Die systemd-Unit ruft nur noch `--config /etc/kapa/kapa.ini --serve` auf –
+# es gibt keine ${VARS} mehr, die INI-Werte überschreiben könnten.
 #
-# Enthält die Datei Passwörter: chmod 600 nicht vergessen!
-# (Passwörter alternativ per Umgebung: ARIA_PASSWORD, SMTP_PASSWORD,
-#  BACKUP_PASSWORD, AD_BIND_PASSWORD — diese greifen als LETZTE Rückfallebene:
-#  Parameter > Passwort-Datei > Umgebungsvariable; siehe kapa.env.example)
+# Rechte:  chown root:kapa /etc/kapa/kapa.ini && chmod 640 /etc/kapa/kapa.ini
+# (Passwörter stehen NICHT hier, sondern in eigenen 0640-Dateien, siehe unten.)
 # =============================================================================
 
 [kapa]
-# --- Aria Operations --------------------------------------------------------
+# --- Aria Operations ----------------------------------------------------------
 url = https://aria-ops.firma.de
 user = svc-kapa-readonly
-#password = besser-per-ARIA_PASSWORD-umgebungsvariable
+# Aria-Passwort NICHT hier, sondern als eigene Datei (root:kapa, 0640):
+#   sudo sh -c 'echo "DAS-ARIA-PASSWORT" > /etc/kapa/aria.pass'
+#   sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
+password-file = /etc/kapa/aria.pass
 auth-source = local
 #insecure = true                 ; Self-Signed-Zertifikat akzeptieren
 #aria-proxy = http://proxy.firma.local:3128   ; optionaler Proxy (leer = direkt)
@@ -34,71 +35,69 @@ auth-source = local
 # --- Berechnung ---------------------------------------------------------------
 cpu-factor = 6
 failover-hosts = 1
+vsan-factor = 0.5                 ; vSAN-Bruttokapazität nur anteilig nutzbar
+res-ttl-days = 31
 
 # --- Netzwerk / VLAN ----------------------------------------------------------
 # Uplink-/Trunk-Portgruppen (Name enthält "uplink" oder VLAN 0-4094) werden
 # standardmäßig ausgeblendet. Auf 'true' setzen, um sie einzublenden.
-#show-uplink-portgroups = false
+#show-uplink-portgroups = true
+# Systeme mit diesem vROps-Tag aus der Auswertung ausschließen (leer = aus):
+#exclude-tag = Kapa_Filter:Ja
+#tag-property = summary|tag       ; Präfix für die vSphere-Tags des Clusters
 
 # --- Webserver ----------------------------------------------------------------
-serve = true
 bind = 127.0.0.1
 port = 8080
 refresh-interval = 1800
 
 # --- Kontakt / Impressum ------------------------------------------------------
-# Wird im Footer und auf der Login-Maske angezeigt (Rückfragen).
 contact-info = IT-Betrieb Musterfirma · kapa-support@firma.local
 
 # --- Datenablage --------------------------------------------------------------
-# Basisordner aller Laufzeitdaten. Bei CI/CD-Deployments AUSSERHALB des
-# Deploy-Verzeichnisses wählen, sonst löscht die Pipeline die Daten bei jedem
-# Deploy (data/ ist gitignored, also nicht im Artefakt enthalten).
+# Basisordner aller Laufzeitdaten. BEWUSST außerhalb des Deploy-Verzeichnisses,
+# sonst löscht eine CI/CD-Pipeline die Daten (data/ ist gitignored).
 data-dir = /var/lib/kapa
 
 # --- Datenspeicher ------------------------------------------------------------
-# json   = je Sammlung eine editierbare .json-Datei im data-dir (Standard).
-# sqlite = eine einzelne data/kapa.db (Python-Standardbibliothek, kein Server),
-#          Reservierungen mit inkrementellen Schreibzugriffen – lohnt sich erst
-#          bei sehr vielen (mehrere Tausend) aktiven Reservierungen.
-# Beim erstmaligen Umstellen auf sqlite werden vorhandene JSON-Daten EINMALIG
-# automatisch übernommen (die JSON-Dateien bleiben als Sicherung liegen).
+# json (Standard) = je Sammlung eine editierbare .json-Datei im data-dir.
+# sqlite          = eine data/kapa.db (Stdlib, kein Server); lohnt erst bei
+#                   sehr vielen (mehrere Tausend) aktiven Reservierungen.
 #storage = json
-#db-file = kapa.db
 
-# --- Reservierungen -----------------------------------------------------------
-res-ttl-days = 31
-#res-file = kapa_reservierungen.json
-#cache = kapa_cache.json
-
-# --- Mehrstufiger Genehmigungsprozess -----------------------------------------
-# Die Genehmigungs-Teams werden auf der VERWALTUNGSSEITE gepflegt und in
-# data/kapa_teams.json gespeichert. Der folgende Wert dient nur zur einmaligen
-# Erstbefüllung, falls diese Datei noch nicht existiert (danach hat die
-# Verwaltungsseite Vorrang). Team-Namen komma-getrennt, in Prüfreihenfolge.
-# Leer/auskommentiert = einstufig (Admin genehmigt direkt).
+# --- Genehmigungs-Teams (nur Erstbefüllung) -----------------------------------
+# Danach werden Teams auf der Verwaltungsseite gepflegt (data/kapa_teams.json).
 #approval-teams = Team Netzwerk, Team Security, Team Betrieb
 
-# --- Active-Directory-Anmeldung ------------------------------------------------
+# --- Active-Directory-Anmeldung (leer = kein Login) ---------------------------
 ad-url = ldaps://dc01.firma.local
 ad-domain = firma.local
 admin-user = vorname.nachname@firma.local
 #ad-insecure = true
-# Session-Cookie ohne Secure-Flag – nur für lokalen HTTP-Test ohne HTTPS-Proxy:
-#cookie-insecure = true
-#roles-file = data/kapa_rollen.json
+#cookie-insecure = true           ; Cookie ohne Secure – nur für lokalen HTTP-Test
+# AD-Gruppenberechtigung + AD-Mailattribut brauchen ein Service-Konto:
+#ad-bind-dn = CN=svc-kapa,OU=Service,DC=firma,DC=local
+#ad-base-dn = DC=firma,DC=local
+#ad-bind-password-file = /etc/kapa/ad_bind.pass     ; eigene Datei (root:kapa 0640)
+# Empfänger-Mailadresse des Anforderers aus einem AD-Attribut statt dem UPN:
+#ad-mail-attribute = mail
 
-# --- Mail-Reports ---------------------------------------------------------------
+# --- Mail-Versand (leer = keine Mails; Regeln pflegt das Admin-UI) ------------
 smtp-server = mail.firma.local:25
 smtp-from = kapa-dashboard@firma.local
-smtp-to = vmware-team@firma.local
-#smtp-user =
+# smtp-to dient nur noch als Rückfall-Adresse für die Rolle "Admin", falls im
+# Admin-UI keine Admin-Verteiler-Adresse gesetzt ist:
+#smtp-to = vmware-team@firma.local
 #smtp-tls = true
+#smtp-user = kapa
+#smtp-password-file = /etc/kapa/smtp.pass           ; nur falls der Server Auth verlangt
 
-# --- SFTP-Backup ----------------------------------------------------------------
-backup-target = backup@backupsrv.firma.local:/backup/kapa
-backup-key = /etc/kapa/backup_ed25519
-#backup-password = nur-mit-installiertem-sshpass
-backup-port = 22
+# --- SFTP-Backup (leer = kein Backup) -----------------------------------------
+#backup-target = backup@backupsrv.firma.local:/backup/kapa
+#backup-port = 22
+# SSH-Key (empfohlen) – NICHT im Home ablegen (systemd ProtectHome), dem Dienst
+# gehörend: chown kapa:kapa, chmod 600:
+#backup-key = /etc/kapa/backup_id_ed25519
+#backup-password-file = /etc/kapa/backup.pass       ; Alternative, braucht sshpass
 backup-interval = 43200          ; zweimal täglich
 backup-keep-days = 30            ; ältere Archive auf dem Ziel löschen

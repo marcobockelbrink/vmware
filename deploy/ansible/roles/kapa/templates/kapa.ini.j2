@@ -1,0 +1,47 @@
+# {{ ansible_managed }}
+# Wird von der Ansible-Role kapa verwaltet – Änderungen hier werden überschrieben.
+# Die EINE Konfigurationsdatei (nicht-geheim). Passwörter liegen als .pass-Dateien.
+
+[kapa]
+# --- Aria Operations ---
+url = {{ kapa_aria_url }}
+user = {{ kapa_aria_user }}
+auth-source = {{ kapa_aria_auth_source }}
+password-file = /etc/kapa/aria.pass
+{% if kapa_aria_proxy | default('') | length > 0 %}
+aria-proxy = {{ kapa_aria_proxy }}
+{% endif %}
+
+# --- Datenablage ---
+data-dir = /var/lib/kapa
+
+{% if kapa_ad_url | default('') | length > 0 %}
+# --- Active Directory ---
+ad-url = {{ kapa_ad_url }}
+ad-domain = {{ kapa_ad_domain }}
+admin-user = {{ kapa_admin_user }}
+{% if kapa_ad_bind_dn | default('') | length > 0 %}
+ad-bind-dn = {{ kapa_ad_bind_dn }}
+ad-bind-password-file = /etc/kapa/ad_bind.pass
+{% endif %}
+{% if kapa_ad_mail_attribute | default('') | length > 0 %}
+ad-mail-attribute = {{ kapa_ad_mail_attribute }}
+{% endif %}
+{% endif %}
+
+{% if kapa_smtp_server | default('') | length > 0 %}
+# --- Mail-Versand ---
+smtp-server = {{ kapa_smtp_server }}
+smtp-from = {{ kapa_smtp_from }}
+{% if kapa_smtp_to | default('') | length > 0 %}
+smtp-to = {{ kapa_smtp_to }}
+{% endif %}
+{% if kapa_smtp_password | default('') | length > 0 %}
+smtp-password-file = /etc/kapa/smtp.pass
+{% endif %}
+{% endif %}
+
+{% if kapa_ini_extra | default('') | length > 0 %}
+# --- Weitere Optionen (frei aus kapa_ini_extra) ---
+{{ kapa_ini_extra }}
+{% endif %}

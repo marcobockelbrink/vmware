@@ -44,8 +44,7 @@ install -d -m 0750                          %{buildroot}/opt/kapa/data
 install -D -m 0644 config/kapa-dashboard.service \
     %{buildroot}%{_unitdir}/kapa-dashboard.service
 
-# Konfigurationsvorlagen nach /etc/kapa (werden bei Updates NICHT überschrieben)
-install -D -m 0640 config/kapa.env.example  %{buildroot}%{_sysconfdir}/kapa/kapa.env
+# Konfigurationsvorlage nach /etc/kapa (wird bei Updates NICHT überschrieben)
 install -D -m 0640 config/kapa.ini.example  %{buildroot}%{_sysconfdir}/kapa/kapa.ini
 # nginx-Snippet als Beispiel (manuell in den 443-Server einbinden)
 install -D -m 0644 config/nginx-kapa.conf   %{buildroot}%{_sysconfdir}/kapa/nginx-kapa.conf.sample
@@ -68,14 +67,13 @@ if [ $1 -eq 1 ]; then
 
 kapa-dashboard installiert. Nächste Schritte:
 
-  1) Konfiguration eintragen:
-       sudoedit /etc/kapa/kapa.env        # Aria-URL, Benutzer, AD, SMTP …
-       sudoedit /etc/kapa/kapa.ini        # optional: alle weiteren Optionen
-     Danach: sudo chown root:kapa /etc/kapa/kapa.env && sudo chmod 640 /etc/kapa/kapa.env
+  1) Konfiguration eintragen (die EINE Datei, nicht-geheim):
+       sudoedit /etc/kapa/kapa.ini        # Aria-URL/-User, AD, SMTP, Backup …
 
-  2) Aria-Passwort ablegen (wird per systemd LoadCredential übergeben):
+  2) Aria-Passwort als eigene Datei ablegen (Pfad steht in der INl):
        echo 'DAS-ARIA-PASSWORT' | sudo tee /etc/kapa/aria.pass >/dev/null
-       sudo chmod 600 /etc/kapa/aria.pass
+       sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
+     (analog ad_bind.pass / smtp.pass / backup.pass, falls genutzt)
 
   3) SELinux erlauben, dass nginx zum Dienst proxied:
        sudo setsebool -P httpd_can_network_connect 1
@@ -103,7 +101,6 @@ fi
 %attr(0750, kapa, kapa) %dir /opt/kapa/data
 %{_unitdir}/kapa-dashboard.service
 %dir %{_sysconfdir}/kapa
-%config(noreplace) %attr(0640, root, kapa) %{_sysconfdir}/kapa/kapa.env
 %config(noreplace) %attr(0640, root, kapa) %{_sysconfdir}/kapa/kapa.ini
 %config(noreplace) %{_sysconfdir}/kapa/nginx-kapa.conf.sample
 
