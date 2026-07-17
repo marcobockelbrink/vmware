@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.20"
+VERSION = "1.21"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -963,6 +963,17 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     report(3)
     log("Lese Cluster ...")
     clusters = api.resources("ClusterComputeResource")
+    # Workload-Badge je Cluster (vROps, 0-100 %) – best effort.
+    cl_workload = {}
+    try:
+        cw = api.latest_stats([c["identifier"] for c in clusters], ["badge|workload"])
+        for cid, st in cw.items():
+            v = st.get("badge|workload")
+            if v is not None:
+                cl_workload[cid] = round(float(v))
+        log(f"Cluster-Workload gelesen: {len(cl_workload)}/{len(clusters)}")
+    except Exception as e:
+        log(f"Cluster-Workload nicht verfügbar: {e}")
     report(8)
     log(f"Lese ESXi-Hosts ... ({len(clusters)} Cluster gefunden)")
     hosts = api.resources("HostSystem")
@@ -1046,6 +1057,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     data = {}
     for c in clusters:
         data[name_of(c)] = {"hosts": [], "vms": [], "tags": [], "portgroups": [],
+                            "workload": cl_workload.get(c["identifier"]),
                             "storage": {"cap_gb": 0.0, "used_gb": 0.0, "luns": []}}
 
     # vSphere-Tags je Cluster: vROps liefert sie als EIGENSCHAFTEN der Ressource
@@ -1331,6 +1343,7 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "vmOff": sum(1 for v in d["vms"] if not v["on"]),
             "tags": list(d.get("tags") or []),
             "portgroups": list(d.get("portgroups") or []),
+            "workload": d.get("workload"),
             "hosts": d["hosts"],
             "vms": d["vms"],
         })
@@ -1385,6 +1398,7 @@ def sample_data():
         pgs.append({"name": f"dvSwitch-{cl}-DVUplinks", "vlan": "0-4094"})
         pgs.sort(key=lambda x: x["name"].lower())
         data[cl] = {"hosts": hosts, "vms": vms, "tags": tags, "portgroups": pgs,
+                    "workload": random.choice([38, 52, 61, 74, 83]),
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
 
@@ -1428,6 +1442,8 @@ def openapi_spec():
             "ramCap": {"type": "number"}, "ramUsed": {"type": "number"}, "ramFree": {"type": "number"},
             "storageCap": {"type": "number"}, "storageUsed": {"type": "number"}, "storageFree": {"type": "number"},
             "vmCount": {"type": "integer"}, "vmOff": {"type": "integer"},
+            "workload": {"type": "integer", "nullable": True,
+                         "description": "vROps-Workload-Badge in % (nicht für Anforderer)"},
             "portgroups": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "vlan": {"type": "string"}}}},
         },
@@ -2560,6 +2576,7 @@ function card(c, idx, isTotal) {
       <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB</b></div>
       <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
+      ${(c.workload != null && ROLE !== "anforderer") ? `<div class="kpi">Workload (vROps)<b style="color:${color(c.workload)}">${c.workload} %</b></div>` : ""}
     </div>
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
@@ -3203,6 +3220,15 @@ function filterRes(list, q) {
 
 function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0),0)*10)/10; }
 
+// Cluster-Name als Tabellenzelle – klickbar (öffnet dieselbe Detailkarte wie
+// auf der Kapazitätsseite), sofern der Cluster in den aktuellen Daten existiert.
+function clusterTd(name) {
+  const i = CLUSTERS.findIndex(c => c.name === name);
+  return i >= 0
+    ? `<td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${i}, this)">${esc(name)}</td>`
+    : `<td>${esc(name || "–")}</td>`;
+}
+
 function renderResTable() {
   const q = (document.getElementById("resSearch") || {}).value || "";
   const own = RES.filter(r => !r.foreign);   // „(anderes Team)" nicht auflisten
@@ -3214,7 +3240,7 @@ function renderResTable() {
   const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
-     <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
+     <td>${esc(r.name)}</td>${clusterTd(r.cluster)}<td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
      <td>${fmtDate(r.created)}</td><td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
@@ -3254,7 +3280,7 @@ function renderAppTable() {
   };
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
-     <td>${esc(r.name)}</td><td>${esc(r.cluster)}</td><td>${esc(r.change || "–")}</td>
+     <td>${esc(r.name)}</td>${clusterTd(r.cluster)}<td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      ${freeCells(r)}
      <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
@@ -4339,6 +4365,14 @@ def serve(args, password):
         Empfänger-Mailadresse von_mail) – so wie sie an Clients gehen darf."""
         return {k: v for k, v in r.items() if k != "von_mail"}
 
+    def clusters_for(role):
+        """Cluster-Daten je Rolle: Anforderer sehen den Workload-Wert nicht
+        (weder im UI noch im Payload)."""
+        cl = state["clusters"]
+        if role == "anforderer":
+            return [{k: v for k, v in c.items() if k != "workload"} for c in cl]
+        return cl
+
     def visible_res(s):
         """Sichtbare Reservierungen je Rolle: Admin, Auditor und Reviewer sehen
         ALLE Anfragen. Nur Anforderer sind auf ihr eigenes Team beschränkt –
@@ -4553,7 +4587,8 @@ def serve(args, password):
                 userinfo = ({"user": s["user"], "role": s["role"],
                              "abteilung": s.get("abteilung") or ""}
                             if auth_enabled else None)
-                self._send(render_html(state["clusters"], args.cpu_factor,
+                self._send(render_html(clusters_for(userinfo["role"] if userinfo else None),
+                                       args.cpu_factor,
                                        serve_mode=True,
                                        updated=state["updated"] or
                                        "noch keine Daten – erster Abruf läuft ...",
@@ -4566,9 +4601,11 @@ def serve(args, password):
                                        notify=notify_cfg),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
-                if not self._require():
+                s = self._require()
+                if not s:
                     return
-                self._json({"updated": state["updated"], "clusters": state["clusters"]})
+                self._json({"updated": state["updated"],
+                            "clusters": clusters_for(s["role"])})
             elif route == "/api/status":
                 if not self._require():
                     return
@@ -4608,8 +4645,11 @@ def serve(args, password):
                     self._json({"version": VERSION, "updated": state["updated"],
                                 "refreshing": state["refreshing"], "next": nxt})
                 elif route == "/api/v1/data":
+                    # Token = externe Anwendung (Workload ok); Session eines
+                    # Anforderers bekommt den Workload wie im UI nicht.
                     self._json({"updated": state["updated"],
-                                "clusters": state["clusters"]})
+                                "clusters": (state["clusters"] if tok
+                                             else clusters_for(s["role"]))})
                 else:
                     with res_lock:
                         prune_reservations()

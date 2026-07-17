@@ -187,6 +187,13 @@ Ablehnungen, Stornos und Backups:
   Trunk-Range wie `0-4094`) sind keine echten Netz-VLANs und werden
   standardmäßig **ausgeblendet**; mit `--show-uplink-portgroups` lassen sie sich
   wieder einblenden.
+- **Workload %**: Der vROps-Workload-Badge je Cluster (`badge|workload`) wird
+  best effort mitgelesen und in der Cluster-Detailkarte als Kennzahl angezeigt –
+  **für die Rolle Anforderer ausgeblendet** (weder im UI noch im Datenabruf).
+  Log: `Cluster-Workload gelesen: N/M`.
+- **Cluster-Detailkarte überall**: Ein Klick auf einen **Clusternamen** öffnet
+  die Detailkarte – nicht nur in der Kapazitätsübersicht, sondern auch in den
+  Reservierungen, Genehmigungen und der VLAN-Suche.
 - Die Erläuterungen zur Berechnung und die Hilfe stehen im Dashboard hinter den
   Buttons **„ℹ Info Kapa-Berechnung"** und **„? Hilfe"** (aufgeräumte Kopfzeile).
 
