@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.24.1"
+VERSION = "1.25"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -723,13 +723,22 @@ def _ssh_run(cmd, env, timeout=180):
     import subprocess
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)
-    except FileNotFoundError as e:
-        raise RuntimeError("sshpass nicht installiert – für Passwort-Backups "
-                           "'sshpass' installieren oder besser --backup-key verwenden"
-                           if "sshpass" in str(e) else str(e)) from None
+    except FileNotFoundError:
+        prog = cmd[0]
+        if prog == "sshpass":
+            raise RuntimeError("'sshpass' ist nicht installiert – für Passwort-Backups "
+                               "installieren oder besser --backup-key (SSH-Key) nutzen") from None
+        raise RuntimeError(f"Programm '{prog}' nicht gefunden (bitte installieren)") from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{cmd[0]} nach {timeout}s abgebrochen (Timeout – "
+                           "Backup-Ziel/Port erreichbar?)") from None
     if r.returncode != 0:
-        raise RuntimeError(r.stderr.decode(errors="replace").strip()
-                           or f"{cmd[0]} beendet mit Exit-Code {r.returncode}")
+        # Die konkrete Shell-Meldung (scp/sftp/ssh) durchreichen – meist steht
+        # der eigentliche Grund in stderr (sonst stdout als Rückfall).
+        err = (r.stderr.decode(errors="replace").strip()
+               or r.stdout.decode(errors="replace").strip())
+        raise RuntimeError(f"{cmd[0]} Exit-Code {r.returncode}"
+                           + (f": {err}" if err else " (keine Meldung)"))
     return r.stdout.decode(errors="replace")
 
 
@@ -4563,6 +4572,8 @@ def serve(args, password):
 
     def do_refresh():
         state.update(refreshing=True, error=None, progress="0 %")
+        t0 = time.time()
+        print(f"Aria-Abruf gestartet ({args.url or 'Demo'}) ...", file=sys.stderr)
         try:
             if args.sample:
                 time.sleep(2)  # Demo: Ladezeit simulieren
@@ -4583,8 +4594,16 @@ def serve(args, password):
             with open(args.cache, "w", encoding="utf-8") as f:
                 json.dump({"updated": state["updated"], "clusters": clusters},
                           f, ensure_ascii=False)
+            dur = time.time() - t0
+            nvm = sum(c.get("vmCount", 0) for c in clusters)
+            detail = f"{len(clusters)} Cluster, {nvm} VMs in {dur:.1f} s"
+            print(f"Aria-Abruf beendet: {detail}", file=sys.stderr)
+            audit(None, "Aria-Abruf beendet", detail)
         except Exception as e:
+            dur = time.time() - t0
             state["error"] = str(e)
+            print(f"Aria-Abruf FEHLGESCHLAGEN nach {dur:.1f} s: {e}", file=sys.stderr)
+            audit(None, "Aria-Abruf fehlgeschlagen", f"nach {dur:.1f} s: {e}")
         finally:
             state["last"] = time.time()
             state["refreshing"] = False
@@ -4624,11 +4643,15 @@ def serve(args, password):
     def backup_loop():
         time.sleep(60)   # erst nach dem Anlauf (Cache/Migration abgeschlossen)
         while True:
+            t0 = time.time()
+            print(f"Backup gestartet -> {args.backup_target} ...", file=sys.stderr)
             try:
                 name = sftp_backup(args)
-                print(f"Backup übertragen: {name} -> {args.backup_target}",
-                      file=sys.stderr)
-                audit(None, "Automatisches Backup", name)
+                dur = time.time() - t0
+                print(f"Backup übertragen: {name} -> {args.backup_target} "
+                      f"({dur:.1f} s)", file=sys.stderr)
+                audit(None, "Automatisches Backup",
+                      f"{name} -> {args.backup_target} in {dur:.1f} s")
                 try:
                     n = backup_rotate(args)
                     if n:
@@ -4636,10 +4659,14 @@ def serve(args, password):
                               f"{n} Archiv(e) älter als "
                               f"{args.backup_keep_days} Tage gelöscht")
                 except Exception as e:
+                    print(f"Backup-Rotation fehlgeschlagen: {e}", file=sys.stderr)
                     audit(None, "Backup-Rotation fehlgeschlagen", str(e))
             except Exception as e:
-                print(f"Backup fehlgeschlagen: {e}", file=sys.stderr)
-                audit(None, "Automatisches Backup fehlgeschlagen", str(e))
+                dur = time.time() - t0
+                print(f"Backup FEHLGESCHLAGEN nach {dur:.1f} s "
+                      f"(Ziel {args.backup_target}): {e}", file=sys.stderr)
+                audit(None, "Automatisches Backup fehlgeschlagen",
+                      f"Ziel {args.backup_target}: {e}")
             if args.backup_interval <= 0:
                 return
             time.sleep(args.backup_interval)
@@ -5151,24 +5178,36 @@ def serve(args, password):
                     audit(s["user"], "Antrag storniert", res_detail(notify)
                           + (f" – Kommentar: {comment}" if comment else ""))
             elif self.path == "/api/backup":
-                if not self._require("admin"):
+                s = self._require("admin")
+                if not s:
                     return
+                t0 = time.time()
+                print(f"Backup (manuell durch {s['user'] or '?'}) -> "
+                      f"{args.backup_target} ...", file=sys.stderr)
                 try:
                     with res_lock:
                         name = sftp_backup(args)
-                    audit(self._session()["user"], "Backup ausgelöst", name)
+                    dur = time.time() - t0
+                    print(f"Backup übertragen: {name} -> {args.backup_target} "
+                          f"({dur:.1f} s)", file=sys.stderr)
+                    audit(s["user"], "Backup ausgelöst",
+                          f"{name} -> {args.backup_target} in {dur:.1f} s")
                     rotated = 0
                     try:
                         rotated = backup_rotate(args)
                         if rotated:
-                            audit(self._session()["user"], "Backup-Rotation",
+                            audit(s["user"], "Backup-Rotation",
                                   f"{rotated} Archiv(e) gelöscht")
                     except Exception as e:
-                        audit(self._session()["user"],
-                              "Backup-Rotation fehlgeschlagen", str(e))
+                        print(f"Backup-Rotation fehlgeschlagen: {e}", file=sys.stderr)
+                        audit(s["user"], "Backup-Rotation fehlgeschlagen", str(e))
                     self._json({"ok": True, "backup": name, "rotated": rotated})
                 except Exception as e:
-                    audit(self._session()["user"], "Backup fehlgeschlagen", str(e))
+                    dur = time.time() - t0
+                    msg = f"Ziel {args.backup_target}: {e}"
+                    print(f"Backup FEHLGESCHLAGEN nach {dur:.1f} s ({msg})",
+                          file=sys.stderr)
+                    audit(s["user"], "Backup fehlgeschlagen", msg)
                     self._json({"error": str(e)}, 502)
             elif self.path == "/api/tokens":
                 s = self._require("admin")
