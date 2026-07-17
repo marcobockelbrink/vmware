@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.23"
+VERSION = "1.24"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3859,6 +3859,14 @@ def serve(args, password):
     import uuid
     from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
+    def new_res_id():
+        """Kapa-ID: konfigurierbares Präfix + Zufallsteil (Hex) in konfigurierter
+        Länge (--id-prefix / --id-length bzw. INI)."""
+        h = ""
+        while len(h) < args.id_length:
+            h += uuid.uuid4().hex
+        return args.id_prefix + h[:args.id_length]
+
     state = {"clusters": [], "updated": None, "refreshing": False,
              "progress": "", "error": None, "last": None}
     interval = max(0, args.refresh_interval)
@@ -3890,7 +3898,7 @@ def serve(args, password):
                 if isinstance(_lst, list) and _lst:
                     for _r in _lst:
                         if isinstance(_r, dict):
-                            _r.setdefault("id", uuid.uuid4().hex[:12])
+                            _r.setdefault("id", new_res_id())
                     store.res_save_all(_lst)
                     print(f"Migriert nach SQLite: {len(_lst)} Reservierungen",
                           file=sys.stderr)
@@ -4286,7 +4294,7 @@ def serve(args, password):
         changed = False
         for r in lst:
             if isinstance(r, dict) and "id" not in r:
-                r["id"] = uuid.uuid4().hex[:12]
+                r["id"] = new_res_id()
                 changed = True
         kept = prune_res(lst)
         # Einmalige Reconciliation beim Start (nachgerüstete IDs / abgelaufene
@@ -4961,7 +4969,7 @@ def serve(args, password):
                 # Change / Jira-Ticket ist freiwillig und frei wählbar (kein Format)
                 change = str(item.get("change") or "").strip()[:60]
                 try:
-                    entry = {"id": uuid.uuid4().hex[:12],
+                    entry = {"id": new_res_id(),
                              "cluster": str(item.get("cluster") or ""),
                              "name": str(item.get("name")).strip(),
                              "change": change,
@@ -5260,7 +5268,7 @@ def serve(args, password):
                     if not isinstance(r, dict):
                         continue
                     r = dict(r)
-                    r.setdefault("id", uuid.uuid4().hex[:12])
+                    r.setdefault("id", new_res_id())
                     r.setdefault("created", datetime.now().date().isoformat())
                     r.setdefault("approved", False)
                     cleaned.append(r)
@@ -5519,6 +5527,12 @@ def main():
     ap.add_argument("--res-ttl-days", type=int_or(31), default=31,
                     help="Reservierungen nach N Tagen ab Anlage automatisch löschen "
                          "(0 = nie, Standard: 31)")
+    ap.add_argument("--id-prefix", default="",
+                    help="Präfix für die Kapa-ID neuer Reservierungen, z. B. 'KAPA-' "
+                         "(Standard: leer). Erlaubt: Buchstaben/Ziffern/-/_")
+    ap.add_argument("--id-length", type=int_or(12), default=12,
+                    help="Anzahl Zeichen des Zufallsteils der Kapa-ID nach dem Präfix "
+                         "(Standard: 12)")
     ap.add_argument("--approval-teams", default="",
                     help="Erstbefüllung der Genehmigungs-Teams (komma-getrennt, in "
                          "Prüfreihenfolge), z. B. 'Team Netzwerk,Team Security,Team "
@@ -5650,6 +5664,9 @@ def main():
     args.rolenames_file = data_path(args.rolenames_file, base)
     args.notify_file = data_path(args.notify_file, base)
     args.prefs_file = data_path(args.prefs_file, base)
+    # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
+    args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
+    args.id_length = min(40, max(4, args.id_length))
     if args.json:
         args.json = data_path(args.json, base)
 

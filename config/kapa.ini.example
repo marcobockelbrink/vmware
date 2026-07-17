@@ -38,6 +38,13 @@ failover-hosts = 1
 vsan-factor = 0.5                 ; vSAN-Bruttokapazität nur anteilig nutzbar
 res-ttl-days = 31
 
+# --- Kapa-ID neuer Reservierungen ---------------------------------------------
+# Aufbau: <id-prefix><Zufallsteil>. Prefix optional (Buchstaben/Ziffern/-/_),
+# id-length = Anzahl Hex-Zeichen des Zufallsteils (4–40). Beispiel:
+#   id-prefix = KAPA-  und  id-length = 6   ->   KAPA-004fb0
+#id-prefix =
+#id-length = 12
+
 # --- Netzwerk / VLAN ----------------------------------------------------------
 # Uplink-/Trunk-Portgruppen (Name enthält "uplink" oder VLAN 0-4094) werden
 # standardmäßig ausgeblendet. Auf 'true' setzen, um sie einzublenden.

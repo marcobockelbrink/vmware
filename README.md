@@ -496,6 +496,7 @@ auslösen** – im Tab „Verwaltung" (Abschnitt „Backup") per Knopf oder dire
 | `--cache kapa_cache.json` | Datei-Cache der letzten Abfrage |
 | `--res-file data/kapa_reservierungen.json` | Reservierungsdatei (Serve-Modus) |
 | `--res-ttl-days 31` | Reservierungen nach N Tagen löschen (`0` = nie) |
+| `--id-prefix KAPA-`, `--id-length 12` | Aufbau der Kapa-ID: Präfix + N zufällige Hex-Zeichen |
 | `--exclude-tag Kapa_Filter:Ja` | VMs mit diesem vROps-Tag (Kategorie:Wert) aus der Auswertung ausschließen |
 | `--contact-info "…"` | Kontakt-/Impressumszeile (Footer + Login) für Rückfragen |
 | `--ad-bind-dn`, `--ad-bind-password`, `--ad-base-dn` | Service-Konto für die AD-Gruppen-Berechtigung (memberOf-Suche) |
