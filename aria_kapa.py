@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.19"
+VERSION = "1.20"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1703,6 +1703,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                overflow:auto; resize:both; border-radius:12px;
                box-shadow:0 14px 44px rgba(0,0,0,.55); }
   .hovercard .card { border-color:#3b5479; }
+  .hovercard .card h2 { cursor:move; user-select:none; }
+  .hovercard .card h2::before { content:"⠿ "; color:var(--muted); font-size:14px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
   .card h2 { font-size:17px; margin-bottom:2px; color:var(--accent); }
   .meta { color:var(--muted); font-size:12px; margin-bottom:12px; }
@@ -1835,7 +1837,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="modal">
     <h2>Neue Kapazitätsanfrage</h2>
     <label>Ziel-Cluster</label>
-    <select id="mCluster" onchange="modalHint()"></select>
+    <input id="mClusterSearch" type="search" placeholder="Cluster suchen …"
+           oninput="fillClusterSelect()" autocomplete="off" style="margin-bottom:6px">
+    <select id="mCluster" size="1" onchange="modalHint()"></select>
     <label>Bezeichnung / Projekt</label>
     <input id="mName" placeholder="z. B. SAP-Erweiterung Q4">
     <label>Change / Jira Ticket (optional)</label>
@@ -1866,6 +1870,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="actions">
       <button class="btn" onclick="cmtCancel()">Abbrechen</button>
       <button class="btn primary" id="cmtOk" onclick="cmtConfirm()">OK</button>
+    </div>
+  </div>
+</div>
+<div class="modal-bg" id="askBg" onclick="if(event.target===this)askClose(false)">
+  <div class="modal">
+    <h2 id="askTitle"></h2>
+    <div class="hint" id="askMsg" style="color:var(--muted);margin-bottom:16px;white-space:pre-line"></div>
+    <div class="actions">
+      <button class="btn" id="askCancel" onclick="askClose(false)">Abbrechen</button>
+      <button class="btn primary" id="askOk" onclick="askClose(true)">OK</button>
     </div>
   </div>
 </div>
@@ -2190,7 +2204,7 @@ async function apiRes(method, path, body) {
   return r.json();
 }
 function setRes(list) { if (Array.isArray(list)) { RES = list; render(); } }
-function resFail() { alert("Reservierungen konnten nicht auf dem Server gespeichert werden."); }
+function resFail() { notify("Reservierungen konnten nicht auf dem Server gespeichert werden."); }
 // Nur genehmigte Reservierungen zählen gegen die Kapazität
 function resFor(cl) { return RES.filter(r => r.cluster === cl && r.approved && !r.cancelled); }
 function allFor(cl) { return RES.filter(r => r.cluster === cl); }
@@ -2242,7 +2256,7 @@ function freeAfter(c) {
            hasStor: (c.storageCap || 0) > 0 };
 }
 
-function createRes(c, name, change, vcpu, ram, storage, errEl) {
+async function createRes(c, name, change, vcpu, ram, storage, errEl) {
   errEl.style.display = "none";
   if (!name || (vcpu <= 0 && ram <= 0 && storage <= 0)) {
     errEl.textContent = "Bitte Bezeichnung sowie vCPU, RAM und/oder Storage angeben.";
@@ -2251,11 +2265,15 @@ function createRes(c, name, change, vcpu, ram, storage, errEl) {
   const ch = String(change || "").trim();   // Change/Jira optional, frei wählbar
   const f = freeAfter(c);
   const over = vcpu > f.cpu || ram > f.ram || (f.hasStor && storage > f.stor);
-  if (over &&
-      !confirm("Achtung: Die Reservierung überschreitet die freie Kapazität dieses Clusters " +
-               "(frei: " + f.cpu + " vCPU / " + f.ram + " GB RAM" +
-               (f.hasStor ? " / " + f.stor + " GB Storage" : "") +
-               "). Trotzdem beantragen?")) return false;
+  if (over) {
+    const goOn = await askConfirm({
+      title: "Freie Kapazität überschritten",
+      okLabel: "Trotzdem beantragen", okClass: "danger",
+      message: "Die Reservierung überschreitet die freie Kapazität von " +
+        esc(c.name) + ".\nFrei: " + fmt(f.cpu) + " vCPU / " + fmt(f.ram) + " GB RAM" +
+        (f.hasStor ? " / " + fmt(f.stor) + " GB Storage" : "") + "." });
+    if (!goOn) return false;
+  }
   const item = { cluster: c.name, name: name, change: ch, vcpu: vcpu,
                  ram_gb: ram, storage_gb: storage };
   if (SERVE) {
@@ -2298,6 +2316,32 @@ function cmtClose(val) {
 }
 function cmtConfirm() { cmtClose(document.getElementById("cmtInput").value.trim().slice(0, 64)); }
 function cmtCancel() { cmtClose(null); }
+
+// ---- Schicke Bestätigung / Hinweis (ersetzt native confirm()/alert()) ----
+let _askResolve = null;
+function askConfirm(opts) {
+  return new Promise(resolve => {
+    _askResolve = resolve;
+    document.getElementById("askTitle").textContent = opts.title || "Bestätigen";
+    document.getElementById("askMsg").textContent = opts.message || "";
+    const ok = document.getElementById("askOk");
+    ok.textContent = opts.okLabel || "OK";
+    ok.className = "btn primary" + (opts.okClass ? " " + opts.okClass : "");
+    const cancel = document.getElementById("askCancel");
+    cancel.style.display = opts.hideCancel ? "none" : "";
+    cancel.textContent = opts.cancelLabel || "Abbrechen";
+    document.getElementById("askBg").classList.add("open");
+    setTimeout(() => ok.focus(), 30);
+  });
+}
+function notify(message, title) {
+  return askConfirm({ title: title || "Hinweis", message: message, okLabel: "OK", hideCancel: true });
+}
+function askClose(val) {
+  document.getElementById("askBg").classList.remove("open");
+  const r = _askResolve; _askResolve = null;
+  if (r) r(!!val);
+}
 
 // ---- Info-/Hilfe-Popup ----
 function showInfo(srcId, title) {
@@ -2368,10 +2412,22 @@ function cancelRes(id) {
 }
 
 // ---- Dialog "Neue Kapazitätsanfrage" ----
-function openModal(prefIdx) {
+function fillClusterSelect(prefIdx) {
   const sel = document.getElementById("mCluster");
-  sel.innerHTML = CLUSTERS.map((c, i) =>
-    `<option value="${i}" ${prefIdx === i ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+  const q = (document.getElementById("mClusterSearch").value || "").trim().toLowerCase();
+  const prev = sel.value;
+  const opts = CLUSTERS.map((c, i) => ({ i: i, name: c.name }))
+                       .filter(o => !q || o.name.toLowerCase().includes(q));
+  sel.innerHTML = opts.length
+    ? opts.map(o => `<option value="${o.i}">${esc(o.name)}</option>`).join("")
+    : `<option value="">(kein Cluster passt)</option>`;
+  const want = (prefIdx !== undefined && prefIdx !== null) ? String(prefIdx) : prev;
+  if (want !== "" && opts.some(o => String(o.i) === want)) sel.value = want;
+  modalHint();
+}
+function openModal(prefIdx) {
+  document.getElementById("mClusterSearch").value = "";
+  fillClusterSelect(prefIdx);
   ["mName", "mChange", "mCpu", "mRam", "mStorage"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("mErr").style.display = "none";
   const today = new Date().toISOString().slice(0, 10);
@@ -2391,10 +2447,10 @@ function modalHint() {
     "Frei nach bestehenden Reservierungen: " + fmt(f.cpu) + " vCPU / " + fmt(f.ram) + " GB RAM"
     + (f.hasStor ? " / " + fmt(f.stor) + " GB Storage" : "");
 }
-function submitModal() {
+async function submitModal() {
   const c = CLUSTERS[+document.getElementById("mCluster").value];
   const v = id => document.getElementById(id).value;
-  const ok = createRes(c, v("mName").trim(), v("mChange"),
+  const ok = await createRes(c, v("mName").trim(), v("mChange"),
                        parseInt(v("mCpu")) || 0, parseInt(v("mRam")) || 0,
                        parseInt(v("mStorage")) || 0,
                        document.getElementById("mErr"));
@@ -2417,10 +2473,10 @@ function importRes(ev) {
   const f = ev.target.files[0]; if (!f) return;
   f.text().then(t => {
     const d = JSON.parse(t);
-    if (!Array.isArray(d)) { alert("Ungültige Datei."); return; }
+    if (!Array.isArray(d)) { notify("Ungültige Datei."); return; }
     if (SERVE) apiRes("PUT", "", d).then(setRes).catch(resFail);
     else { RES = d; saveLocal(); render(); }
-  }).catch(() => alert("Datei konnte nicht gelesen werden."));
+  }).catch(() => notify("Datei konnte nicht gelesen werden."));
   ev.target.value = "";
 }
 
@@ -2481,14 +2537,19 @@ function card(c, idx, isTotal) {
       <h3>vSphere-Tags</h3>
       <div>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
     </div>` : "";
-  const resRows = clRes.map(r =>
+  // Reservierungen ANDERER Teams (foreign) tauchen für Anforderer nicht als
+  // Zeile auf – sie zählen aber weiter in „reserviert"/„frei" hinein (rv).
+  const shownRes = clRes.filter(r => !r.foreign);
+  const foreignN = clRes.length - shownRes.length;
+  const resRows = shownRes.map(r =>
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
      <td>${fmtDate(validUntil(r))}</td><td>${stBadge(r)}</td>
      <td>${canCancel(r) ? `<button class="del" title="Anfrage stornieren" onclick="cancelRes('${esc(r.id)}')">⦸ Storno</button>` : ""}</td></tr>`).join("");
-  const resTable = clRes.length ?
+  const foreignNote = foreignN ? `<div style="color:var(--muted);font-size:12px;margin-top:6px">+ ${foreignN} genehmigte Reservierung(en) anderer Teams – in „reserviert“ berücksichtigt.</div>` : "";
+  const resTable = (shownRes.length ?
     `<table><tr><th>Anfrage</th><th class="num">vCPU</th><th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>gültig bis</th><th>Status</th><th></th></tr>${resRows}</table>`
-    : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`;
+    : `<div style="color:var(--muted);font-size:12px">Keine Reservierungen.</div>`) + foreignNote;
   const spare = (c.spareCores || c.spareRamGb) ?
     ` · Ausfallreserve (N+1): ${fmt(c.spareCores)} Cores / ${fmt(c.spareRamGb)} GB abgezogen` : "";
   // ---- Inhalte je Reiter ----
@@ -2720,15 +2781,16 @@ function addToken() {
     document.getElementById("newTokenVal").textContent = d.token;
     document.getElementById("newToken").style.display = "";
     render();
-  }).catch(() => alert("Token konnte nicht erstellt werden."));
+  }).catch(() => notify("Token konnte nicht erstellt werden."));
 }
 function delToken(id) {
   const t = TOKENS[id];
-  if (!confirm("API-Token „" + ((t && t.name) || id) + "“ widerrufen? " +
-               "Die Anwendung verliert sofort den Zugriff.")) return;
-  apiTokens("DELETE", "/" + encodeURIComponent(id))
-    .then(d => { TOKENS = d; render(); })
-    .catch(() => alert("Widerruf fehlgeschlagen."));
+  askConfirm({ title: "API-Token widerrufen", okLabel: "Widerrufen", okClass: "danger",
+    message: "„" + ((t && t.name) || id) + "“ widerrufen? Die Anwendung verliert sofort den Zugriff." })
+    .then(ok => { if (!ok) return;
+      apiTokens("DELETE", "/" + encodeURIComponent(id))
+        .then(d => { TOKENS = d; render(); })
+        .catch(() => notify("Widerruf fehlgeschlagen.")); });
 }
 function renderTokenTable() {
   const rows = Object.keys(TOKENS)
@@ -2792,13 +2854,14 @@ function addRole() {
   if (!u) return;
   apiRoles("POST", "", { user: u, role: rl, abteilung: ab, kind: kind })
     .then(d => { ROLES = d; render(); })
-    .catch(() => alert("Speichern fehlgeschlagen."));
+    .catch(() => notify("Speichern fehlgeschlagen."));
 }
 function delRole(u) {
-  if (!confirm("Rollenzuweisung für „" + u + "“ entfernen?")) return;
-  apiRoles("DELETE", "/" + encodeURIComponent(u))
-    .then(d => { ROLES = d; if (EDIT_USER === u) EDIT_USER = null; render(); })
-    .catch(() => alert("Löschen fehlgeschlagen."));
+  askConfirm({ title: "Rollenzuweisung entfernen", okLabel: "Entfernen", okClass: "danger",
+    message: "Rollenzuweisung für „" + u + "“ entfernen?" }).then(ok => { if (!ok) return;
+    apiRoles("DELETE", "/" + encodeURIComponent(u))
+      .then(d => { ROLES = d; if (EDIT_USER === u) EDIT_USER = null; render(); })
+      .catch(() => notify("Löschen fehlgeschlagen.")); });
 }
 let EDIT_USER = null;   // Benutzer, dessen Zeile gerade bearbeitet wird
 function editRole(u) { EDIT_USER = u; render(); document.getElementById("editDept").focus(); }
@@ -2808,7 +2871,7 @@ function saveEditRole(u) {
   const ab = document.getElementById("editDept").value.trim();
   apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
     .then(d => { ROLES = d; EDIT_USER = null; render(); })
-    .catch(() => alert("Speichern fehlgeschlagen."));
+    .catch(() => notify("Speichern fehlgeschlagen."));
 }
 // ---- Genehmigungs-Teams (Prüfreihenfolge) ----
 async function apiTeams(method, body) {
@@ -2824,19 +2887,20 @@ function loadTeams() {
 }
 function putTeams(list) {
   apiTeams("PUT", list).then(d => { TEAMS = (d && d.teams) || []; render(); })
-                       .catch(() => alert("Speichern der Teams fehlgeschlagen."));
+                       .catch(() => notify("Speichern der Teams fehlgeschlagen."));
 }
 function addTeam() {
   const el = document.getElementById("newTeam");
   const t = (el.value || "").trim();
   if (!t) return;
-  if (TEAMS.includes(t)) { alert("Team „" + t + "“ existiert bereits."); return; }
+  if (TEAMS.includes(t)) { notify("Team „" + t + "“ existiert bereits."); return; }
   el.value = "";
   putTeams(TEAMS.concat([t]));
 }
 function delTeam(i) {
-  if (!confirm("Team „" + TEAMS[i] + "“ aus dem Genehmigungsprozess entfernen?")) return;
-  putTeams(TEAMS.filter((_, j) => j !== i));
+  askConfirm({ title: "Team entfernen", okLabel: "Entfernen", okClass: "danger",
+    message: "Team „" + TEAMS[i] + "“ aus dem Genehmigungsprozess entfernen?" })
+    .then(ok => { if (ok) putTeams(TEAMS.filter((_, j) => j !== i)); });
 }
 function moveTeam(i, dir) {
   const j = i + dir;
@@ -2858,7 +2922,7 @@ function saveTeamRename(i) {
     .then(d => { if (d && d.teams) TEAMS = d.teams;
                  if (d && d.roles) ROLES = d.roles;
                  TEAM_EDIT = -1; render(); })
-    .catch(() => alert("Umbenennen fehlgeschlagen (Name evtl. schon vergeben)."));
+    .catch(() => notify("Umbenennen fehlgeschlagen (Name evtl. schon vergeben)."));
 }
 function teamMail(t) { return ((NOTIFY.team_email || {})[t]) || ""; }
 function renderTeams() {
@@ -2939,7 +3003,7 @@ function saveNotify() {
     const st = document.getElementById("notifySaved");
     if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     render();
-  }).catch(() => alert("Speichern der Mail-Regeln fehlgeschlagen."));
+  }).catch(() => notify("Speichern der Mail-Regeln fehlgeschlagen."));
 }
 
 // ---- Unter-Reiter der Verwaltung + read-only Konfiguration ----
@@ -2997,7 +3061,7 @@ function saveSelector() {
     const st = document.getElementById("selSaved");
     if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     render();
-  }).catch(() => alert("Speichern des Selektors fehlgeschlagen."));
+  }).catch(() => notify("Speichern des Selektors fehlgeschlagen."));
 }
 function renderSelector() {
   const all = [...new Set([...tagCategories(), ...SELECTOR.map(s => s.category)])].sort();
@@ -3038,7 +3102,7 @@ function saveRoleNames() {
   const body = {};
   ROLE_ORDER.forEach(k => { body[k] = (document.getElementById("rn_" + k).value || "").trim(); });
   apiRoleNames("PUT", body).then(d => { if (d && d.rolenames) ROLE_NAMES = d.rolenames;
-                                        render(); }).catch(() => alert("Speichern fehlgeschlagen."));
+                                        render(); }).catch(() => notify("Speichern fehlgeschlagen."));
 }
 function renderRoleNames() {
   const rows = ROLE_ORDER.map(k =>
@@ -3141,10 +3205,11 @@ function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0)
 
 function renderResTable() {
   const q = (document.getElementById("resSearch") || {}).value || "";
-  const list = filterRes(RES, q);
+  const own = RES.filter(r => !r.foreign);   // „(anderes Team)" nicht auflisten
+  const list = filterRes(own, q);
   const appr = list.filter(r => r.approved && !r.cancelled);
   const cnt = document.getElementById("resCount");
-  if (cnt) cnt.textContent = q.trim() ? list.length + " von " + RES.length + " Anfragen" : RES.length + " Anfragen";
+  if (cnt) cnt.textContent = q.trim() ? list.length + " von " + own.length + " Anfragen" : own.length + " Anfragen";
   const showDec = ROLE !== "anforderer";
   const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
@@ -3304,6 +3369,28 @@ document.addEventListener("click", e => {
     hideCard();
 }, true);
 
+// ---- Detailkarte per Titel (⠿) frei verschieben ----
+(function () {
+  let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  hc.addEventListener("mousedown", e => {
+    const h = e.target.closest("h2");
+    if (!h || !hc.contains(h) || e.target.closest("button,a,input,select,textarea")) return;
+    const r = hc.getBoundingClientRect();
+    drag = true; sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+    hc.style.right = "auto"; hc.style.bottom = "auto";
+    hc.style.left = ox + "px"; hc.style.top = oy + "px";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", e => {
+    if (!drag) return;
+    const nx = Math.max(4, Math.min(ox + e.clientX - sx, innerWidth - 60));
+    const ny = Math.max(4, Math.min(oy + e.clientY - sy, innerHeight - 40));
+    hc.style.left = nx + "px"; hc.style.top = ny + "px";
+  });
+  document.addEventListener("mouseup", () => { drag = false; document.body.style.userSelect = ""; });
+})();
+
 // ---- Rollenabhängige Sichtbarkeit ----
 if (ME) {
   document.getElementById("userbox").textContent =
@@ -3434,16 +3521,15 @@ function migrateLocalRes(serverList) {
   let old = [];
   try { old = JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch (e) {}
   if (!old.length) return;
-  if (confirm(old.length + " Reservierung(en) aus dem Browser-Speicher gefunden " +
-              "(alter Speicherort). Auf den Server übernehmen?\n" +
-              "Sie erscheinen dann mit Status „beantragt“ und können unter " +
-              "„Genehmigungen“ freigegeben werden.")) {
-    apiRes("PUT", "", old).then(l => {
-      setRes(l);
-      localStorage.removeItem(LS_KEY);
-    }).catch(resFail);
-  }
-  try { localStorage.setItem(LS_KEY + "_migriert", "1"); } catch (e) {}
+  askConfirm({ title: "Alte Reservierungen übernehmen?", okLabel: "Übernehmen",
+    message: old.length + " Reservierung(en) aus dem Browser-Speicher gefunden " +
+             "(alter Speicherort). Auf den Server übernehmen?\nSie erscheinen dann " +
+             "mit Status „beantragt“ und können unter „Genehmigungen“ freigegeben werden." })
+    .then(ok => {
+      if (ok) apiRes("PUT", "", old).then(l => {
+        setRes(l); localStorage.removeItem(LS_KEY); }).catch(resFail);
+      try { localStorage.setItem(LS_KEY + "_migriert", "1"); } catch (e) {}
+    });
 }
 
 if (SERVE) {
