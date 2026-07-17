@@ -28,6 +28,7 @@ das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
 **Reservierungen & Genehmigungs-Workflow**
 - Kapazitätsanfragen mit optionalem **Change/Jira-Ticket**; eigene Reservierungsseite mit **Suchmaske** und Summenzeile
 - **Mehrstufige Genehmigung** über Teams (Prüfreihenfolge), Freigabe/Ablehnung/Storno, Status-Historie
+- **Archiv** für abgelehnte/stornierte Anfragen (eigener Menüpunkt, dauerhaft, gleiche Team-Sichtbarkeit)
 - Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt
 
 **Rollen, AD & Sicherheit**
@@ -89,9 +90,14 @@ Details zu jedem Bereich in den folgenden Abschnitten.
   (Kapazität, Reservierungen, Genehmigungen, Log, Benutzer/Rollen, Tokens). Die
   Genehmigungs-Teams behalten ihre manuelle Prüfreihenfolge.
 - **Eigene Reservierungsseite** (Tab „Reservierungen" bzw. `/reservierungen`)
-  mit allen Kapazitätsanfragen, Status und Summenzeile
+  mit allen **aktiven** Kapazitätsanfragen, Status und Summenzeile (mit Suchfeld)
 - **Genehmigungs-Dashboard** (Tab „Genehmigungen" bzw. `/genehmigungen`):
   offene Anträge genehmigen oder ablehnen
+- **Archiv** (Tab „Archiv" bzw. `/archiv`): abgelehnte und stornierte Anfragen als
+  Historie (durchsuchbar, zählt nicht gegen die Kapazität). Sie bleiben dauerhaft
+  erhalten und tauchen nicht mehr in der aktiven Reservierungsliste auf.
+  **Sichtbarkeit wie bei den Reservierungen**: Anforderer sehen die des eigenen
+  Teams, Reviewer/Admin/Auditor alle.
 - **Audit-Log** (Tab „Log" bzw. `/log`, nur Admins): protokolliert
   Anmeldungen (auch fehlgeschlagene), Anträge, Genehmigungen/Ablehnungen,
   Stornos, Importe, Rollenänderungen und Backups nach `data/kapa_log.jsonl`.

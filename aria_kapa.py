@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.21"
+VERSION = "1.22"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1904,6 +1904,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <span class="tab" id="tabVlan" onclick="setView('vlan')">VLAN-Suche</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
+  <span class="tab" id="tabArch" onclick="setView('arch')">Archiv</span>
   <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
   <span class="tab" id="tabLog" onclick="setView('log')">Log</span>
 </div>
@@ -1962,6 +1963,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <th>von</th><th>Team</th><th>beantragt am</th><th>Fortschritt</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="atbody"></tbody>
 </table>
+</div>
+<div id="archView" style="display:none">
+<div class="hint" style="color:var(--muted);margin:4px 0 10px">
+  Archiv der <b>abgelehnten</b> und <b>stornierten</b> Kapazitätsanfragen (Historie,
+  zählt nicht gegen die Kapazität). Sichtbarkeit wie bei den Reservierungen:
+  Anforderer sehen die des eigenen Teams, Reviewer/Admin/Auditor alle.</div>
+<div class="vlanbar" style="margin-bottom:12px">
+  <input id="archSearch" class="filterbox" style="max-width:520px" type="search"
+         placeholder="Archiv durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …"
+         oninput="renderArchiveTable()" autocomplete="off">
+  <span id="archCount" style="color:var(--muted);font-size:13px"></span>
+</div>
+<div class="tablewrap">
+<table class="kt" id="artable">
+  <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
+    <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Team</th>
+    <th>angelegt</th><th>erledigt am</th><th>Status</th><th>durch</th><th>Kommentar</th></tr></thead>
+  <tbody id="arbody"></tbody>
+</table>
+</div>
 </div>
 <div id="admView" style="display:none">
 <div class="tabs subtabs">
@@ -2555,8 +2576,9 @@ function card(c, idx, isTotal) {
     </div>` : "";
   // Reservierungen ANDERER Teams (foreign) tauchen für Anforderer nicht als
   // Zeile auf – sie zählen aber weiter in „reserviert"/„frei" hinein (rv).
-  const shownRes = clRes.filter(r => !r.foreign);
-  const foreignN = clRes.length - shownRes.length;
+  // Abgelehnte/stornierte liegen im Archiv und erscheinen hier nicht.
+  const shownRes = clRes.filter(r => !r.foreign && !isArchived(r));
+  const foreignN = clRes.filter(r => r.foreign).length;
   const resRows = shownRes.map(r =>
     `<tr><td>${esc(r.name)}${r.change ? ' <span style="color:var(--muted)">' + esc(r.change) + '</span>' : ''}${isTotal ? ' <span style="color:var(--muted)">(' + esc(r.cluster) + ')</span>' : ''}</td>
      <td class="num">${r.vcpu}</td><td class="num">${fmt(r.ram_gb)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
@@ -2728,6 +2750,7 @@ function row(c, idx, isTotal) {
 let VIEW = (location.pathname.endsWith("/vlan-suche") || location.hash === "#vlan-suche") ? "vlan"
          : (location.pathname.endsWith("/reservierungen") || location.hash === "#reservierungen") ? "res"
          : (location.pathname.endsWith("/genehmigungen") || location.hash === "#genehmigungen") ? "app"
+         : (location.pathname.endsWith("/archiv") || location.hash === "#archiv") ? "arch"
          : (location.pathname.endsWith("/verwaltung") || location.hash === "#verwaltung") ? "adm"
          : (location.pathname.endsWith("/log") || location.hash === "#log") ? "log"
          : "kapa";
@@ -2735,20 +2758,20 @@ if ((VIEW === "adm" || VIEW === "log") && !IS_ADMIN) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  const tabs = { kapa: "tabKapa", vlan: "tabVlan", res: "tabRes", app: "tabApp", adm: "tabAdm", log: "tabLog" };
-  const views = { kapa: "kapaView", vlan: "vlanView", res: "resView", app: "appView", adm: "admView", log: "logView" };
+  const tabs = { kapa: "tabKapa", vlan: "tabVlan", res: "tabRes", app: "tabApp", arch: "tabArch", adm: "tabAdm", log: "tabLog" };
+  const views = { kapa: "kapaView", vlan: "vlanView", res: "resView", app: "appView", arch: "archView", adm: "admView", log: "logView" };
   for (const k in tabs) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
-  document.getElementById("filter").style.display = (v === "vlan" || v === "res") ? "none" : "";
+  document.getElementById("filter").style.display = (v === "vlan" || v === "res" || v === "arch") ? "none" : "";
   document.getElementById("filter").placeholder =
     v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
   try {
     history.replaceState(null, "",
       v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
-      : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
+      : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
   hideCard();
@@ -3229,9 +3252,12 @@ function clusterTd(name) {
     : `<td>${esc(name || "–")}</td>`;
 }
 
+function isArchived(r) { return !!(r.rejected || r.cancelled); }
+
 function renderResTable() {
   const q = (document.getElementById("resSearch") || {}).value || "";
-  const own = RES.filter(r => !r.foreign);   // „(anderes Team)" nicht auflisten
+  // „(anderes Team)" nicht auflisten; abgelehnte/stornierte liegen im Archiv
+  const own = RES.filter(r => !r.foreign && !isArchived(r));
   const list = filterRes(own, q);
   const appr = list.filter(r => r.approved && !r.cancelled);
   const cnt = document.getElementById("resCount");
@@ -3251,8 +3277,29 @@ function renderResTable() {
     `<tr class="trtotal"><td></td><td>Summe genehmigt (${appr.length} von ${list.length})</td><td></td><td></td>
      <td class="num">${fmt(sumCpu(appr))}</td><td class="num">${fmt(sumRam(appr))}</td><td class="num">${fmt(sumStorage(appr))}</td>
      <td colspan="${nCols - 7}"></td></tr>` +
-    (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine Reservierungen.</td></tr>`);
+    (rows || `<tr><td colspan="${nCols}" style="color:var(--muted)">Keine aktiven Reservierungen.</td></tr>`);
   reSort("rtable");
+}
+
+function renderArchiveTable() {
+  const q = (document.getElementById("archSearch") || {}).value || "";
+  const arch = RES.filter(r => !r.foreign && isArchived(r));
+  const list = filterRes(arch, q);
+  const cnt = document.getElementById("archCount");
+  if (cnt) cnt.textContent = q.trim() ? list.length + " von " + arch.length + " Einträgen" : arch.length + " Einträge";
+  const rows = list.map(r => {
+    const done = r.cancelled ? r.cancelled_on : r.rejected_on;
+    const by = r.cancelled ? r.cancelled_by : r.rejected_by;
+    return `<tr><td class="rid">${esc(r.id || "–")}</td>
+     <td>${esc(r.name)}</td>${clusterTd(r.cluster)}<td>${esc(r.change || "–")}</td>
+     <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
+     <td>${esc(r.von || "–")}</td><td>${esc(r.abteilung || "–")}</td>
+     <td>${fmtDate(r.created)}</td><td>${fmtDate(done)}</td><td>${stBadge(r)}</td>
+     <td>${esc(by || "–")}</td><td>${esc(r.comment || "–")}</td></tr>`;
+  }).join("");
+  document.getElementById("arbody").innerHTML =
+    rows || `<tr><td colspan="14" style="color:var(--muted)">Archiv ist leer.</td></tr>`;
+  reSort("artable");
 }
 
 function renderAppTable() {
@@ -3326,6 +3373,7 @@ function render() {
   if (VIEW === "vlan") { renderVlan(); return; }
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
+  if (VIEW === "arch") { renderArchiveTable(); return; }
   if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
@@ -3435,7 +3483,7 @@ if (ROLE === "anforderer") {
 }
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
-const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0},
+const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0}, artable:{pin:0},
                    ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1}, vtable:{pin:0} };
 const sortState = {};
 function cellVal(td) {
@@ -4118,15 +4166,11 @@ def serve(args, password):
         if args.res_ttl_days <= 0:
             return lst
         cutoff = (datetime.now() - timedelta(days=args.res_ttl_days)).date().isoformat()
-
-        def ref_date(r):
-            # Abgelehnte/stornierte bleiben ab dem Ereignisdatum in der Historie
-            if r.get("rejected"):
-                return str(r.get("rejected_on") or r.get("created") or "9999")
-            if r.get("cancelled"):
-                return str(r.get("cancelled_on") or r.get("created") or "9999")
-            return str(r.get("created") or "9999")
-        return [r for r in lst if ref_date(r) >= cutoff]
+        # Abgelehnte und stornierte Anfragen bleiben DAUERHAFT im Archiv erhalten;
+        # nur aktive/genehmigte laufen nach --res-ttl-days ab (geben Kapazität frei).
+        return [r for r in lst
+                if r.get("rejected") or r.get("cancelled")
+                or str(r.get("created") or "9999") >= cutoff]
 
     def load_res():
         try:
@@ -4577,7 +4621,7 @@ def serve(args, password):
             route = parsed.path
             query = urllib.parse.parse_qs(parsed.query)
             if route in ("/", "/index.html", "/reservierungen",
-                         "/genehmigungen", "/verwaltung", "/log"):
+                         "/genehmigungen", "/archiv", "/verwaltung", "/log"):
                 s = self._session()
                 if auth_enabled and not s:
                     self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION)
