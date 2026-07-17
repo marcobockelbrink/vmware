@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.25"
+VERSION = "1.26"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -756,6 +756,7 @@ def sftp_backup(args):
     files = [p for p in (args.cache, args.res_file, args.roles_file,
                          args.log_file, args.tokens_file, args.teams_file,
                          args.rolenames_file, args.selector_file, args.notify_file,
+                         getattr(args, "prefs_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1951,6 +1952,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <input id="vlanQ" placeholder="IP-Adresse, Netz oder Portgruppen-Name suchen …"
          oninput="renderVlan()" autocomplete="off">
   <span id="vlanCount" style="color:var(--muted);font-size:13px"></span>
+  <span id="colctl_vtable" style="margin-left:auto"></span>
 </div>
 <div class="tablewrap">
 <table class="kt" id="vtable">
@@ -2018,6 +2020,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div id="admGrpUsers">
 <div class="sechead">Benutzer und Rollen</div>
+<div style="text-align:right;margin-bottom:6px"><span id="colctl_mtable"></span></div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
   <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Team</th><th class="nosort">Aktion</th></tr></thead>
@@ -2067,6 +2070,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   📖 <a href="api/v1/docs" target="_blank" rel="noopener">API-Dokumentation öffnen</a>
   (interaktiv, mit „Ausführen") · <a href="api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI-Spec</a>
   zum Import in Swagger/Postman.</div>
+<div style="text-align:right;margin-bottom:6px"><span id="colctl_ttable"></span></div>
 <div class="tablewrap">
 <table class="kt" id="ttable">
   <thead><tr><th>Anwendung</th><th>Token-Anfang</th><th>erstellt</th><th>von</th>
@@ -2123,11 +2127,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="configSheet"></div>
 </div><!-- admGrpConf -->
 </div>
-<div class="tablewrap" id="logView" style="display:none">
+<div id="logView" style="display:none">
+<div style="text-align:right;margin-bottom:6px"><span id="colctl_ltable"></span></div>
+<div class="tablewrap">
 <table class="kt" id="ltable">
   <thead><tr><th>Zeit</th><th>Benutzer</th><th>Aktion</th><th>Details</th></tr></thead>
   <tbody id="ltbody"></tbody>
 </table>
+</div>
 </div>
 <div class="hovercard" id="hovercard"></div>
 <div class="foot">VMware Kapazitätsplanung · Version __VERSION____CONTACT_FOOT__</div>
@@ -2930,7 +2937,7 @@ function renderTokenTable() {
        onkeydown="if(event.key==='Enter')addToken()"></td>
      <td><button class="btn approve" onclick="addToken()">+ Token erzeugen</button></td></tr>` +
     (rows || `<tr><td colspan="6" style="color:var(--muted)">Keine API-Tokens vorhanden.</td></tr>`);
-  reSort("ttable");
+  reSort("ttable"); renderColMenu("ttable"); applyCols("ttable");
 }
 
 // ---- Audit-Log (nur Admins) ----
@@ -2951,7 +2958,7 @@ function renderLogTable() {
      <td>${esc(e.user || "–")}</td><td>${esc(e.action || "")}</td>
      <td>${esc(e.detail || "")}</td></tr>`).join("") ||
     `<tr><td colspan="4" style="color:var(--muted)">Keine Log-Einträge${q ? " für diesen Filter" : ""}.</td></tr>`;
-  reSort("ltable");
+  reSort("ltable"); renderColMenu("ltable"); applyCols("ltable");
 }
 
 // ---- Verwaltung: AD-Benutzer → Rollen ----
@@ -3298,7 +3305,7 @@ function renderAdmTable() {
      <td id="admFieldCell">${roleField("admDept", firstRole, "", null)}</td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
     (rows || `<tr><td colspan="5" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
-  reSort("mtable");
+  reSort("mtable"); renderColMenu("mtable"); applyCols("mtable");
 }
 function admKindSync() {
   const g = document.getElementById("admKind").value === "group";
@@ -3446,7 +3453,7 @@ function renderVlan() {
   document.getElementById("vlanCount").textContent = all.length
     ? (q ? hits.length + " von " + all.length + " Portgruppen"
          : all.length + " Portgruppen gesamt") : "";
-  reSort("vtable");
+  reSort("vtable"); renderColMenu("vtable"); applyCols("vtable");
 }
 
 function render() {

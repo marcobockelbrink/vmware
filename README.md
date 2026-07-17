@@ -89,10 +89,13 @@ Details zu jedem Bereich in den folgenden Abschnitten.
   absteigend (numerisch, nach Datum oder Text) – in allen Datentabellen
   (Kapazität, Reservierungen, Genehmigungen, Log, Benutzer/Rollen, Tokens). Die
   Genehmigungs-Teams behalten ihre manuelle Prüfreihenfolge.
-- **Spalten ein-/ausblenden**: Über den Knopf **„⚙ Spalten"** (Kapazität,
-  Reservierungen, Genehmigungen, Archiv) lassen sich einzelne Spalten aus- und
-  wieder einblenden. Die Auswahl wird **pro Benutzer** gespeichert (angemeldet
-  serverseitig, sonst lokal im Browser).
+- **Spalten ein-/ausblenden**: Über den Knopf **„⚙ Spalten"** – in **allen
+  Datentabellen** (Kapazität, Reservierungen, Genehmigungen, Archiv, Log,
+  Benutzer/Rollen, API-Tokens, VLAN-Suche) – lassen sich einzelne Spalten aus-
+  und wieder einblenden. Die Auswahl wird **pro Benutzer** gespeichert (angemeldet
+  serverseitig, sonst lokal im Browser). Die kleinen Konfig-Tabellen mit fester
+  Reihenfolge (Genehmigungs-Teams, Rollen-Bezeichnungen, Cluster-Selektor)
+  behalten bewusst ihr Layout.
 - **Eigene Reservierungsseite** (Tab „Reservierungen" bzw. `/reservierungen`)
   mit allen **aktiven** Kapazitätsanfragen, Status und Summenzeile (mit Suchfeld)
 - **Genehmigungs-Dashboard** (Tab „Genehmigungen" bzw. `/genehmigungen`):
