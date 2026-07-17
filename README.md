@@ -6,7 +6,8 @@ Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 ![Dashboard mit Demo-Daten](docs/screenshot.png)
 
 *Kapazitätsübersicht mit Demo-Daten: freie vCPU-, RAM- und Storage-Kapazität je
-Cluster mit Auslastungsbalken (`python3 aria_kapa.py --sample --serve`).*
+Cluster mit Auslastungsbalken, Quellen-Badge (mehrere vROps), vROps-Quickfilter
+im Selektor und Spalten-Konfiguration (`python3 aria_kapa.py --sample --serve`).*
 
 ## Funktionsüberblick
 
@@ -18,7 +19,9 @@ das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
 - Freie **vCPU / RAM / Storage** je Cluster mit Auslastungsbalken; frei = Kapazität − belegt − genehmigte Reservierungen
 - **N+1-Ausfallreserve** (`--failover-hosts`), **vSAN-Faktor** für nutzbare Netto-Kapazität, VM-**Ausschluss per Tag**
 - **Storage-Drilldown** je LUN/Datastore (sortierbar), **vSphere-Tags** je Cluster
-- **Cluster-Selektor**: bis zu 3 kaskadierende Tag-Filter; **Filter-/Suchfelder**, **sortierbare Tabellen**
+- **Workload %** je Cluster aus vROps (für Anforderer verborgen — auch serverseitig)
+- **Cluster-Selektor**: vROps-Quellen-Filter + bis zu 3 kaskadierende Tag-Filter; **Filter-/Suchfelder**, **sortierbare Tabellen**
+- **Spalten ein-/ausblenden** in allen Datentabellen („⚙ Spalten", je Benutzer gespeichert)
 - **Auto-Aktualisierung** mit geschätztem Prozent-Fortschritt; Export als **CSV/JSON**
 
 **Netzwerk & VLAN**
@@ -27,7 +30,7 @@ das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
 - **Uplink-/Trunk-Portgruppen** (VLAN 0-4094) werden ausgeblendet (`--show-uplink-portgroups`)
 
 **Reservierungen & Genehmigungs-Workflow**
-- Kapazitätsanfragen mit optionalem **Change/Jira-Ticket**; eigene Reservierungsseite mit **Suchmaske** und Summenzeile
+- Kapazitätsanfragen mit optionalem **Change/Jira-Ticket**; eigene Reservierungsseite mit **Suchmaske** und Summenzeile; **Kapa-ID-Format konfigurierbar** (`id-prefix`/`id-length`)
 - **Mehrstufige Genehmigung** über Teams (Prüfreihenfolge), Freigabe/Ablehnung/Storno, Status-Historie
 - **Archiv** für abgelehnte/stornierte Anfragen (eigener Menüpunkt, dauerhaft, gleiche Team-Sichtbarkeit)
 - Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt
@@ -54,7 +57,7 @@ das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
 - Datenhaltung als **JSON-Dateien oder SQLite** (`--storage`), **atomare** Schreibvorgänge
 - **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend)
 - **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**
-- Auslieferung als **systemd + nginx**, **RPM**, **Ansible** oder **Container**
+- Auslieferung als **systemd + nginx**, **RPM**, **Ansible** oder **Container** (fertiges Image auf **GHCR**, bei jedem Release automatisch gebaut)
 
 Details zu jedem Bereich in den folgenden Abschnitten.
 
