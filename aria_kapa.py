@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.29"
+VERSION = "1.30"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -56,6 +56,7 @@ DEFAULT_NOTIFY = {
 import argparse
 import getpass
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -947,7 +948,10 @@ DEFAULT_MAIL_TEMPLATE = (
 def _mail_values(r, action, admin, res_ttl, team=None, html=True):
     """Werte für die Vorlagen-Variablen. html=True escaped für die HTML-Mail,
     html=False für den (plain) Betreff."""
-    e = _html_escape if html else (lambda x: str(x if x is not None else ""))
+    # html=False landet im Mail-Betreff: CR/LF dort immer zu Leerzeichen falten,
+    # sonst lehnt EmailMessage den Header ab und der Versand scheitert still.
+    e = _html_escape if html else (
+        lambda x: " ".join(str(x if x is not None else "").split()))
     approvals = r.get("approvals") or []
     if html:
         appr = "<br>".join(
@@ -4720,8 +4724,10 @@ def serve(args, password):
             tpl_html = notify_cfg.get("template_html") or ""
             tpl_subj = notify_cfg.get("template_subject") or ""
         admin = actor or "System"
-        subject = render_template(tpl_subj or DEFAULT_MAIL_SUBJECT,
-                                  _mail_values(r, action, admin, args.res_ttl_days, team, html=False))
+        subject = " ".join(render_template(
+            tpl_subj or DEFAULT_MAIL_SUBJECT,
+            _mail_values(r, action, admin, args.res_ttl_days, team,
+                         html=False)).split())
         html = reservation_mail_html(r, action, admin, args.res_ttl_days,
                                      tpl_html or None, team)
         body = reservation_mail_body(r, action, admin, args.res_ttl_days)
@@ -4978,7 +4984,7 @@ def serve(args, password):
             now = datetime.now()
             with tokens_lock:
                 for tid, t in tokens.items():
-                    if t.get("hash") == th:
+                    if hmac.compare_digest(str(t.get("hash") or ""), th):
                         stale = str(t.get("last_used") or "")[:10] != now.date().isoformat()
                         t["last_used"] = now.isoformat(timespec="seconds")
                         if stale:
@@ -5194,6 +5200,11 @@ def serve(args, password):
                     except Exception as e:
                         print(f"AD-Mailattribut-Suche fehlgeschlagen: {e}",
                               file=sys.stderr)
+                # Abgelaufene Sitzungen bei der Gelegenheit entsorgen, sonst
+                # wächst das Dict über Monate unbegrenzt.
+                now = time.time()
+                for k in [k for k, v in sessions.items() if v["exp"] <= now]:
+                    sessions.pop(k, None)
                 token = secrets.token_urlsafe(32)
                 sessions[token] = {"user": user, "role": entry["role"],
                                    "abteilung": entry.get("abteilung") or "",
@@ -5227,12 +5238,17 @@ def serve(args, password):
                 if not isinstance(item, dict) or not str(item.get("name") or "").strip():
                     self._json({"error": "Ungültige Reservierung"}, 400)
                     return
-                # Change / Jira-Ticket ist freiwillig und frei wählbar (kein Format)
-                change = str(item.get("change") or "").strip()[:60]
+                # Change / Jira-Ticket ist freiwillig und frei wählbar (kein Format).
+                # Freitextfelder: Whitespace (inkl. Zeilenumbrüche) zu Leerzeichen
+                # falten und Länge begrenzen – ein \n im Namen würde sonst den
+                # Mail-Betreff ungültig machen (EmailMessage lehnt CR/LF ab) und
+                # so die Benachrichtigungen still unterdrücken.
+                oneline = lambda v, n: " ".join(str(v or "").split())[:n]
+                change = oneline(item.get("change"), 60)
                 try:
                     entry = {"id": new_res_id(),
-                             "cluster": str(item.get("cluster") or ""),
-                             "name": str(item.get("name")).strip(),
+                             "cluster": oneline(item.get("cluster"), 120),
+                             "name": oneline(item.get("name"), 120),
                              "change": change,
                              "vcpu": int(float(item.get("vcpu") or 0)),
                              "ram_gb": int(float(item.get("ram_gb") or 0)),
