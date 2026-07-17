@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.18"
+VERSION = "1.18.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1682,12 +1682,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 </div>
 </div>
-<div class="tablewrap" id="resView" style="display:none">
+<div id="resView" style="display:none">
+<div class="vlanbar" style="margin-bottom:12px">
+  <input id="resSearch" class="filterbox" style="max-width:520px" type="search"
+         placeholder="Reservierungen durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …"
+         oninput="renderResTable()" autocomplete="off">
+  <span id="resCount" style="color:var(--muted);font-size:13px"></span>
+</div>
+<div class="tablewrap">
 <table class="kt" id="rtable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
     <th class="num">RAM (GB)</th><th class="num">Storage (GB)</th><th>von</th><th>Team</th><th>gilt ab</th><th>gültig bis</th><th>Status</th><th id="thDec">entschieden von</th><th>Kommentar</th><th class="nosort"></th></tr></thead>
   <tbody id="rtbody"></tbody>
 </table>
+</div>
 </div>
 <div class="tablewrap" id="appView" style="display:none">
 <table class="kt" id="atable">
@@ -2425,7 +2433,7 @@ function setView(v) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
-  document.getElementById("filter").style.display = v === "vlan" ? "none" : "";
+  document.getElementById("filter").style.display = (v === "vlan" || v === "res") ? "none" : "";
   document.getElementById("filter").placeholder =
     v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
@@ -2890,8 +2898,8 @@ function statusText(r) {
   if (r.approved) return "genehmigt";
   return (TEAMS.length && stageOf(r) > 0) ? "in Prüfung" : "beantragt";
 }
-function filterRes(list) {
-  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+function filterRes(list, q) {
+  q = (q || "").trim().toLowerCase();
   const hit = r => [r.name, r.cluster, r.change, r.von, r.abteilung, r.id,
                     statusText(r)].some(v => (v || "").toLowerCase().includes(q));
   return list.filter(r => !q || hit(r))
@@ -2902,8 +2910,11 @@ function filterRes(list) {
 function sumStorage(rv) { return Math.round(rv.reduce((s,r)=>s+(r.storage_gb||0),0)*10)/10; }
 
 function renderResTable() {
-  const list = filterRes(RES);
+  const q = (document.getElementById("resSearch") || {}).value || "";
+  const list = filterRes(RES, q);
   const appr = list.filter(r => r.approved && !r.cancelled);
+  const cnt = document.getElementById("resCount");
+  if (cnt) cnt.textContent = q.trim() ? list.length + " von " + RES.length + " Anfragen" : RES.length + " Anfragen";
   const showDec = ROLE !== "anforderer";
   const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
@@ -2924,7 +2935,7 @@ function renderResTable() {
 }
 
 function renderAppTable() {
-  const list = filterRes(RES.filter(isPend));
+  const list = filterRes(RES.filter(isPend), (document.getElementById("filter") || {}).value || "");
   const action = r => {
     if (canDecide(r)) {
       const team = currentTeam(r);
