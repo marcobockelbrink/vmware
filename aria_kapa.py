@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.27"
+VERSION = "1.28"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2152,6 +2152,15 @@ const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst n
 let TEAMS = __TEAMS__;      // Genehmigungs-Teams in Prüfreihenfolge (leer = einstufig); auf der Verwaltungsseite pflegbar
 let SELECTOR = __SELECTOR__; // Tag-Kategorien des Cluster-Selektors (max 3, kaskadierend)
 let SEL_VALUES = {};         // gewählte Werte je Kategorie
+let SRC_FILTER = null;       // vROps-Quellen-Filter (null = Default ableiten)
+function clusterSources() {  // benannte vROps-Quellen im Datenbestand
+  return [...new Set(CLUSTERS.map(c => c.source).filter(Boolean))].sort();
+}
+function effectiveSrc() {    // gewählte Quelle bzw. Default (bei genau einer Quelle diese)
+  if (SRC_FILTER !== null) return SRC_FILTER;
+  const s = clusterSources();
+  return s.length === 1 ? s[0] : "";
+}
 const HAS_BACKUP = __BACKUP__; // ist ein SFTP-Backup-Ziel konfiguriert?
 const LS_KEY = "aria_kapa_reservierungen";
 
@@ -2167,16 +2176,19 @@ function clusterTagVals(c, cat) {   // Werte, die Cluster c für Kategorie cat h
   return (c.tags || []).filter(t => t.startsWith(p)).map(t => t.slice(p.length));
 }
 function selCat(i) { return SELECTOR[i] ? SELECTOR[i].category : ""; }
-function selMatch(c) {       // erfüllt Cluster c alle gewählten Selektor-Stufen?
+function selMatch(c) {       // erfüllt Cluster c Quellen-Filter + alle Selektor-Stufen?
+  const src = effectiveSrc();
+  if (src && c.source !== src) return false;
   return SELECTOR.every(s => {
     const v = SEL_VALUES[s.category];
     return !v || clusterTagVals(c, s.category).includes(v);
   });
 }
-// Werte für Stufe i – kaskadierend: nur die, die zu den höheren Stufen passen
+// Werte für Stufe i – kaskadierend: nur die, die zur Quelle + höheren Stufen passen
 function selectorOptions(i) {
+  const src = effectiveSrc();
   const upper = SELECTOR.slice(0, i);
-  const base = CLUSTERS.filter(c => upper.every(s => {
+  const base = CLUSTERS.filter(c => (!src || c.source === src) && upper.every(s => {
     const v = SEL_VALUES[s.category]; return !v || clusterTagVals(c, s.category).includes(v); }));
   const vals = new Set();
   base.forEach(c => clusterTagVals(c, selCat(i)).forEach(v => vals.add(v)));
@@ -2192,23 +2204,40 @@ function onSelectorChange(i, val) {
   }
   render();
 }
-function resetSelector() { SEL_VALUES = {}; render(); }
+function onSourceChange(val) {
+  SRC_FILTER = val;
+  // Tag-Stufen zurücksetzen, deren Wert in der gewählten Quelle nicht mehr passt
+  for (let j = 0; j < SELECTOR.length; j++) {
+    const opts = selectorOptions(j);
+    if (SEL_VALUES[selCat(j)] && !opts.includes(SEL_VALUES[selCat(j)]))
+      SEL_VALUES[selCat(j)] = "";
+  }
+  render();
+}
+function resetSelector() { SEL_VALUES = {}; SRC_FILTER = null; render(); }
 function renderClusterSelector() {
   const box = document.getElementById("clusterSelector");
   if (!box) return;
   const active = SELECTOR.filter(s => tagCategories().includes(s.category));
-  if (!active.length) { box.innerHTML = ""; box.style.display = "none"; return; }
+  const srcs = clusterSources();
+  if (!active.length && !srcs.length) { box.innerHTML = ""; box.style.display = "none"; return; }
   box.style.display = "";
-  const any = SELECTOR.some(s => SEL_VALUES[s.category]);
-  box.innerHTML = '<span class="sellabel">Cluster-Selektor:</span>' +
+  const cur = effectiveSrc();
+  const srcSel = srcs.length ? `<label>vROps
+    <select onchange="onSourceChange(this.value)">
+      <option value="">alle</option>
+      ${srcs.map(v => `<option value="${esc(v)}" ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
+    </select></label>` : "";
+  const any = SRC_FILTER !== null || SELECTOR.some(s => SEL_VALUES[s.category]);
+  box.innerHTML = '<span class="sellabel">Cluster-Selektor:</span>' + srcSel +
     SELECTOR.map((s, i) => {
       if (!tagCategories().includes(s.category)) return "";
       const opts = selectorOptions(i);
-      const cur = SEL_VALUES[s.category] || "";
+      const sv = SEL_VALUES[s.category] || "";
       return `<label>${esc(s.label || s.category)}
         <select onchange="onSelectorChange(${i}, this.value)">
           <option value="">alle</option>
-          ${opts.map(v => `<option value="${esc(v)}" ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
+          ${opts.map(v => `<option value="${esc(v)}" ${sv === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
         </select></label>`;
     }).join("") +
     (any ? '<button class="btn" onclick="resetSelector()">Zurücksetzen</button>' : "");

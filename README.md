@@ -77,10 +77,13 @@ Details zu jedem Bereich in den folgenden Abschnitten.
   Ergebnis als sortierbare Tabelle Portgruppe / VLAN / Cluster.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
-- **Cluster-Selektor**: Über der Kapazitätsliste blenden sich bis zu drei
-  **kaskadierende** Auswahllisten ein, mit denen man sich anhand der
-  vSphere-Tags zu den Clustern durchfiltert (z. B. Umgebung → Standort →
-  Betreuung). Stufe 2 zeigt nur Werte, die zur Wahl in Stufe 1 passen. Welche
+- **Cluster-Selektor**: Über der Kapazitätsliste blenden sich Schnellfilter
+  ein. Bei mehreren vROps-Quellen steht **ganz vorn ein „vROps"-Filter** (der
+  Quellenname aus der INI); ist nur eine Quelle konfiguriert, ist sie der
+  Standard. Danach folgen bis zu drei **kaskadierende** Auswahllisten anhand der
+  vSphere-Tags (z. B. Umgebung → Standort → Betreuung); die Tag-Werte richten
+  sich nach der gewählten Quelle. Stufe 2 zeigt nur Werte, die zur Wahl in
+  Stufe 1 passen. Welche
   Tag-Kategorien die Stufen bilden, konfigurierst du frei im Tab „Verwaltung"
   (Abschnitt „Cluster-Selektor"); pro Stufe lässt sich ein eigener
   **Anzeigename** vergeben (z. B. Kategorie „Standort" → Beschriftung
