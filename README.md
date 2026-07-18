@@ -1,5 +1,7 @@
 # VMware Kapazitätsplanung (Aria Operations)
 
+> 🇬🇧 [English version: README.en.md](README.en.md)
+
 Kapazitätsauswertung pro Cluster aus VMware Aria Operations mit browserbasiertem
 Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 
@@ -12,7 +14,10 @@ im Selektor und Spalten-Konfiguration (`python3 aria_kapa.py --sample --serve`).
 ## Funktionsüberblick
 
 Ein einzelnes Python-Skript (nur Standardbibliothek, **kein pip, kein Build**),
-das die Aria-Operations-Daten als Web-Dashboard aufbereitet.
+das die Aria-Operations-Daten als Web-Dashboard aufbereitet. Die
+**Oberflächensprache folgt dem Browser**: Deutsch bleibt Deutsch, jede andere
+Browsersprache bekommt Englisch (interne Werte, API und Audit-Log bleiben
+stabil deutsch).
 
 **Kapazität & Auswertung**
 - **Mehrere benannte vROps-Quellen** (optional): 1–3 (oder mehr) Aria-Operations-Systeme, je mit/ohne Proxy, gemischt zu einer Übersicht; jeder Cluster trägt ein Quellen-Badge (Voraussetzung: eindeutige Cluster-Namen)

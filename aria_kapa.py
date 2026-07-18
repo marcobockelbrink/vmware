@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.30"
+VERSION = "1.31"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1752,8 +1752,32 @@ async function login(ev) {
       body: JSON.stringify({ username: document.getElementById("u").value.trim(),
                              password: document.getElementById("p").value }) });
     if (r.ok) { location.reload(); return; }
-    e.textContent = (await r.json()).error || "Anmeldung fehlgeschlagen.";
-  } catch (x) { e.textContent = "Server nicht erreichbar."; }
+    e.textContent = tr((await r.json()).error || "Anmeldung fehlgeschlagen.");
+  } catch (x) { e.textContent = tr("Server nicht erreichbar."); }
+}
+// Browsersprache nicht Deutsch -> englische Beschriftung (Werte bleiben intern)
+const L_EN = {
+  "Anmeldung – VMware Kapazitätsplanung": "Sign in – VMware Capacity Planning",
+  "VMware Kapazitätsplanung": "VMware Capacity Planning",
+  "Anmeldung mit Active-Directory-Konto": "Sign in with your Active Directory account",
+  "Benutzername": "Username", "Passwort": "Password", "Anmelden": "Sign in",
+  "vorname.nachname": "first.last",
+  "Anmeldung fehlgeschlagen.": "Sign-in failed.",
+  "Server nicht erreichbar.": "Server unreachable.",
+  "Benutzername oder Passwort falsch.": "Wrong username or password.",
+  "Zu viele Fehlversuche – bitte einige Minuten warten und erneut versuchen.":
+    "Too many failed attempts – please wait a few minutes and try again."
+};
+const IS_DE = (navigator.language || "de").toLowerCase().startsWith("de");
+function tr(s) { return IS_DE ? s : (L_EN[(s || "").trim()] || s); }
+if (!IS_DE) {
+  document.documentElement.lang = "en";
+  document.title = tr(document.title);
+  document.querySelectorAll("h1,p,label,button").forEach(el => {
+    if (!el.children.length) el.textContent = tr(el.textContent);
+  });
+  const u = document.getElementById("u");
+  if (u) u.placeholder = tr(u.placeholder);
 }
 </script>
 </body>
@@ -3890,6 +3914,340 @@ if (SERVE) {
   pollStatus();
   setInterval(pollStatus, 3000);
   setInterval(tickTimer, 1000);
+}
+
+// ============================================================================
+// Sprache: Deutsch ist die Quelle im Code. Browser auf Deutsch -> alles bleibt
+// wie es ist. Jede andere Browsersprache -> Englisch: ein Wörterbuch übersetzt
+// NUR die Anzeige (Textknoten + Attribute) per MutationObserver. Interne Werte
+// (Status, API-Felder, gespeicherte Daten, Audit-Log) bleiben unverändert.
+// ============================================================================
+const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
+const I18N = {
+// --- Navigation / Kopf ---
+"Kapazitätsübersicht pro Cluster": "Capacity overview per cluster",
+"VMware Kapazitätsübersicht pro Cluster": "VMware capacity overview per cluster",
+"VMware Kapazitätsplanung": "VMware Capacity Planning",
+"Kapazität": "Capacity", "VLAN-Suche": "VLAN search", "Reservierungen": "Reservations",
+"Genehmigungen": "Approvals", "Archiv": "Archive", "Verwaltung": "Administration", "Log": "Log",
+"ℹ Info Kapa-Berechnung": "ℹ How capacity is calculated", "? Hilfe": "? Help",
+"Stand:": "Data as of:", "Abmelden": "Sign out",
+"+ Neue Kapazitätsanfrage": "+ New capacity request",
+"Neue Kapazitätsanfrage": "New capacity request",
+"⟳ Jetzt aktualisieren": "⟳ Refresh now",
+"CSV exportieren": "Export CSV",
+"Reservierungen exportieren (JSON)": "Export reservations (JSON)",
+"Reservierungen importieren (JSON)": "Import reservations (JSON)",
+"Reservierungen als CSV (Semikolon, für Excel)": "Reservations as CSV (semicolon, Excel-ready)",
+"Cluster filtern …": "Filter clusters …", "Cluster suchen …": "Search clusters …",
+"Schließen": "Close", "Ausblenden": "Hide", "Abbrechen": "Cancel", "Bestätigen": "Confirm",
+"Hinweis": "Notice", "Übernehmen": "Apply", "Zurücksetzen": "Reset",
+"⚙ Spalten": "⚙ Columns", "alle einblenden": "show all", "Spalten ein-/ausblenden": "Show/hide columns",
+// --- Kapazitätstabelle ---
+"Cluster": "Cluster", "Hosts": "Hosts", "VMs": "VMs", "vCPU frei": "vCPU free",
+"vCPU-Auslastung": "vCPU usage", "RAM frei (GB)": "RAM free (GB)", "RAM-Auslastung": "RAM usage",
+"Storage frei (GB)": "Storage free (GB)", "Storage-Auslastung": "Storage usage",
+"Res.": "Res.", "Workload (vROps)": "Workload (vROps)",
+"Cluster-Details anzeigen": "Show cluster details",
+"Kein Cluster entspricht dem Filter.": "No cluster matches the filter.",
+"(kein Cluster passt)": "(no matching cluster)",
+"Gesamt (alle Cluster)": "Total (all clusters)", "Gesamt (Filter)": "Total (filtered)",
+"Cluster-Selektor:": "Cluster selector:", "vROps": "vROps", "alle": "all",
+"Antrag passt": "Request fits", "Antrag überschreitet die freie Kapazität": "Request exceeds free capacity",
+// --- Detailkarte ---
+"CPU & RAM": "CPU & RAM", "Netzwerk": "Network", "Storage": "Storage",
+"Kapazitätsreservierungen": "Capacity reservations",
+"frei nach Reservierungen": "free after reservations", "reserviert": "reserved",
+"Keine Reservierungen.": "No reservations.", "Keine aktiven Reservierungen.": "No active reservations.",
+"Datastores/LUNs anzeigen": "Show datastores/LUNs", "keine Storage-Daten aus Aria": "no storage data from Aria",
+"Keine Storage-Daten aus Aria.": "No storage data from Aria.",
+"Keine Portgruppen-Daten aus Aria.": "No port group data from Aria.",
+"Keine Portgruppe passt zur Suche.": "No port group matches the search.",
+"Datastore / LUN": "Datastore / LUN", "Größe (GB)": "Size (GB)", "Belegt (GB)": "Used (GB)",
+"Frei (GB)": "Free (GB)", "Belegt %": "Used %", "Portgruppe": "Port group", "Portgruppen": "Port groups",
+"vSphere-Tags": "vSphere tags", "Host": "Host", "Cores": "Cores", "RAM GB": "RAM GB",
+"Storage GB": "Storage GB", "Server / Speicher": "Compute / memory",
+"IP-Adresse, Netz oder Portgruppen-Name suchen …": "Search IP address, subnet or port group name …",
+"VLAN / IP / Portgruppe suchen …": "Search VLAN / IP / port group …",
+"Details anzeigen": "Show details",
+"Portgruppen aller Cluster durchsuchen – z. B. nach einer IP-Adresse oder einem Netz aus dem Portgruppen-Namen. Das Ergebnis zeigt, an welchem Cluster das Netz hängt. Teil-Eingaben genügen (z. B.":
+  "Search port groups across all clusters – e.g. by an IP address or a subnet that is part of the port group name. The result shows which cluster the network is attached to. Partial input is fine (e.g.",
+// --- Formular neue Anfrage ---
+"Ziel-Cluster": "Target cluster", "Bezeichnung / Projekt": "Name / project",
+"Change / Jira Ticket (optional)": "Change / Jira ticket (optional)",
+"Change / Jira-Ticket": "Change / Jira ticket",
+"z. B. SAP-Erweiterung Q4": "e.g. SAP expansion Q4",
+"Beantragen": "Submit request", "+ Beantragen": "+ Submit request",
+"Freie Kapazität überschritten": "Free capacity exceeded",
+"Trotzdem beantragen": "Request anyway",
+"Die Reservierung überschreitet die freie Kapazität von": "The reservation exceeds the free capacity of",
+"Cluster unbekannt": "Unknown cluster",
+// --- Reservierungen / Archiv ---
+"Reservierungen durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …":
+  "Search reservations – name, cluster, change, requester, team, ID, status …",
+"Archiv durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …":
+  "Search archive – name, cluster, change, requester, team, ID, status …",
+"Reservierungen filtern …": "Filter reservations …", "Log filtern …": "Filter log …",
+"Benutzer filtern …": "Filter users …",
+"Anfrage / Projekt": "Request / project", "Anfrage": "Request",
+"Change": "Change", "vCPU": "vCPU", "RAM (GB)": "RAM (GB)", "Storage (GB)": "Storage (GB)",
+"von": "by", "Team": "Team", "gilt ab": "valid from", "gültig bis": "valid until",
+"Status": "Status", "entschieden von": "decided by", "beantragt am": "requested on",
+"erledigt am": "closed on", "Fortschritt": "Progress",
+"Kapa-ID": "Capa ID", "Eindeutige ID der Anfrage": "Unique request ID",
+"beantragt": "requested", "genehmigt": "approved", "abgelehnt": "rejected",
+"storniert": "cancelled", "durch": "by", "am": "on", "und": "and", "oder": "or",
+"nie": "never", "nein": "no", "– keine –": "– none –",
+"Archiv ist leer.": "The archive is empty.",
+"Archiv der": "Archive of", "abgelehnten": "rejected", "stornierten": "cancelled",
+"Kapazitätsanfragen (Historie, zählt nicht gegen die Kapazität). Sichtbarkeit wie bei den Reservierungen: Anforderer sehen die des eigenen Teams, Reviewer/Admin/Auditor alle.":
+  "capacity requests (history – does not count against capacity). Visibility as with reservations: requesters see their own team's, reviewers/admins/auditors see all.",
+"Anfrage stornieren": "Cancel request", "⦸ Storno": "⦸ Cancel",
+"Kommentar": "Comment", "Kommentar (optional)": "Comment (optional)",
+"kurze Begründung, max. 64 Zeichen": "short reason, max. 64 characters",
+// --- Genehmigungen ---
+"Cluster frei vCPU": "Cluster free vCPU", "Cluster frei RAM": "Cluster free RAM",
+"Frei im Ziel-Cluster nach genehmigten Reservierungen": "Free in target cluster after approved reservations",
+"Keine offenen Anträge – alles genehmigt.": "No open requests – everything approved.",
+"Antrag ablehnen": "Reject request", "Ablehnen": "Reject", "✕ Ablehnen": "✕ Reject",
+"Team ist dran": "team's turn",
+// --- Verwaltung: Reiter + Benutzer/Rollen ---
+"Benutzer & Rollen": "Users & roles", "Mail": "Mail", "Backup & Konfiguration": "Backup & configuration",
+"Benutzer und Rollen": "Users and roles", "Benutzer / AD-Gruppe": "User / AD group",
+"Benutzer": "User", "AD-Gruppe": "AD group", "Typ": "Type", "Rolle": "Role", "Aktion": "Action",
+"benutzer@firma.local oder vorname.nachname": "user@example.com or first.last",
+"– Team wählen –": "– select team –", "+ Zuweisen": "+ Assign",
+"Rolle/Team bearbeiten": "Edit role/team", "Zuweisung entfernen": "Remove assignment",
+"Rollenzuweisung entfernen": "Remove role assignment", "Entfernen": "Remove", "✕ Entfernen": "✕ Remove",
+"Noch keine Rollen zugewiesen.": "No roles assigned yet.",
+"Ohne Team: sieht nur eigene Anfragen bzw. kann nichts freigeben": "Without a team: sees only own requests / cannot approve",
+"Dieses Team gibt es nicht (mehr) – bitte neu zuweisen": "This team no longer exists – please reassign",
+"⚠ unbekannt": "⚠ unknown", "⚠ kein Team": "⚠ no team",
+"Administrator": "Administrator", "Anforderer": "Requester", "Reviewer": "Reviewer",
+"Technische Prüfung": "Technical audit",
+"(admin)": "(admin)", "(anforderer)": "(requester)", "(reviewer)": "(reviewer)", "(auditor)": "(auditor)",
+"AD-Mail: ": "AD mail: ",
+"keine AD-Mail aufgelöst (nur mit --ad-mail-attribute)": "no AD mail resolved (requires --ad-mail-attribute)",
+// --- Verwaltung: Rollen-Bezeichnungen / Teams ---
+"Rollen-Bezeichnungen": "Role labels", "Interne Rolle": "Internal role",
+"Angezeigte Bezeichnung": "Displayed label",
+"Die angezeigten Namen der Rollen sind frei wählbar. Die Rechte bleiben an der internen Rolle (linke Spalte) gebunden und ändern sich dadurch nicht.":
+  "Role display names can be chosen freely. Permissions stay bound to the internal role (left column) and are not affected.",
+"✓ Bezeichnungen speichern": "✓ Save labels",
+"Genehmigungs-Teams (Prüfreihenfolge)": "Approval teams (review order)",
+"Anträge durchlaufen die Teams von oben nach unten. Erst wenn alle Teams freigegeben haben, ist ein Antrag genehmigt. Ohne Teams gilt einstufig (Admin genehmigt direkt). Reviewer werden oben ihrem Team zugewiesen. Die":
+  "Requests pass through the teams from top to bottom. Only when all teams have approved is a request fully approved. Without teams, approval is single-stage (admin approves directly). Reviewers are assigned to their team above. The",
+"E-Mail / Verteiler (Team ist dran)": "Email / list (team's turn)", "E-Mail/Verteiler": "Email/list",
+"je Team wird angeschrieben, sobald das Team im Workflow an der Reihe ist (siehe „Mail-Benachrichtigungen\"); mit „✓ Team-Adressen speichern\" sichern.":
+  "each team is notified as soon as it is up in the workflow (see \"Mail notifications\"); save with \"✓ Save team addresses\".",
+"Neues Team, z. B. Team Betrieb": "New team, e.g. Operations team",
+"+ Hinzufügen": "+ Add", "nach oben": "move up", "nach unten": "move down",
+"✎ Umbenennen": "✎ Rename", "Team umbenennen": "Rename team", "Team entfernen": "Remove team",
+"✓ Speichern": "✓ Save", "✓ Team-Adressen speichern": "✓ Save team addresses",
+"Keine Teams – einstufig (Admin genehmigt direkt).": "No teams – single-stage (admin approves directly).",
+"team@firma.de": "team@example.com", "verteiler@firma.de": "list@example.com",
+// --- Verwaltung: Mail ---
+"Mail-Benachrichtigungen (je interner Rolle)": "Mail notifications (per internal role)",
+"Legt fest, bei welchem Ereignis eine Mail rausgeht.": "Defines which event triggers an email.",
+"= der jeweilige Antragsteller (automatisch).": "= the respective requester (automatic).",
+"= die eingetragene Verteiler-Adresse.": "= the configured distribution address.",
+"= die Team-Adresse aus der Teams-Tabelle (Reiter „Benutzer & Rollen\"). Voraussetzung ist ein konfigurierter SMTP-Server. „Freigabe\" meint die endgültige Genehmigung.":
+  "= the team address from the teams table (\"Users & roles\" tab). Requires a configured SMTP server. \"Approval\" means the final approval.",
+"= Antragsteller (automatisch)": "= requester (automatic)",
+"pro Team (Tabelle oben)": "per team (table above)",
+"Admin/Auditor": "Admin/Auditor", "Reviewer / „Team ist dran\"": "Reviewer / \"team's turn\"",
+"Anlage": "Created", "Ablehnung": "Rejection", "Freigabe": "Approval",
+"Verteiler-Adresse": "Distribution address",
+"✓ Mail-Regeln speichern": "✓ Save mail rules",
+"Mail-Vorlage (HTML)": "Mail template (HTML)",
+"Betreff und HTML-Text der Reservierungs-Mails. Verfügbare Variablen unten einfach anklicken, um sie an der Cursor-Position einzufügen. Leer lassen = eingebaute Standardvorlage. „Vorschau\" rendert die Vorlage mit Beispieldaten.":
+  "Subject and HTML body of the reservation emails. Click a variable below to insert it at the cursor position. Leave empty = built-in default template. \"Preview\" renders the template with sample data.",
+"Betreff": "Subject", "HTML-Text": "HTML body",
+"Standardbetreff": "Default subject", "Standardvorlage (leer lassen)": "Default template (leave empty)",
+"✓ Vorlage speichern": "✓ Save template", "Vorschau": "Preview", "Standard einsetzen": "Insert default",
+"Vorschau (Beispieldaten) · Betreff:": "Preview (sample data) · subject:",
+"Vorschau fehlgeschlagen.": "Preview failed.",
+"Speichern der Mail-Vorlage fehlgeschlagen.": "Saving the mail template failed.",
+"Ereignis (beantragt / genehmigt / abgelehnt / wartet auf Freigabe …)": "Event (requested / approved / rejected / awaiting approval …)",
+"Team / Abteilung des Anforderers": "Requester's team / department",
+"Gilt ab (Anlagedatum)": "Valid from (creation date)", "Gültig bis": "Valid until",
+"Freigaben (Liste der Team-Freigaben)": "Approvals (list of team approvals)",
+"letzter Kommentar": "last comment", "ausführende Person": "acting person",
+"Zeitpunkt der Mail": "time of the email",
+"aktuell zuständiges Team (bei „Team ist dran“)": "team currently up (for \"team's turn\")",
+"vROps-Quelle": "vROps source", "vCPU-Anzahl": "vCPU count",
+"RAM (inkl. „GB“)": "RAM (incl. \"GB\")", "Storage (inkl. „GB“)": "Storage (incl. \"GB\")",
+"SMTP / Versand (aus der Konfiguration)": "SMTP / delivery (from configuration)",
+// --- Verwaltung: Selektor / Tokens / Backup / Konfiguration ---
+"Cluster-Selektor (Filter nach vSphere-Tags)": "Cluster selector (filter by vSphere tags)",
+"Bis zu 3 Stufen, jede Stufe eine Tag-Kategorie. In der Kapazitätsübersicht erscheinen dann kaskadierende Auswahllisten (Stufe 2 zeigt nur Werte, die zur Wahl in Stufe 1 passen). Die Kategorien kommen aus den vorhandenen Cluster-Tags – sind noch keine Daten geladen, ist die Liste leer.":
+  "Up to 3 levels, each level one tag category. The capacity view then shows cascading dropdowns (level 2 only shows values matching the level-1 choice). Categories come from the existing cluster tags – if no data is loaded yet, the list is empty.",
+"Stufe": "Level", "Tag-Kategorie": "Tag category", "Anzeigename im Selektor": "Display name in selector",
+"Anzeigename (leer = Kategorie)": "Display name (empty = category)",
+"Kategorie derzeit in keinem Cluster-Tag": "category currently in no cluster tag",
+"Noch keine Tag-Kategorien – erst nach dem ersten Aria-Abruf verfügbar.": "No tag categories yet – available after the first Aria refresh.",
+"✓ Selektor speichern": "✓ Save selector",
+"⚠ derzeit ohne Werte": "⚠ currently without values",
+"API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)": "API tokens for external applications (read-only, endpoints under /api/v1/)",
+"API-Dokumentation öffnen": "Open API documentation",
+"(interaktiv, mit „Ausführen\") ·": "(interactive, with \"Run\") ·",
+"OpenAPI-Spec": "OpenAPI spec", "zum Import in Swagger/Postman.": "for import into Swagger/Postman.",
+"Anwendung": "Application", "Name der Anwendung, z. B. Grafana oder CMDB-Sync": "Application name, e.g. Grafana or CMDB sync",
+"+ Token erzeugen": "+ Create token", "Token-Anfang": "Token prefix",
+"zuletzt benutzt": "last used", "erstellt": "created", "angelegt": "created",
+"✕ Widerrufen": "✕ Revoke", "API-Token widerrufen": "Revoke API token", "Widerrufen": "Revoke",
+"Keine API-Tokens vorhanden.": "No API tokens.",
+"Neues API-Token – wird nur EINMAL angezeigt, jetzt kopieren:": "New API token – shown only ONCE, copy it now:",
+"Token konnte nicht erstellt werden.": "Token could not be created.",
+"Widerruf fehlgeschlagen.": "Revoke failed.",
+"Backup": "Backup", "💾 Backup jetzt erstellen": "💾 Create backup now",
+"Sichert alle Laufzeitdaten (Reservierungen, Rollen, Teams, Selektor, Log, Tokens) als tar.gz auf das konfigurierte SFTP-Ziel. Läuft automatisch nach dem konfigurierten Intervall – hier lässt sich ein Backup sofort auslösen.":
+  "Saves all runtime data (reservations, roles, teams, selector, log, tokens) as tar.gz to the configured SFTP target. Runs automatically at the configured interval – here you can trigger a backup immediately.",
+"Backup läuft … (kann einen Moment dauern)": "Backup running … (may take a moment)",
+"Konfiguration (schreibgeschützt)": "Configuration (read-only)",
+"Die im System gesetzten Werte (aus INI, kapa.env bzw. Kommandozeile). Nur zur Ansicht – Änderungen erfolgen in der Konfiguration und erfordern einen Neustart.":
+  "The values configured in the system (from INI, kapa.env or command line). View only – changes are made in the configuration and require a restart.",
+"Passwörter werden nie angezeigt": "Passwords are never shown",
+"(nur, ob gesetzt).": "(only whether they are set).",
+"Lade Konfiguration …": "Loading configuration …",
+"Datenquellen (vROps)": "Data sources (vROps)", "Datenquelle (vROps)": "Data source (vROps)",
+"Berechnung": "Calculation", "CPU-Faktor": "CPU factor", "Failover-Hosts (N+1)": "Failover hosts (N+1)",
+"vSAN-Faktor": "vSAN factor", "Reservierung gültig (Tage)": "Reservation valid (days)",
+"Uplink-Portgruppen anzeigen": "Show uplink port groups", "Ausschluss-Tag": "Exclusion tag",
+"Tag-Präfix": "Tag prefix", "(alle mit 'tag')": "(all containing 'tag')",
+"Auto-Refresh (Sek.)": "Auto-refresh (sec.)", "Mail / SMTP": "Mail / SMTP",
+"SMTP-Server": "SMTP server", "Absender": "Sender", "smtp-to (Fallback Admin)": "smtp-to (admin fallback)",
+"STARTTLS": "STARTTLS", "SMTP-Passwort gesetzt": "SMTP password set",
+"AD-Mail-Attribut": "AD mail attribute", "– (UPN)": "– (UPN)",
+"Ziel": "Target", "Port": "Port", "Intervall (Sek.)": "Interval (sec.)",
+"Aufbewahrung (Tage)": "Retention (days)", "SSH-Key": "SSH key",
+"Backup-Passwort gesetzt": "Backup password set", "– (kein Backup)": "– (no backup)",
+"– (kein Mailversand)": "– (no mail delivery)", "Active Directory": "Active Directory",
+"Domäne": "Domain", "Admin-User": "Admin user", "Service-Konto (Bind-DN)": "Service account (bind DN)",
+"Basis-DN": "Base DN", "Bind-Passwort gesetzt": "Bind password set",
+"– (keine AD-Anmeldung)": "– (no AD sign-in)", "Kontakt / Impressum": "Contact / imprint",
+"Webserver": "Web server", "Bind-Adresse": "Bind address", "Daten-Verzeichnis": "Data directory",
+"Datenspeicher": "Data store",
+// --- Log ---
+"Zeit": "Time",
+"Keine Log-Einträge": "No log entries",
+// --- Statuszeile / Meldungen / Dialoge ---
+"Server nicht erreichbar.": "Server unreachable.",
+"Speichern fehlgeschlagen.": "Saving failed.",
+"Löschen fehlgeschlagen.": "Deleting failed.",
+"Speichern der Teams fehlgeschlagen.": "Saving teams failed.",
+"Speichern des Selektors fehlgeschlagen.": "Saving the selector failed.",
+"Speichern der Mail-Regeln fehlgeschlagen.": "Saving mail rules failed.",
+"Umbenennen fehlgeschlagen (Name evtl. schon vergeben).": "Rename failed (name may already be taken).",
+"Reservierungen konnten nicht auf dem Server gespeichert werden.": "Reservations could not be saved on the server.",
+"Datei konnte nicht gelesen werden.": "File could not be read.",
+"Ungültige Datei.": "Invalid file.",
+"Alte Reservierungen übernehmen?": "Adopt old reservations?",
+"Benutzername oder Passwort falsch.": "Wrong username or password.",
+"Zu viele Fehlversuche – bitte einige Minuten warten und erneut versuchen.": "Too many failed attempts – please wait a few minutes and try again.",
+"Nicht angemeldet": "Not signed in",
+"Keine Berechtigung für diese Aktion": "No permission for this action",
+"✎ Bearbeiten": "✎ Edit", "✕ Löschen": "✕ Delete",
+"Hilfe": "Help", "Info Kapa-Berechnung": "How capacity is calculated"
+};
+// Muster mit variablen Teilen (ganzer Text)
+const I18N_RX = [
+  [/^Auto-Update in (\d+:\d\d) min$/, "Auto-update in $1 min"],
+  [/^in Prüfung \((\d+)\/(\d+)\)$/, "in review ($1/$2)"],
+  [/^Summe genehmigt \((\d+) von (\d+)\)$/, "Total approved ($1 of $2)"],
+  [/^(\d+) Anfragen$/, "$1 requests"], [/^(\d+) Anfrage$/, "$1 request"],
+  [/^(\d+) Einträge$/, "$1 entries"], [/^(\d+) Eintrag$/, "$1 entry"],
+  [/^Genehmigungen \((\d+)\)$/, "Approvals ($1)"],
+  [/^wartet auf: (.+)$/, "waiting for: $1"],
+  [/^wartet auf (.+)$/, "waiting for $1"],
+  [/^✓ Freigeben \((.+)\)$/, "✓ Approve ($1)"],
+  [/^✓ Freigeben$/, "✓ Approve"],
+  [/^(\d+) von (\d+)$/, "$1 of $2"],
+  [/^(\d+)% belegt$/, "$1% used"],
+  [/^(\d+)% belegt \(inkl\. Reservierungen\)$/, "$1% used (incl. reservations)"],
+  [/^\+ (\d+) genehmigte Reservierung\(en\) anderer Teams – in „reserviert“ berücksichtigt\.$/,
+   "+ $1 approved reservation(s) of other teams – included in \"reserved\"."],
+  [/^brutto ([\d.,]+) GB · mit Faktor ([\d.,]+) als nutzbar gerechnet$/,
+   "gross $1 GB · counted as usable with factor $2"],
+  [/^AD-Mail: (.+)$/, "AD mail: $1"],
+  [/^Spalte (\d+)$/, "Column $1"],
+  [/^(\d+) alte\(s\) Archiv\(e\) gelöscht$/, "$1 old archive(s) deleted"],
+  [/^Team „(.+)“ aus dem Genehmigungsprozess entfernen\?$/, "Remove team „$1“ from the approval process?"],
+  [/^Rollenzuweisung für „(.+)“ entfernen\?$/, "Remove role assignment for „$1“?"],
+  [/^Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor ([\d.,]+) \(physische Cores\).*abgezogen$/,
+   "Source: VMware Aria Operations · CPU overcommit: factor $1 (physical cores) · RAM 1:1 · all VMs incl. powered-off · “free” accounts for approved reservations · failover spare (N+1): largest host per cluster deducted"],
+  [/^Klick auf den Clusternamen zeigt Details und Reservierungen\. Neue Reservierungen gelten ab dem Anlagetag für (\d+) Tage.*nach (\d+) Tagen automatisch entfernt\. Speicherung zentral auf dem Server\. Genehmigung mehrstufig: (.+) \(erst wenn alle freigegeben haben, ist der Antrag genehmigt\)\.$/,
+   "Click a cluster name to see details and reservations. New reservations are valid from the day of creation for $1 days, count against capacity only after approval and are removed automatically after $2 days. Stored centrally on the server. Multi-stage approval: $3 (a request is approved only once all teams have signed off)."],
+  [/^Klick auf den Clusternamen zeigt Details und Reservierungen\. Neue Reservierungen gelten ab dem Anlagetag für (\d+) Tage.*nach (\d+) Tagen automatisch entfernt\. Speicherung zentral auf dem Server\.$/,
+   "Click a cluster name to see details and reservations. New reservations are valid from the day of creation for $1 days, count against capacity only after approval and are removed automatically after $2 days. Stored centrally on the server."]
+];
+// Teil-Ersetzungen nur für zusammengesetzte Meta-Zeilen (Gate: enthält " · ")
+const I18N_SUB = [
+  [/VMware Kapazitätsplanung/g, "VMware Capacity Planning"],
+  [/Quelle: /g, "Source: "], [/ nutzbare Cores/g, " usable cores"],
+  [/\(davon (\d+) aus\)/g, "($1 powered off)"], [/(\d+) genehmigt/g, "$1 approved"],
+  [/(\d+) beantragt/g, "$1 requested"], [/(\d+) abgelehnt/g, "$1 rejected"],
+  [/größter Host als Reserve/g, "largest host held as spare"]
+];
+// Teil-Ersetzungen für Status-Tooltips ("genehmigt von X am Y · Kommentar: Z")
+const I18N_TIP = [
+  [/^Bereits freigegeben:/, "Already approved:"], [/wartet auf: /g, "waiting for: "],
+  [/ von /g, " by "], [/ am /g, " on "], [/ in Stufe „/g, " at stage „"],
+  [/· Kommentar: /g, "· comment: "],
+  [/^abgelehnt/, "rejected"], [/^storniert/, "cancelled"], [/^genehmigt/, "approved"]
+];
+function i18nText(s) {
+  const lead = s.match(/^\s*/)[0], tail = s.match(/\s*$/)[0];
+  const key = s.replace(/\s+/g, " ").trim();
+  if (!key) return s;
+  const wrap = t => lead + t + tail;      // Leerraum um den Knoten erhalten
+  const hit = I18N[key];
+  if (hit !== undefined) return wrap(hit);
+  for (const [rx, rep] of I18N_RX) if (rx.test(key)) return wrap(key.replace(rx, rep));
+  if (/^(abgelehnt|storniert|genehmigt|Bereits freigegeben:)/.test(key)) {
+    let out = key;
+    for (const [rx, rep] of I18N_TIP) out = out.replace(rx, rep);
+    return wrap(out);
+  }
+  if (key.includes(" · ")) {
+    let out = key;
+    for (const [rx, rep] of I18N_SUB) out = out.replace(rx, rep);
+    return wrap(out);
+  }
+  return s;
+}
+const I18N_ATTRS = ["placeholder", "title", "aria-label", "data-label"];
+const I18N_SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, CODE: 1 };
+function i18nTree(root) {
+  if (root.nodeType === 3) {
+    const p = root.parentNode;
+    if (p && I18N_SKIP[p.nodeName]) return;
+    const t = i18nText(root.data);
+    if (t !== root.data) root.data = t;
+    return;
+  }
+  if (root.nodeType !== 1 || I18N_SKIP[root.nodeName]) return;
+  for (const a of I18N_ATTRS) {
+    const v = root.getAttribute && root.getAttribute(a);
+    if (v) { const t = i18nText(v); if (t !== v) root.setAttribute(a, t); }
+  }
+  if (root.nodeName === "INPUT" && (root.type === "button" || root.type === "submit") && root.value) {
+    const t = i18nText(root.value);
+    if (t !== root.value) root.value = t;
+  }
+  let n = root.firstChild;
+  while (n) { const next = n.nextSibling; i18nTree(n); n = next; }
+}
+if (LANG === "en") {
+  document.documentElement.lang = "en";
+  document.title = i18nText(document.title);
+  i18nTree(document.body);
+  new MutationObserver(muts => {
+    for (const m of muts) {
+      if (m.type === "characterData") i18nTree(m.target);
+      else m.addedNodes.forEach(n => i18nTree(n));
+    }
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
 }
 </script>
 </body>
