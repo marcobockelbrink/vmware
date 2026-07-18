@@ -257,6 +257,11 @@ python3 aria_kapa.py --sample                # statisch
 python3 aria_kapa.py --sample --serve        # Server-Modus
 ```
 
+Eine fertig generierte Demo liegt als
+[`kapa_dashboard_demo.html`](kapa_dashboard_demo.html) im Repo — herunterladen
+und im Browser öffnen, ganz ohne Installation (Reservierungen landen dann nur
+im localStorage des Browsers).
+
 ## Reservierungen (Kapazitätsanfragen)
 
 Anlegen per Dialog („+ Neue Kapazitätsanfrage") oder direkt in der

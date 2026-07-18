@@ -246,6 +246,11 @@ python3 aria_kapa.py --sample                # static
 python3 aria_kapa.py --sample --serve        # server mode
 ```
 
+A pre-built demo ships in the repo as
+[`kapa_dashboard_demo.html`](kapa_dashboard_demo.html) — download it and open
+it in a browser, no installation needed (reservations then live in the
+browser's localStorage only).
+
 ## Reservations (capacity requests)
 
 Create via the dialog ("+ New capacity request") or directly in a cluster's
