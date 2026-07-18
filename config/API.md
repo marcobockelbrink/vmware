@@ -75,6 +75,9 @@ Cluster-Kapazitäten aus dem letzten Aria-Abruf:
                "vcpuCap": 384, "vcpuUsed": 370, "vcpuFree": 14,
                "ramCap": 1024.0, "ramUsed": 1504.0, "ramFree": -480.0,
                "storageCap": 24000.0, "storageUsed": 17826.0, "storageFree": 6174.0,
+               "tanzuVcpu": 12, "tanzuRamGb": 128.0,
+               "namespaces": [{"name": "ns-webshop-prod", "cpu_mhz": 20000,
+                               "vcpu": 8, "ram_gb": 96.0}],
                "vmCount": 93, "vmOff": 8, "hosts": [...], "vms": [...]}]}
 ```
 

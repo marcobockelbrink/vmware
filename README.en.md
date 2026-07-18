@@ -27,6 +27,9 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 - **N+1 failover reserve** (`--failover-hosts`), **vSAN factor** for usable net capacity, VM **exclusion by tag**
 - **Storage drill-down** per LUN/datastore (sortable), **vSphere tags** per cluster
 - **Workload %** per cluster from vROps (hidden from requesters — also server-side)
+- **Tanzu/Kubernetes namespaces**: CPU/RAM **reservations of vSphere namespaces**
+  automatically count against free capacity (like approved reservations);
+  per-cluster drill-down, `tanzu-mhz-per-vcpu` for the MHz→vCPU conversion
 - **Cluster selector**: vROps source filter + up to 3 cascading tag filters; **filter/search fields**, **sortable tables**
 - **Show/hide columns** in all data tables ("⚙ Columns", stored per user)
 - **Auto-refresh** with estimated progress; export as **CSV/JSON**
@@ -214,6 +217,20 @@ rejections, cancellations and backups:
   read best effort and shown as a key figure in the cluster detail card —
   **hidden from the requester role** (neither in the UI nor in the payload).
   Log: `Cluster-Workload gelesen: N/M`.
+- **Tanzu/vSphere namespaces**: if vSphere with Tanzu runs on a cluster, the
+  **namespace reservations** (CPU/RAM) are read from vROps and count — like
+  approved manual reservations — against free capacity. The CPU reservation
+  arrives in **MHz** and is converted to **vCPU equivalents** (rounded up) via
+  `tanzu-mhz-per-vcpu` (default 2500, `0` = do not count CPU). The detail card
+  shows a dedicated "Tanzu namespaces" section listing every namespace (MHz,
+  vCPU equivalent, RAM) plus the "of which Tanzu namespaces" key figure. TKG
+  worker VMs are already included in usage as regular VMs — the namespace
+  reservation additionally covers committed capacity that has not
+  materialized yet (deliberately conservative). The fetch is best effort:
+  resource kind and stat keys vary by vROps version, so the system probes
+  candidates and logs the outcome (`Tanzu: … Namespaces gefunden`,
+  `erkannte Schlüssel: …`) — check the log against your real vROps after the
+  first refresh. Without Tanzu the fetch finds nothing and changes nothing.
 - **Cluster detail card everywhere**: clicking a **cluster name** opens the
   detail card — not only in the capacity overview but also in reservations,
   approvals and the VLAN search.

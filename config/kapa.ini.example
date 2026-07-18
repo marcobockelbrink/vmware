@@ -59,6 +59,10 @@ cpu-factor = 6
 failover-hosts = 1
 vsan-factor = 0.5                 ; vSAN-Bruttokapazität nur anteilig nutzbar
 res-ttl-days = 31
+# Tanzu-/vSphere-Namespaces: deren CPU-/RAM-Reservierungen zählen automatisch
+# gegen die freie Kapazität (ohne Tanzu passiert nichts). Die CPU-Reservierung
+# kommt in MHz aus vROps und wird so in vCPU-Äquivalente umgerechnet:
+#tanzu-mhz-per-vcpu = 2500        ; MHz je vCPU (0 = CPU nicht zählen, nur RAM)
 
 # --- Kapa-ID neuer Reservierungen ---------------------------------------------
 # Aufbau: <id-prefix><Zufallsteil>. Prefix optional (Buchstaben/Ziffern/-/_),

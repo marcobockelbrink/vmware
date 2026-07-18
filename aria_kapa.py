@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.1.1"
+VERSION = "2.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1021,7 +1021,7 @@ def strip_uplinks(clusters, hide=True):
 
 
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
-            tag_property="", vsan_factor=0.5):
+            tag_property="", vsan_factor=0.5, tanzu_mhz=2500):
     # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
     # grob geschätzten Prozentwert über report().
     log = lambda m: print(m, file=sys.stderr)
@@ -1366,17 +1366,120 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     except Exception as e:
         log(f"Netzwerk-Daten (dvSwitch) nicht verfügbar: {e}")
 
+    # Tanzu-/vSphere-Namespaces: deren RESERVIERUNGEN zählen gegen die freie
+    # Kapazität (analog zu genehmigten manuellen Reservierungen). Best effort –
+    # Resource-Kind und Stat-Keys unterscheiden sich je nach vROps-Version,
+    # deshalb Kandidatenlisten und ein ausführliches Log zum Gegenprüfen.
+    # Ohne Tanzu findet der Abruf schlicht nichts und ändert nichts.
+    NS_KINDS = ["Namespace", "SupervisorNamespace", "K8sNamespace",
+                "vSphereNamespace"]
+    # CPU-Reservierung in MHz (Kandidaten), RAM-Reservierung mit Einheit je Key
+    NS_CPU_KEYS = ["config|cpuAllocation|reservation", "cpu|reservation",
+                   "configuration|cpuReservation", "summary|config|cpuReservation"]
+    NS_MEM_KEYS = [("config|memAllocation|reservation", "MB"),
+                   ("mem|reservation", "KB"),
+                   ("configuration|memoryReservation", "MB"),
+                   ("summary|config|memReservation", "MB")]
+    try:
+        report(92)
+        namespaces = []
+        for kind in NS_KINDS:
+            try:
+                namespaces = api.resources(kind)
+            except Exception:
+                namespaces = []
+            if namespaces:
+                log(f"Tanzu: {len(namespaces)} Namespaces gefunden (Kind: {kind})")
+                break
+        if namespaces:
+            ns_ids = [n["identifier"] for n in namespaces]
+            all_keys = NS_CPU_KEYS + [k for k, _ in NS_MEM_KEYS]
+            ns_props = api.properties(ns_ids, all_keys)
+            ns_stats = api.latest_stats(ns_ids, all_keys)
+            hit_keys = set()
+            for ns in namespaces:
+                nid = ns["identifier"]
+                nname = name_of(ns)
+                merged = dict(ns_stats.get(nid) or {})
+                merged.update({k: v for k, v in (ns_props.get(nid) or {}).items()
+                               if v not in (None, "")})
+                cpu_mhz = 0.0
+                for k in NS_CPU_KEYS:
+                    try:
+                        v = float(merged.get(k))
+                    except (TypeError, ValueError):
+                        continue
+                    if v > 0:
+                        cpu_mhz = v
+                        hit_keys.add(k)
+                        break
+                ram_gb = 0.0
+                for k, unit in NS_MEM_KEYS:
+                    try:
+                        v = float(merged.get(k))
+                    except (TypeError, ValueError):
+                        continue
+                    if v > 0:
+                        ram_gb = v / (1024.0 * 1024.0 if unit == "KB" else 1024.0)
+                        hit_keys.add(k)
+                        break
+                if cpu_mhz <= 0 and ram_gb <= 0:
+                    continue
+                # Cluster über die Beziehungen finden (Namespace -> Supervisor
+                # = ClusterComputeResource; notfalls über einen Host)
+                cl_name = ""
+                try:
+                    rel = api.related(nid, kinds={"ClusterComputeResource"})
+                    if rel:
+                        rid = rel[0]
+                        cl_name = next((name_of(c) for c in clusters
+                                        if c["identifier"] == rid), "")
+                except Exception:
+                    pass
+                if cl_name and cl_name in data:
+                    data[cl_name].setdefault("namespaces", []).append(
+                        {"name": nname, "cpu_mhz": round(cpu_mhz),
+                         "ram_gb": round(ram_gb, 1)})
+                else:
+                    log(f"Tanzu: Namespace '{nname}' keinem Cluster zuordenbar "
+                        "(Beziehungen prüfen)")
+            n_used = sum(len(d.get("namespaces") or []) for d in data.values())
+            log("Tanzu: Reservierungen übernommen: "
+                + (", ".join(f"{cl}={len(d['namespaces'])}"
+                             for cl, d in data.items() if d.get("namespaces"))
+                   or "keine (Reservierungen 0 oder Zuordnung fehlt)")
+                + (f" · erkannte Schlüssel: {sorted(hit_keys)}" if n_used else ""))
+        else:
+            log("Tanzu: keine Namespace-Ressourcen gefunden (Kinds: "
+                + ", ".join(NS_KINDS) + ") – ohne Tanzu ist das normal")
+    except Exception as e:
+        log(f"Tanzu-Namespaces nicht verfügbar: {e}")
+
     report(100)
-    return build_summary(data, cpu_factor, failover_hosts)
+    return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz)
 
 
-def build_summary(data, cpu_factor, failover_hosts=1):
+def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500):
     """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}
 
     Pro Cluster werden die größten `failover_hosts` Hosts als Ausfallreserve
-    (N+1) von der Gesamtkapazität abgezogen."""
+    (N+1) von der Gesamtkapazität abgezogen. Tanzu-Namespace-Reservierungen
+    (CPU in MHz, RAM in GB) werden als vCPU-Äquivalent (tanzu_mhz MHz je vCPU,
+    0 = CPU nicht zählen) bzw. GB ausgewiesen und zählen wie genehmigte
+    Reservierungen gegen die freie Kapazität."""
     clusters = []
     for cl, d in sorted(data.items()):
+        ns_list = []
+        for ns in (d.get("namespaces") or []):
+            mhz = float(ns.get("cpu_mhz") or 0)
+            vcpu = (int(-(-mhz // tanzu_mhz)) if tanzu_mhz > 0 and mhz > 0 else 0)
+            ns_list.append({"name": ns.get("name") or "?",
+                            "cpu_mhz": round(mhz),
+                            "vcpu": vcpu,
+                            "ram_gb": round(float(ns.get("ram_gb") or 0), 1)})
+        ns_list.sort(key=lambda n: (n["ram_gb"], n["vcpu"]), reverse=True)
+        tz_vcpu = sum(n["vcpu"] for n in ns_list)
+        tz_ram = round(sum(n["ram_gb"] for n in ns_list), 1)
         n_spare = min(max(0, failover_hosts), max(0, len(d["hosts"]) - 1))
         spare_cores = sum(sorted((h["cores"] for h in d["hosts"]), reverse=True)[:n_spare])
         spare_ram = sum(sorted((h["ram_gb"] for h in d["hosts"]), reverse=True)[:n_spare])
@@ -1418,6 +1521,9 @@ def build_summary(data, cpu_factor, failover_hosts=1):
             "portgroups": list(d.get("portgroups") or []),
             "workload": d.get("workload"),
             "source": d.get("source"),
+            "namespaces": ns_list,
+            "tanzuVcpu": tz_vcpu,
+            "tanzuRamGb": tz_ram,
             "hosts": d["hosts"],
             "vms": d["vms"],
         })
@@ -1471,9 +1577,17 @@ def sample_data():
         # ausgeblendet (siehe --show-uplink-portgroups).
         pgs.append({"name": f"dvSwitch-{cl}-DVUplinks", "vlan": "0-4094"})
         pgs.sort(key=lambda x: x["name"].lower())
+        # Tanzu-Demo: Cluster 1 und 3 tragen Namespace-Reservierungen
+        namespaces = []
+        if ci == 1:
+            namespaces = [{"name": "ns-webshop-prod", "cpu_mhz": 20000, "ram_gb": 96.0},
+                          {"name": "ns-ci-runner", "cpu_mhz": 8000, "ram_gb": 32.0}]
+        elif ci == 3:
+            namespaces = [{"name": "ns-data-analytics", "cpu_mhz": 12000, "ram_gb": 64.0}]
         data[cl] = {"hosts": hosts, "vms": vms, "tags": tags, "portgroups": pgs,
                     "workload": random.choice([38, 52, 61, 74, 83]),
                     "source": "RZ-Nord" if ci <= 2 else "RZ-Sued",
+                    "namespaces": namespaces,
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
 
@@ -1522,6 +1636,15 @@ def openapi_spec(lang="de"):
             "vmCount": {"type": "integer"}, "vmOff": {"type": "integer"},
             "workload": {"type": "integer", "nullable": True,
                          "description": T("vROps-Workload-Badge in % (nicht für Anforderer)", "vROps workload badge in % (not for requesters)")},
+            "tanzuVcpu": {"type": "integer",
+                          "description": T("vCPU-Äquivalent der Tanzu-Namespace-Reservierungen", "vCPU equivalent of Tanzu namespace reservations")},
+            "tanzuRamGb": {"type": "number",
+                           "description": T("RAM-Reservierungen der Tanzu-Namespaces (GB)", "RAM reservations of the Tanzu namespaces (GB)")},
+            "namespaces": {"type": "array",
+                           "description": T("Tanzu-/vSphere-Namespaces mit Reservierungen", "Tanzu/vSphere namespaces with reservations"),
+                           "items": {"type": "object", "properties": {
+                               "name": {"type": "string"}, "cpu_mhz": {"type": "number"},
+                               "vcpu": {"type": "integer"}, "ram_gb": {"type": "number"}}}},
             "portgroups": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "vlan": {"type": "string"}}}},
         },
@@ -2348,6 +2471,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script>
 let CLUSTERS = __DATA__;
 const FACTOR = __FACTOR__;
+const TANZU_MHZ = __TANZU_MHZ__;   // MHz je vCPU-Äquivalent (Tanzu-Namespaces)
 const SERVE = __SERVE__;
 const TTL = __TTL__;
 const ME = __USERINFO__;   // {user, role} bei aktivierter AD-Anmeldung, sonst null
@@ -2643,10 +2767,12 @@ function isPend(r) { return !r.approved && !r.rejected && !r.cancelled; }
 function sumCpu(rv) { return rv.reduce((s,r)=>s+(r.vcpu||0),0); }
 function sumRam(rv) { return Math.round(rv.reduce((s,r)=>s+(r.ram_gb||0),0)*10)/10; }
 
+// Tanzu-Namespace-Reservierungen des Clusters (zählen wie genehmigte Reservierungen)
+function tzOf(c) { return { cpu: c.tanzuVcpu || 0, ram: c.tanzuRamGb || 0 }; }
 function freeAfter(c) {
-  const rv = resFor(c.name);
-  return { cpu: c.vcpuFree - sumCpu(rv),
-           ram: Math.round((c.ramFree - sumRam(rv)) * 10) / 10,
+  const rv = resFor(c.name), tz = tzOf(c);
+  return { cpu: c.vcpuFree - sumCpu(rv) - tz.cpu,
+           ram: Math.round((c.ramFree - sumRam(rv) - tz.ram) * 10) / 10,
            stor: Math.round(((c.storageFree || 0) - sumStorage(rv)) * 10) / 10,
            hasStor: (c.storageCap || 0) > 0 };
 }
@@ -2899,7 +3025,9 @@ function metric(label, used, resv, cap, unit) {
 function card(c, idx, isTotal) {
   const clRes = isTotal ? RES.filter(r => !TOTAL || TOTAL._names.has(r.cluster)) : allFor(c.name);
   const rv = clRes.filter(r => r.approved && !r.cancelled);
-  const rvCpu = sumCpu(rv), rvRam = sumRam(rv), rvStor = sumStorage(rv);
+  const tz = tzOf(c);   // Tanzu-Namespace-Reservierungen zählen wie genehmigte
+  const rvCpu = sumCpu(rv) + tz.cpu, rvRam = Math.round((sumRam(rv) + tz.ram) * 10) / 10,
+        rvStor = sumStorage(rv);
   const hasStor = (c.storageCap || 0) > 0;
   const vmRows = (c.vms || []).sort((a,b)=>b.vcpu-a.vcpu).map(v =>
     `<tr class="${v.on?'':'off'}"><td>${esc(v.name)}${v.on?'':' (aus)'}</td>
@@ -2956,9 +3084,19 @@ function card(c, idx, isTotal) {
     <div class="kpis">
       <div class="kpi">frei nach Reservierungen<b>${fmt(c.vcpuFree - rvCpu)} vCPU / ${fmt(Math.round((c.ramFree - rvRam)*10)/10)} GB</b></div>
       <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
+      ${(tz.cpu || tz.ram) ? `<div class="kpi">davon Tanzu-Namespaces<b>${fmt(tz.cpu)} vCPU / ${fmt(tz.ram)} GB</b></div>` : ""}
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
       ${(c.workload != null && ROLE !== "anforderer") ? `<div class="kpi">Workload (vROps)<b style="color:${color(c.workload)}">${c.workload} %</b></div>` : ""}
     </div>
+    ${(c.namespaces || []).length ? `
+    <div class="resbox">
+      <h3>Tanzu-Namespaces (${c.namespaces.length})</h3>
+      <div style="color:var(--muted);font-size:12px;margin:4px 0 6px">
+        Kubernetes-Namespace-Reservierungen aus vROps – zählen wie genehmigte
+        Reservierungen gegen die freie Kapazität (CPU: ${fmt(TANZU_MHZ)} MHz je vCPU).</div>
+      <table><tr><th>Namespace</th><th class="num">CPU (MHz)</th><th class="num">vCPU-Äquiv.</th><th class="num">RAM (GB)</th>${isTotal ? "" : ""}</tr>
+      ${c.namespaces.map(n => `<tr><td>${esc(n.name)}</td><td class="num">${fmt(n.cpu_mhz)}</td><td class="num">${fmt(n.vcpu)}</td><td class="num">${fmt(n.ram_gb)}</td></tr>`).join("")}</table>
+    </div>` : ""}
     <div class="resbox">
       <h3>Kapazitätsreservierungen</h3>
       ${resTable}
@@ -3090,7 +3228,10 @@ function row(c, idx, isTotal) {
   const clRes = isTotal ? RES.filter(r => TOTAL._names.has(r.cluster)) : allFor(c.name);
   const rv = clRes.filter(r => r.approved && !r.cancelled);
   const pend = clRes.filter(isPend).length;
-  const rvCpu = sumCpu(rv), rvRam = sumRam(rv), rvStor = sumStorage(rv);
+  const tz = tzOf(c);
+  const rvCpu = sumCpu(rv) + tz.cpu,
+        rvRam = Math.round((sumRam(rv) + tz.ram) * 10) / 10,
+        rvStor = sumStorage(rv);
   const fCpu = c.vcpuFree - rvCpu;
   const fRam = Math.round((c.ramFree - rvRam) * 10) / 10;
   const cCpu = color(pct(c.vcpuUsed + rvCpu, c.vcpuCap));
@@ -3865,6 +4006,9 @@ function render() {
     spareCores: vis.reduce((s,c)=>s+(c.spareCores||0),0),
     spareRamGb: Math.round(vis.reduce((s,c)=>s+(c.spareRamGb||0),0)*10)/10,
     datastores: vis.reduce((s,c)=>s.concat(c.datastores||[]),[]),
+    tanzuVcpu: vis.reduce((s,c)=>s+(c.tanzuVcpu||0),0),
+    tanzuRamGb: Math.round(vis.reduce((s,c)=>s+(c.tanzuRamGb||0),0)*10)/10,
+    namespaces: vis.reduce((s,c)=>s.concat(c.namespaces||[]),[]),
     _names: new Set(vis.map(c => c.name)),
   };
   TOTAL.vcpuFree = TOTAL.vcpuCap - TOTAL.vcpuUsed;
@@ -4331,7 +4475,10 @@ const I18N = {
 "aktiv – Popup wird angezeigt": "active – popup is shown",
 "✓ Ankündigung speichern": "✓ Save announcement",
 "Verstanden": "Got it",
-"Speichern der Ankündigung fehlgeschlagen.": "Saving the announcement failed."
+"Speichern der Ankündigung fehlgeschlagen.": "Saving the announcement failed.",
+// --- Tanzu-Namespaces ---
+"davon Tanzu-Namespaces": "of which Tanzu namespaces",
+"Namespace": "Namespace", "CPU (MHz)": "CPU (MHz)", "vCPU-Äquiv.": "vCPU equiv."
 };
 // Muster mit variablen Teilen (ganzer Text)
 const I18N_RX = [
@@ -4358,6 +4505,9 @@ const I18N_RX = [
   [/^Team „(.+)“ aus dem Genehmigungsprozess entfernen\?$/, "Remove team „$1“ from the approval process?"],
   [/^Zuletzt geändert: (.+?) durch (.+)$/, "Last changed: $1 by $2"],
   [/^Zuletzt geändert: (.+)$/, "Last changed: $1"],
+  [/^Tanzu-Namespaces \((\d+)\)$/, "Tanzu namespaces ($1)"],
+  [/^Kubernetes-Namespace-Reservierungen aus vROps – zählen wie genehmigte Reservierungen gegen die freie Kapazität \(CPU: ([\d.,]+) MHz je vCPU\)\.$/,
+   "Kubernetes namespace reservations from vROps – count against free capacity like approved reservations (CPU: $1 MHz per vCPU)."],
   [/^Rollenzuweisung für „(.+)“ entfernen\?$/, "Remove role assignment for „$1“?"],
   [/^Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor ([\d.,]+) \(physische Cores\).*abgezogen$/,
    "Source: VMware Aria Operations · CPU overcommit: factor $1 (physical cores) · RAM 1:1 · all VMs incl. powered-off · “free” accounts for approved reservations · failover spare (N+1): largest host per cluster deducted"],
@@ -4556,7 +4706,7 @@ def _html_escape(s):
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
                 contact="", selector=None, backup=False, notify=None, prefs=None,
-                announce=None):
+                announce=None, tanzu_mhz=2500):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -4577,6 +4727,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
     return (HTML_TEMPLATE
             .replace("__DATA__", json_for_html(clusters))
             .replace("__FACTOR__", str(cpu_factor))
+            .replace("__TANZU_MHZ__", str(int(tanzu_mhz)))
             .replace("__SERVE__", "true" if serve_mode else "false")
             .replace("__TTL__", str(res_ttl))
             .replace("__USERINFO__", json_for_html(userinfo))
@@ -4596,10 +4747,11 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
 
 
 def render_dashboard(clusters, cpu_factor, path, res_ttl=31, failover_hosts=1,
-                     contact=""):
+                     contact="", tanzu_mhz=2500):
     with open(path, "w", encoding="utf-8") as f:
         f.write(render_html(clusters, cpu_factor, res_ttl=res_ttl,
-                            failover_hosts=failover_hosts, contact=contact))
+                            failover_hosts=failover_hosts, contact=contact,
+                            tanzu_mhz=tanzu_mhz))
 
 # ------------------------------------------------------------- Serve-Modus ---
 
@@ -5388,7 +5540,9 @@ def serve(args, password):
         try:
             if args.sample:
                 time.sleep(2)  # Demo: Ladezeit simulieren
-                clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
+                clusters = build_summary(sample_data(), args.cpu_factor,
+                                         args.failover_hosts,
+                                         args.tanzu_mhz_per_vcpu)
             else:
                 clusters, errors = [], []
                 for i, s in enumerate(sources):
@@ -5405,7 +5559,8 @@ def serve(args, password):
                                      failover_hosts=args.failover_hosts,
                                      exclude_tag=args.exclude_tag,
                                      tag_property=args.tag_property,
-                                     vsan_factor=args.vsan_factor)
+                                     vsan_factor=args.vsan_factor,
+                                     tanzu_mhz=args.tanzu_mhz_per_vcpu)
                         for c in cl:
                             if s["name"]:
                                 c["source"] = s["name"]
@@ -5628,7 +5783,8 @@ def serve(args, password):
                                        backup=bool(args.backup_target),
                                        notify=notify_cfg,
                                        prefs=user_prefs(s["user"]) if s else {},
-                                       announce=public_announce()),
+                                       announce=public_announce(),
+                                       tanzu_mhz=args.tanzu_mhz_per_vcpu),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 s = self._require()
@@ -6458,6 +6614,10 @@ def main():
     ap.add_argument("--backup-password-file", help="Datei mit dem Backup-SSH-Passwort")
     ap.add_argument("--auth-source", default="local", help="Auth-Quelle (Standard: local)")
     ap.add_argument("--cpu-factor", type=int_or(6), default=6, help="CPU-Überprovisionierungsfaktor (Standard: 6)")
+    ap.add_argument("--tanzu-mhz-per-vcpu", type=int_or(2500), default=2500,
+                    help="Umrechnung der Tanzu-Namespace-CPU-Reservierung (MHz) "
+                         "in vCPU-Äquivalente (Standard: 2500 MHz je vCPU; "
+                         "0 = CPU-Reservierungen der Namespaces nicht zählen)")
     ap.add_argument("--failover-hosts", type=int_or(1), default=1,
                     help="Ausfall-Hosts pro Cluster (N+1): die größten N Hosts werden "
                          "von der Kapazität abgezogen (Standard: 1, 0 = aus)")
@@ -6709,7 +6869,8 @@ def main():
         return
 
     if args.sample:
-        clusters = build_summary(sample_data(), args.cpu_factor, args.failover_hosts)
+        clusters = build_summary(sample_data(), args.cpu_factor,
+                                 args.failover_hosts, args.tanzu_mhz_per_vcpu)
     else:
         valid = [s for s in args.sources if s["url"] and s["user"]]
         if not valid:
@@ -6722,7 +6883,8 @@ def main():
             cl = collect(api, args.cpu_factor, failover_hosts=args.failover_hosts,
                          exclude_tag=args.exclude_tag,
                          tag_property=args.tag_property,
-                         vsan_factor=args.vsan_factor)
+                         vsan_factor=args.vsan_factor,
+                         tanzu_mhz=args.tanzu_mhz_per_vcpu)
             for c in cl:
                 if s["name"]:
                     c["source"] = s["name"]
@@ -6736,7 +6898,8 @@ def main():
 
     render_dashboard(clusters, args.cpu_factor, args.output,
                      args.res_ttl_days, args.failover_hosts,
-                     contact=args.contact_info)
+                     contact=args.contact_info,
+                     tanzu_mhz=args.tanzu_mhz_per_vcpu)
 
     print(f"\n{'Cluster':<22}{'Hosts':>6}{'Cores':>7}{'vCPU-Kap':>10}{'vCPU-belegt':>12}"
           f"{'vCPU-frei':>10}{'RAM-Kap GB':>12}{'RAM-belegt':>12}{'RAM-frei':>10}")

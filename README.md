@@ -27,6 +27,9 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 - **N+1-Ausfallreserve** (`--failover-hosts`), **vSAN-Faktor** für nutzbare Netto-Kapazität, VM-**Ausschluss per Tag**
 - **Storage-Drilldown** je LUN/Datastore (sortierbar), **vSphere-Tags** je Cluster
 - **Workload %** je Cluster aus vROps (für Anforderer verborgen — auch serverseitig)
+- **Tanzu-/Kubernetes-Namespaces**: CPU-/RAM-**Reservierungen der vSphere-Namespaces**
+  zählen automatisch gegen die freie Kapazität (wie genehmigte Reservierungen);
+  Drilldown je Cluster, `tanzu-mhz-per-vcpu` für die MHz→vCPU-Umrechnung
 - **Cluster-Selektor**: vROps-Quellen-Filter + bis zu 3 kaskadierende Tag-Filter; **Filter-/Suchfelder**, **sortierbare Tabellen**
 - **Spalten ein-/ausblenden** in allen Datentabellen („⚙ Spalten", je Benutzer gespeichert)
 - **Auto-Aktualisierung** mit geschätztem Prozent-Fortschritt; Export als **CSV/JSON**
@@ -225,6 +228,21 @@ Ablehnungen, Stornos und Backups:
   best effort mitgelesen und in der Cluster-Detailkarte als Kennzahl angezeigt –
   **für die Rolle Anforderer ausgeblendet** (weder im UI noch im Datenabruf).
   Log: `Cluster-Workload gelesen: N/M`.
+- **Tanzu-/vSphere-Namespaces**: Läuft auf einem Cluster vSphere with Tanzu,
+  werden die **Namespace-Reservierungen** (CPU/RAM) aus vROps gelesen und
+  zählen — wie genehmigte manuelle Reservierungen — gegen die freie Kapazität.
+  Die CPU-Reservierung kommt in **MHz** und wird über `tanzu-mhz-per-vcpu`
+  (Standard 2500, `0` = CPU nicht zählen) in **vCPU-Äquivalente** umgerechnet
+  (aufgerundet). Die Detailkarte zeigt einen eigenen Abschnitt
+  „Tanzu-Namespaces" mit jedem Namespace (MHz, vCPU-Äquivalent, RAM) und die
+  Kennzahl „davon Tanzu-Namespaces". Die Worker-VMs der TKG-Cluster sind als
+  normale VMs ohnehin in der Belegung enthalten — die Namespace-Reservierung
+  sichert zusätzlich zugesagte, noch nicht materialisierte Kapazität ab
+  (bewusst konservativ). Der Abruf ist best effort: Resource-Kind und
+  Stat-Keys variieren je vROps-Version, deshalb probiert das System Kandidaten
+  durch und protokolliert das Ergebnis (`Tanzu: … Namespaces gefunden`,
+  `erkannte Schlüssel: …`) — nach dem ersten Abruf gegen das echte vROps im
+  Log gegenprüfen. Ohne Tanzu findet der Abruf nichts und ändert nichts.
 - **Cluster-Detailkarte überall**: Ein Klick auf einen **Clusternamen** öffnet
   die Detailkarte – nicht nur in der Kapazitätsübersicht, sondern auch in den
   Reservierungen, Genehmigungen und der VLAN-Suche.
