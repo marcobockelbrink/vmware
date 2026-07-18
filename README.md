@@ -56,7 +56,11 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
 **Verwaltung (Admin-UI)**
-- Unter-Reiter **Benutzer & Rollen / Mail / Backup & Konfiguration**
+- Unter-Reiter **Benutzer & Rollen / Mail / Ankündigung / Backup & Konfiguration**
+- **Ankündigungs-Popup**: Admins veröffentlichen bei Bedarf eine Ankündigung
+  (Titel + Text, aktivierbar) — jeder Benutzer sieht sie **einmal** nach der
+  Anmeldung („Verstanden"-Merker je Benutzer); Textänderung zeigt sie allen
+  erneut. Ideal für Release-News, neue Datacenter oder Wartungsfenster
 - **Schreibgeschütztes Konfig-Sheet** (alle gesetzten Werte, Passwörter nur als „gesetzt: ja/nein")
 - **API-Tokens** für die lesende v1-REST-API, Backup-auf-Knopfdruck
 

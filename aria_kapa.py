@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.0"
+VERSION = "2.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -758,6 +758,7 @@ def sftp_backup(args):
                          args.log_file, args.tokens_file, args.teams_file,
                          args.rolenames_file, args.selector_file, args.notify_file,
                          getattr(args, "prefs_file", ""),
+                         getattr(args, "announce_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -2008,6 +2009,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="actions"><button class="btn primary" onclick="closeInfo()">Schließen</button></div>
   </div>
 </div>
+<div class="modal-bg" id="annBg">
+  <div class="modal" style="max-width:520px">
+    <h2 id="annTitle" style="display:flex;align-items:center;gap:8px">📣 <span></span></h2>
+    <div id="annBody" style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap"></div>
+    <div class="actions"><button class="btn primary" onclick="closeAnnounce()">Verstanden</button></div>
+  </div>
+</div>
 <div class="toolbar">
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
   <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
@@ -2167,8 +2175,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="tabs subtabs">
   <span class="tab active" id="atabUsers" onclick="setAdmTab('users')">Benutzer &amp; Rollen</span>
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
+  <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
+
+<div id="admGrpAnn" style="display:none">
+<div class="sechead">Ankündigung (Popup nach der Anmeldung)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:10px">
+  Ist die Ankündigung aktiv, sieht jeder Benutzer sie <b>einmal</b> als Popup –
+  nach dem Klick auf „Verstanden" erscheint sie nicht erneut. Eine Änderung an
+  Titel oder Text zeigt sie allen Benutzern noch einmal. Beispiele: Neues aus
+  einem Release, neue Datacenter/Cluster, Wartungsfenster.</div>
+<label style="font-size:12px;color:var(--muted)">Titel</label>
+<input id="annCfgTitle" class="filterbox" style="width:100%;max-width:520px;margin-bottom:10px"
+       placeholder="z. B. Neu: Datacenter RZ-Sued verfügbar">
+<label style="font-size:12px;color:var(--muted)">Text</label>
+<textarea id="annCfgText" style="width:100%;max-width:640px;min-height:140px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;line-height:1.5"
+          placeholder="Der Text des Popups (Zeilenumbrüche bleiben erhalten, kein HTML)."></textarea>
+<div style="margin-top:10px">
+  <label style="font-size:13px"><input type="checkbox" id="annCfgActive"> aktiv – Popup wird angezeigt</label>
+</div>
+<div style="margin-top:10px">
+  <button class="btn approve" onclick="saveAnnounce()">✓ Ankündigung speichern</button>
+  <button class="btn" onclick="previewAnnounce()">Vorschau</button>
+  <span id="annSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div>
+<div id="annMeta" style="color:var(--muted);font-size:12px;margin-top:8px"></div>
+</div><!-- admGrpAnn -->
 
 <div id="admGrpUsers">
 <div class="sechead">Benutzer und Rollen</div>
@@ -2425,6 +2458,7 @@ let MAIL_VARS = [];        // verfügbare {{var}} für die Mail-Vorlage
 let MAIL_DEF_TPL = "";     // eingebaute Standard-HTML-Vorlage
 let MAIL_DEF_SUBJ = "";    // eingebauter Standardbetreff
 let PREFS = __PREFS__;      // persönliche UI-Einstellungen (serverseitig je Benutzer)
+let ANNOUNCE = __ANNOUNCE__; // aktive Ankündigung {id,title,text} oder null
 
 // ---- Spalten ein-/ausblenden je Tabelle, pro Benutzer gespeichert ----
 const USE_SERVER_PREFS = SERVE && !!ME;   // sonst localStorage (Demo/ohne Login)
@@ -2437,11 +2471,40 @@ function saveColPrefs() {
   if (USE_SERVER_PREFS) {
     clearTimeout(_prefsTimer);
     _prefsTimer = setTimeout(() => {
+      // announce_seen mitschicken: der Server ersetzt die Prefs komplett
+      const body = { cols: COLHIDE };
+      if (PREFS && PREFS.announce_seen) body.announce_seen = PREFS.announce_seen;
       fetch("api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cols: COLHIDE }) }).catch(() => {});
+        body: JSON.stringify(body) }).catch(() => {});
     }, 400);
   } else {
     try { localStorage.setItem("kapa_cols", JSON.stringify(COLHIDE)); } catch (e) {}
+  }
+}
+
+// ---- Ankündigungs-Popup (einmal je Benutzer, Merker in den Prefs) ----
+function announceSeenId() {
+  if (USE_SERVER_PREFS) return (PREFS && PREFS.announce_seen) || "";
+  try { return localStorage.getItem("kapa_announce_seen") || ""; } catch (e) { return ""; }
+}
+function maybeShowAnnounce() {
+  if (!ANNOUNCE || !ANNOUNCE.id || announceSeenId() === ANNOUNCE.id) return;
+  document.querySelector("#annTitle span").textContent = ANNOUNCE.title || "Ankündigung";
+  document.getElementById("annBody").textContent = ANNOUNCE.text || "";
+  document.getElementById("annBg").classList.add("open");
+}
+let _annPreview = false;
+function closeAnnounce() {
+  document.getElementById("annBg").classList.remove("open");
+  if (_annPreview) { _annPreview = false; return; }   // Admin-Vorschau: kein Merker
+  if (!ANNOUNCE || !ANNOUNCE.id) return;
+  if (USE_SERVER_PREFS) {
+    PREFS = PREFS || {};
+    PREFS.announce_seen = ANNOUNCE.id;
+    fetch("api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cols: COLHIDE, announce_seen: ANNOUNCE.id }) }).catch(() => {});
+  } else {
+    try { localStorage.setItem("kapa_announce_seen", ANNOUNCE.id); } catch (e) {}
   }
 }
 function applyCols(tableId) {
@@ -3079,7 +3142,7 @@ function setView(v) {
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
   hideCard();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); }
   if (v === "log") loadLog();
   render();
 }
@@ -3393,6 +3456,50 @@ function resetMailTemplate() {
   if (h) h.value = MAIL_DEF_TPL || "";
   if (s) s.value = MAIL_DEF_SUBJ || "";
 }
+// ---- Ankündigung pflegen (Verwaltung -> Ankündigung) ----
+let ANN_CFG = null;
+function loadAnnounce() {
+  fetch("api/announce").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.announce) { ANN_CFG = d.announce; if (VIEW === "adm") renderAnnounce(); }
+  }).catch(() => {});
+}
+function renderAnnounce() {
+  if (!ANN_CFG) return;
+  const t = document.getElementById("annCfgTitle");
+  const x = document.getElementById("annCfgText");
+  const a = document.getElementById("annCfgActive");
+  if (t && document.activeElement !== t) t.value = ANN_CFG.title || "";
+  if (x && document.activeElement !== x) x.value = ANN_CFG.text || "";
+  if (a) a.checked = !!ANN_CFG.active;
+  const m = document.getElementById("annMeta");
+  if (m) m.textContent = ANN_CFG.updated_on
+    ? "Zuletzt geändert: " + ANN_CFG.updated_on +
+      (ANN_CFG.updated_by ? " durch " + ANN_CFG.updated_by : "") : "";
+}
+function saveAnnounce() {
+  const body = {
+    title: (document.getElementById("annCfgTitle") || {}).value || "",
+    text: (document.getElementById("annCfgText") || {}).value || "",
+    active: !!(document.getElementById("annCfgActive") || {}).checked };
+  fetch("api/announce", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      if (d && d.announce) { ANN_CFG = d.announce; renderAnnounce(); }
+      const st = document.getElementById("annSaved");
+      if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
+    }).catch(() => notify("Speichern der Ankündigung fehlgeschlagen."));
+}
+function previewAnnounce() {
+  _annPreview = true;
+  document.querySelector("#annTitle span").textContent =
+    (document.getElementById("annCfgTitle") || {}).value || "Ankündigung";
+  document.getElementById("annBody").textContent =
+    (document.getElementById("annCfgText") || {}).value || "";
+  document.getElementById("annBg").classList.add("open");
+}
+
 function previewMail() {
   const th = (document.getElementById("tplHtml") || {}).value || "";
   const ts = (document.getElementById("tplSubject") || {}).value || "";
@@ -3414,8 +3521,8 @@ function previewMail() {
 let ADM_TAB = "users";
 function setAdmTab(t) {
   ADM_TAB = t;
-  const tabs = { users: "atabUsers", mail: "atabMail", conf: "atabConf" };
-  const grps = { users: "admGrpUsers", mail: "admGrpMail", conf: "admGrpConf" };
+  const tabs = { users: "atabUsers", mail: "atabMail", ann: "atabAnn", conf: "atabConf" };
+  const grps = { users: "admGrpUsers", mail: "admGrpMail", ann: "admGrpAnn", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -3738,7 +3845,7 @@ function render() {
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "arch") { renderArchiveTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -3976,6 +4083,7 @@ if (SERVE) {
   setInterval(pollStatus, 3000);
   setInterval(tickTimer, 1000);
 }
+maybeShowAnnounce();
 
 // ============================================================================
 // Sprache: Deutsch ist die Quelle im Code. Browser auf Deutsch -> alles bleibt
@@ -4209,7 +4317,21 @@ const I18N = {
 "Nicht angemeldet": "Not signed in",
 "Keine Berechtigung für diese Aktion": "No permission for this action",
 "✎ Bearbeiten": "✎ Edit", "✕ Löschen": "✕ Delete",
-"Hilfe": "Help", "Info Kapa-Berechnung": "How capacity is calculated"
+"Hilfe": "Help", "Info Kapa-Berechnung": "How capacity is calculated",
+// --- Ankündigung ---
+"Ankündigung": "Announcement",
+"Ankündigung (Popup nach der Anmeldung)": "Announcement (popup after sign-in)",
+"Ist die Ankündigung aktiv, sieht jeder Benutzer sie": "While the announcement is active, every user sees it",
+"einmal": "once",
+"als Popup – nach dem Klick auf „Verstanden\" erscheint sie nicht erneut. Eine Änderung an Titel oder Text zeigt sie allen Benutzern noch einmal. Beispiele: Neues aus einem Release, neue Datacenter/Cluster, Wartungsfenster.":
+  "as a popup – after clicking „Got it“ it does not appear again. Changing the title or text shows it to all users once more. Examples: release news, new datacenters/clusters, maintenance windows.",
+"Titel": "Title", "Text": "Text",
+"z. B. Neu: Datacenter RZ-Sued verfügbar": "e.g. New: datacenter RZ-Sued available",
+"Der Text des Popups (Zeilenumbrüche bleiben erhalten, kein HTML).": "The popup text (line breaks are kept, no HTML).",
+"aktiv – Popup wird angezeigt": "active – popup is shown",
+"✓ Ankündigung speichern": "✓ Save announcement",
+"Verstanden": "Got it",
+"Speichern der Ankündigung fehlgeschlagen.": "Saving the announcement failed."
 };
 // Muster mit variablen Teilen (ganzer Text)
 const I18N_RX = [
@@ -4234,6 +4356,8 @@ const I18N_RX = [
   [/^Spalte (\d+)$/, "Column $1"],
   [/^(\d+) alte\(s\) Archiv\(e\) gelöscht$/, "$1 old archive(s) deleted"],
   [/^Team „(.+)“ aus dem Genehmigungsprozess entfernen\?$/, "Remove team „$1“ from the approval process?"],
+  [/^Zuletzt geändert: (.+?) durch (.+)$/, "Last changed: $1 by $2"],
+  [/^Zuletzt geändert: (.+)$/, "Last changed: $1"],
   [/^Rollenzuweisung für „(.+)“ entfernen\?$/, "Remove role assignment for „$1“?"],
   [/^Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor ([\d.,]+) \(physische Cores\).*abgezogen$/,
    "Source: VMware Aria Operations · CPU overcommit: factor $1 (physical cores) · RAM 1:1 · all VMs incl. powered-off · “free” accounts for approved reservations · failover spare (N+1): largest host per cluster deducted"],
@@ -4431,7 +4555,8 @@ def _html_escape(s):
 
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
-                contact="", selector=None, backup=False, notify=None, prefs=None):
+                contact="", selector=None, backup=False, notify=None, prefs=None,
+                announce=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -4461,6 +4586,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
             .replace("__NOTIFY__", json_for_html(notify or DEFAULT_NOTIFY))
             .replace("__PREFS__", json_for_html(prefs or {}))
+            .replace("__ANNOUNCE__", json_for_html(announce))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -4501,12 +4627,14 @@ def serve(args, password):
     _coll_paths = {"res": args.res_file, "roles": args.roles_file,
                    "teams": args.teams_file, "selector": args.selector_file,
                    "rolenames": args.rolenames_file, "tokens": args.tokens_file,
-                   "notify": args.notify_file, "prefs": args.prefs_file}
+                   "notify": args.notify_file, "prefs": args.prefs_file,
+                   "announce": args.announce_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
-        for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify", "prefs"):
+        for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify",
+                   "prefs", "announce"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
                 try:
@@ -4688,11 +4816,43 @@ def serve(args, password):
                     if idxs:
                         c[tid] = idxs
             out["cols"] = c
+        seen = (body or {}).get("announce_seen") if isinstance(body, dict) else None
+        if isinstance(seen, str) and seen.strip():
+            out["announce_seen"] = seen.strip()[:16]
         return out
 
     def user_prefs(user):
         with prefs_lock:
             return json.loads(json.dumps(all_prefs.get(user or "", {})))
+
+    # ---- Ankündigung (Popup nach der Anmeldung, einmal je Benutzer) ----
+    announce_lock = threading.Lock()
+
+    def clean_announce(raw, actor=""):
+        """Nur die erlaubten Felder übernehmen. Die id ist ein Hash aus
+        Titel+Text: Textänderung -> neue id -> jeder sieht das Popup erneut."""
+        raw = raw if isinstance(raw, dict) else {}
+        title = " ".join(str(raw.get("title") or "").split())[:120]
+        text = str(raw.get("text") or "").strip()[:2000]
+        return {"active": bool(raw.get("active")) and bool(text),
+                "title": title, "text": text,
+                "id": hashlib.sha256((title + "\n" + text).encode()).hexdigest()[:8],
+                "updated_on": (datetime.now().strftime("%d.%m.%Y %H:%M") if actor
+                               else str(raw.get("updated_on") or "")),
+                "updated_by": actor or str(raw.get("updated_by") or "")}
+
+    announce_cfg = clean_announce(store.load("announce", None))
+
+    def save_announce():
+        store.save("announce", announce_cfg)
+
+    def public_announce():
+        """Nur die aktive Ankündigung, reduziert auf das, was Clients brauchen."""
+        with announce_lock:
+            if not announce_cfg.get("active"):
+                return None
+            return {"id": announce_cfg["id"], "title": announce_cfg["title"],
+                    "text": announce_cfg["text"]}
 
     def current_team(r):
         """Team, das als Nächstes freigeben muss – None, wenn keine Teams
@@ -5467,7 +5627,8 @@ def serve(args, password):
                                        selector=cluster_selector,
                                        backup=bool(args.backup_target),
                                        notify=notify_cfg,
-                                       prefs=user_prefs(s["user"]) if s else {}),
+                                       prefs=user_prefs(s["user"]) if s else {},
+                                       announce=public_announce()),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 s = self._require()
@@ -5567,6 +5728,11 @@ def serve(args, password):
                                 "default_template": DEFAULT_MAIL_TEMPLATE,
                                 "default_subject": DEFAULT_MAIL_SUBJECT,
                                 "vars": MAIL_VARS})
+            elif route == "/api/announce":
+                if not self._require("admin"):
+                    return
+                with announce_lock:
+                    self._json({"announce": json.loads(json.dumps(announce_cfg))})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -6101,6 +6267,24 @@ def serve(args, password):
                          if result["team_email"] else "")
                       + ("; Vorlage angepasst" if result.get("template_html") else ""))
                 self._json({"notify": result})
+            elif self.path == "/api/announce":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, dict):
+                    self._json({"error": "Objekt mit Ankündigung erwartet"}, 400)
+                    return
+                clean = clean_announce(body, actor=s["user"] or "Admin")
+                with announce_lock:
+                    announce_cfg.clear()
+                    announce_cfg.update(clean)
+                    save_announce()
+                    result = json.loads(json.dumps(announce_cfg))
+                audit(s["user"], "Ankündigung geändert",
+                      ("aktiv" if result["active"] else "deaktiviert")
+                      + (f": {result['title']}" if result["title"] else ""))
+                self._json({"announce": result})
             elif self.path == "/api/mail-preview":
                 if not self._require("admin"):
                     return
@@ -6439,6 +6623,10 @@ def main():
                     help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
                          "(z. B. ein-/ausgeblendete Tabellenspalten; "
                          "Standard: data/kapa_prefs.json)")
+    ap.add_argument("--announce-file", default="kapa_ankuendigung.json",
+                    help="Datei mit der Ankündigung (Popup nach der Anmeldung; "
+                         "Standard: data/kapa_ankuendigung.json); Pflege über "
+                         "die Verwaltungsseite")
     # Leere Werte von Langoptionen verwerfen, BEVOR geparst wird. Grund: Die
     # systemd-Unit baut Argumente wie "--backup-target ${BACKUP_TARGET}" aus
     # kapa.env; ist die Variable leer, käme ein leeres Argument an und würde den
@@ -6465,6 +6653,7 @@ def main():
     args.rolenames_file = data_path(args.rolenames_file, base)
     args.notify_file = data_path(args.notify_file, base)
     args.prefs_file = data_path(args.prefs_file, base)
+    args.announce_file = data_path(args.announce_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

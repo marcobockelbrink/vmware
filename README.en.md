@@ -56,7 +56,11 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
 **Administration (admin UI)**
-- Sub-tabs **Users & roles / Mail / Backup & configuration**
+- Sub-tabs **Users & roles / Mail / Announcement / Backup & configuration**
+- **Announcement popup**: admins publish an announcement on demand (title +
+  text, activatable) — every user sees it **once** after sign-in ("Got it"
+  marker per user); changing the text shows it to everyone again. Ideal for
+  release news, new datacenters or maintenance windows
 - **Read-only configuration sheet** (all configured values, passwords only as "set: yes/no")
 - **API tokens** for the read-only v1 REST API, one-click backup
 

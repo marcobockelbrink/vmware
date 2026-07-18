@@ -11,7 +11,8 @@ Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 | `kapa_rollennamen.json` | Frei gewählte Rollen-Bezeichnungen | Ja |
 | `kapa_tokens.json` | API-Tokens (nur Hashes) | Ja |
 | `kapa_mail.json` | Mail-Benachrichtigungsregeln je Rolle **+ editierbare Mail-Vorlage** (Betreff/HTML) | Ja |
-| `kapa_prefs.json` | Persönliche UI-Einstellungen je Benutzer (Tabellenspalten) | Nein (Komfort) |
+| `kapa_prefs.json` | Persönliche UI-Einstellungen je Benutzer (Tabellenspalten, „Ankündigung gesehen") | Nein (Komfort) |
+| `kapa_ankuendigung.json` | Ankündigungs-Popup (Titel/Text/aktiv) | Nein (Komfort) |
 | `kapa.db` (+ `-wal`/`-shm`) | Bei `storage = sqlite`: alle obigen Sammlungen in einer DB | **Ja** (statt der JSONs) |
 | `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |
 | `kapa_cache.json` | Letzter Aria-Datenabruf | Nein (wird neu abgerufen) |
