@@ -16,7 +16,10 @@ the selector and column configuration (`python3 aria_kapa.py --sample --serve`).
 
 A single Python script (standard library only, **no pip, no build**) that turns
 Aria Operations data into a web dashboard. The UI language follows the browser:
-German browsers get German, everything else English.
+German browsers get German, everything else English — including the login page,
+the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
+`Accept-Language` or `?lang=de|en`). The JSON API field names and status values
+(v1 contract), the audit log and the stored data stay German.
 
 **Capacity & reporting**
 - **Multiple named vROps sources** (optional): 1–3 (or more) Aria Operations systems, each with or without a proxy, merged into one overview; every cluster carries a source badge (requires unique cluster names)
@@ -358,8 +361,12 @@ curl -H "Authorization: Bearer kapa_..." \
 
 Endpoints: `/api/v1/reservations` (filters: `cluster`, `status`, `abteilung`;
 `format=csv`), `/api/v1/data` (cluster capacities), `/api/v1/status`.
-Note: API field names and status values stay German — they are part of the
-stable v1 contract (`status=genehmigt` etc.).
+
+**Language:** JSON field names and status values are part of the stable v1
+contract and stay German (`status=genehmigt` etc.). **CSV headers/status
+values** and the **OpenAPI descriptions**, however, follow `Accept-Language`
+(or explicitly `?lang=de|en`) — requests without the header (curl, scripts)
+keep getting German, so existing consumers see no change.
 
 **Interactive docs in the dashboard**: at **`/api/v1/docs`** (also linked from
 "Administration → API tokens") — a self-contained, offline-capable

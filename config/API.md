@@ -101,6 +101,10 @@ die Reservierungen liefert `/api/v1/reservations` (Status `genehmigt`).
 
 - Die v1-Pfade bleiben stabil; Erweiterungen kommen als neue Felder oder
   Parameter, bestehende Felder ändern sich nicht.
+- **Sprache:** JSON-Feldnamen und Statuswerte bleiben deutsch (stabiler
+  Vertrag). CSV-Spalten/Statuswerte und die OpenAPI-Beschreibungen folgen
+  `Accept-Language` bzw. `?lang=de|en`; ohne Header (curl/Skripte) unverändert
+  Deutsch.
 - Tokens sind rein lesend — Schreibzugriffe (Anträge stellen) sind für eine
   spätere Version mit eigenem `write`-Scope vorgesehen.
 - Browser-Sessions (angemeldete Admins) können die v1-Endpunkte ebenfalls

@@ -16,8 +16,10 @@ im Selektor und Spalten-Konfiguration (`python3 aria_kapa.py --sample --serve`).
 Ein einzelnes Python-Skript (nur Standardbibliothek, **kein pip, kein Build**),
 das die Aria-Operations-Daten als Web-Dashboard aufbereitet. Die
 **Oberflächensprache folgt dem Browser**: Deutsch bleibt Deutsch, jede andere
-Browsersprache bekommt Englisch (interne Werte, API und Audit-Log bleiben
-stabil deutsch).
+Browsersprache bekommt Englisch — inklusive Login, **API-Doku/OpenAPI-Spec**
+und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
+`?lang=de|en`). Stabil deutsch bleiben die JSON-API-Felder und -Statuswerte
+(v1-Vertrag), das Audit-Log und die gespeicherten Daten.
 
 **Kapazität & Auswertung**
 - **Mehrere benannte vROps-Quellen** (optional): 1–3 (oder mehr) Aria-Operations-Systeme, je mit/ohne Proxy, gemischt zu einer Übersicht; jeder Cluster trägt ein Quellen-Badge (Voraussetzung: eindeutige Cluster-Namen)
@@ -383,6 +385,12 @@ curl -H "Authorization: Bearer kapa_..." \
 
 Endpunkte: `/api/v1/reservations` (Filter: `cluster`, `status`, `abteilung`;
 `format=csv`), `/api/v1/data` (Cluster-Kapazitäten), `/api/v1/status`.
+
+**Sprache:** Die JSON-Feldnamen und Statuswerte sind Teil des stabilen
+v1-Vertrags und bleiben deutsch. **CSV-Spalten/Statuswerte** und die
+**OpenAPI-Beschreibungen** folgen dagegen `Accept-Language` (bzw. explizit
+`?lang=de|en`) — Aufrufe ohne Header (curl, Skripte) bekommen unverändert
+Deutsch, bestehende Consumer sehen keine Änderung.
 
 **Interaktive Doku im Dashboard**: unter **`/api/v1/docs`** (auch verlinkt im Tab
 „Verwaltung → API-Tokens") – eine selbst-enthaltene, offline lauffähige

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "1.31"
+VERSION = "2.0"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1478,27 +1478,30 @@ def sample_data():
 
 # ------------------------------------------------------------------ Dashboard --
 
-def openapi_spec():
+def openapi_spec(lang="de"):
     """OpenAPI-3.0-Beschreibung der lesenden v1-API. Importierbar in Swagger
-    Editor/Postman; die eingebaute Seite /api/v1/docs rendert sie direkt."""
+    Editor/Postman; die eingebaute Seite /api/v1/docs rendert sie direkt.
+    lang="en" liefert englische Beschreibungstexte (Feldnamen/Werte bleiben
+    unverändert Teil des stabilen v1-Vertrags)."""
+    T = (lambda de, en: en) if lang == "en" else (lambda de, en: de)
     reservation = {
         "type": "object",
         "properties": {
-            "id": {"type": "string", "description": "Eindeutige ID"},
-            "name": {"type": "string", "description": "Bezeichnung / Projekt"},
-            "change": {"type": "string", "description": "Change-Nummer / Jira-Ticket (optional)"},
+            "id": {"type": "string", "description": T("Eindeutige ID", "Unique ID")},
+            "name": {"type": "string", "description": T("Bezeichnung / Projekt", "Name / project")},
+            "change": {"type": "string", "description": T("Change-Nummer / Jira-Ticket (optional)", "Change number / Jira ticket (optional)")},
             "cluster": {"type": "string"},
             "vcpu": {"type": "integer"},
             "ram_gb": {"type": "integer"},
-            "storage_gb": {"type": "integer", "description": "nur informativ"},
-            "von": {"type": "string", "description": "Anforderer"},
-            "abteilung": {"type": "string", "description": "Team/Abteilung"},
-            "created": {"type": "string", "description": "gilt ab (ISO-Datum)"},
-            "approvals": {"type": "array", "description": "bisherige Team-Freigaben (Prüfreihenfolge)",
+            "storage_gb": {"type": "integer", "description": T("nur informativ", "informational only")},
+            "von": {"type": "string", "description": T("Anforderer", "Requester")},
+            "abteilung": {"type": "string", "description": T("Team/Abteilung", "Team/department")},
+            "created": {"type": "string", "description": T("gilt ab (ISO-Datum)", "valid from (ISO date)")},
+            "approvals": {"type": "array", "description": T("bisherige Team-Freigaben (Prüfreihenfolge)", "team approvals so far (review order)"),
                           "items": {"type": "object", "properties": {
                               "team": {"type": "string"}, "by": {"type": "string"},
                               "on": {"type": "string"}, "comment": {"type": "string"}}}},
-            "approved": {"type": "boolean", "description": "vollständig genehmigt (alle Stufen)"},
+            "approved": {"type": "boolean", "description": T("vollständig genehmigt (alle Stufen)", "fully approved (all stages)")},
             "approved_on": {"type": "string"}, "approved_by": {"type": "string"},
             "rejected": {"type": "boolean"}, "rejected_on": {"type": "string"},
             "rejected_by": {"type": "string"}, "rejected_team": {"type": "string"},
@@ -1512,12 +1515,12 @@ def openapi_spec():
             "name": {"type": "string"},
             "hostCount": {"type": "integer"}, "cores": {"type": "integer"},
             "vcpuCap": {"type": "number"}, "vcpuUsed": {"type": "number"},
-            "vcpuFree": {"type": "number", "description": "vor Abzug genehmigter Reservierungen"},
+            "vcpuFree": {"type": "number", "description": T("vor Abzug genehmigter Reservierungen", "before subtracting approved reservations")},
             "ramCap": {"type": "number"}, "ramUsed": {"type": "number"}, "ramFree": {"type": "number"},
             "storageCap": {"type": "number"}, "storageUsed": {"type": "number"}, "storageFree": {"type": "number"},
             "vmCount": {"type": "integer"}, "vmOff": {"type": "integer"},
             "workload": {"type": "integer", "nullable": True,
-                         "description": "vROps-Workload-Badge in % (nicht für Anforderer)"},
+                         "description": T("vROps-Workload-Badge in % (nicht für Anforderer)", "vROps workload badge in % (not for requesters)")},
             "portgroups": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "vlan": {"type": "string"}}}},
         },
@@ -1525,14 +1528,20 @@ def openapi_spec():
     return {
         "openapi": "3.0.3",
         "info": {
-            "title": "VMware Kapazitätsplanung – API",
+            "title": T("VMware Kapazitätsplanung – API", "VMware Capacity Planning – API"),
             "version": VERSION,
-            "description": "Stabile, **nur lesende** REST-API. Authentifizierung "
-                           "per Bearer-Token (Admins erzeugen es im Tab „Verwaltung“) "
-                           "oder per Browser-Session.",
+            "description": T("Stabile, **nur lesende** REST-API. Authentifizierung "
+                             "per Bearer-Token (Admins erzeugen es im Tab „Verwaltung“) "
+                             "oder per Browser-Session.",
+                             "Stable, **read-only** REST API. Authentication via "
+                             "bearer token (admins create it in the „Administration“ "
+                             "tab) or via browser session. Field names and status "
+                             "values are German – they are part of the stable v1 contract."),
         },
-        "servers": [{"url": "/", "description": "dieser Server (hinter einem "
-                     "Proxy-Unterpfad wie /capa entsprechend anpassen)"}],
+        "servers": [{"url": "/", "description": T("dieser Server (hinter einem "
+                     "Proxy-Unterpfad wie /capa entsprechend anpassen)",
+                     "this server (adjust accordingly behind a proxy sub-path "
+                     "like /capa)")}],
         "components": {
             "securitySchemes": {
                 "bearerAuth": {"type": "http", "scheme": "bearer",
@@ -1544,7 +1553,7 @@ def openapi_spec():
                             "version": {"type": "string"}, "updated": {"type": "string"},
                             "refreshing": {"type": "boolean"},
                             "next": {"type": "integer", "nullable": True,
-                                     "description": "Sekunden bis zur nächsten Aktualisierung"}}},
+                                     "description": T("Sekunden bis zur nächsten Aktualisierung", "seconds until the next refresh")}}},
                         "Data": {"type": "object", "properties": {
                             "updated": {"type": "string"},
                             "clusters": {"type": "array", "items": {"$ref": "#/components/schemas/Cluster"}}}}},
@@ -1552,38 +1561,51 @@ def openapi_spec():
         "security": [{"bearerAuth": []}, {"cookieAuth": []}],
         "paths": {
             "/api/v1/status": {"get": {
-                "summary": "Status & Aktualität",
-                "description": "Version, Zeitpunkt des letzten Aria-Abrufs, ob gerade "
-                               "aktualisiert wird und Sekunden bis zum nächsten Abruf.",
+                "summary": T("Status & Aktualität", "Status & freshness"),
+                "description": T("Version, Zeitpunkt des letzten Aria-Abrufs, ob gerade "
+                                 "aktualisiert wird und Sekunden bis zum nächsten Abruf.",
+                                 "Version, time of the last Aria refresh, whether a refresh "
+                                 "is running and seconds until the next one."),
                 "responses": {"200": {"description": "OK", "content": {"application/json": {
                     "schema": {"$ref": "#/components/schemas/Status"}}}},
-                    "401": {"description": "Token/Anmeldung fehlt oder ungültig"}}}},
+                    "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}}}},
             "/api/v1/data": {"get": {
-                "summary": "Cluster-Kapazitäten",
-                "description": "Cluster-Kennzahlen aus dem letzten Aria-Abruf. "
-                               "vcpuFree/ramFree sind VOR Abzug genehmigter Reservierungen.",
+                "summary": T("Cluster-Kapazitäten", "Cluster capacities"),
+                "description": T("Cluster-Kennzahlen aus dem letzten Aria-Abruf. "
+                                 "vcpuFree/ramFree sind VOR Abzug genehmigter Reservierungen.",
+                                 "Cluster metrics from the last Aria refresh. "
+                                 "vcpuFree/ramFree are BEFORE subtracting approved reservations."),
                 "responses": {"200": {"description": "OK", "content": {"application/json": {
                     "schema": {"$ref": "#/components/schemas/Data"}}}},
-                    "401": {"description": "Token/Anmeldung fehlt oder ungültig"}}}},
+                    "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}}}},
             "/api/v1/reservations": {"get": {
-                "summary": "Reservierungen (Kapazitätsanfragen)",
-                "description": "Alle Reservierungen. Kombinierbare Filter; als CSV mit "
-                               "format=csv (Semikolon, Excel-tauglich).",
+                "summary": T("Reservierungen (Kapazitätsanfragen)", "Reservations (capacity requests)"),
+                "description": T("Alle Reservierungen. Kombinierbare Filter; als CSV mit "
+                                 "format=csv (Semikolon, Excel-tauglich).",
+                                 "All reservations. Combinable filters; as CSV with "
+                                 "format=csv (semicolon, Excel-ready). CSV headers/status "
+                                 "follow Accept-Language or ?lang=de|en (default: German)."),
                 "parameters": [
                     {"name": "cluster", "in": "query", "schema": {"type": "string"},
-                     "description": "nur dieses Cluster"},
+                     "description": T("nur dieses Cluster", "only this cluster")},
                     {"name": "abteilung", "in": "query", "schema": {"type": "string"},
-                     "description": "nur dieses Team/diese Abteilung"},
+                     "description": T("nur dieses Team/diese Abteilung", "only this team/department")},
                     {"name": "status", "in": "query", "schema": {"type": "string",
                      "enum": ["beantragt", "in Prüfung", "genehmigt", "abgelehnt", "storniert"]}},
                     {"name": "format", "in": "query", "schema": {"type": "string",
                      "enum": ["json", "csv"], "default": "json"}},
+                    {"name": "lang", "in": "query", "schema": {"type": "string",
+                     "enum": ["de", "en"]},
+                     "description": T("Sprache der CSV-Spalten/Statuswerte (Standard: "
+                                      "Accept-Language, sonst Deutsch)",
+                                      "language of CSV headers/status values (default: "
+                                      "Accept-Language, else German)")},
                 ],
                 "responses": {"200": {"description": "OK", "content": {
                     "application/json": {"schema": {"type": "array",
                         "items": {"$ref": "#/components/schemas/Reservation"}}},
                     "text/csv": {"schema": {"type": "string"}}}},
-                    "401": {"description": "Token/Anmeldung fehlt oder ungültig"}}}},
+                    "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}}}},
         },
     }
 
@@ -1659,6 +1681,45 @@ tokEl.addEventListener("input", () => { try { localStorage.setItem("kapa_api_tok
 
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
+// Browsersprache nicht Deutsch -> englische Beschriftung. Die Endpunkt-Texte
+// kommen bereits lokalisiert aus openapi.json (Accept-Language, serverseitig).
+const IS_DE = (navigator.language || "de").toLowerCase().startsWith("de");
+const L_EN = {
+  "API-Dokumentation – VMware Kapazitätsplanung": "API documentation – VMware Capacity Planning",
+  "API-Dokumentation": "API documentation",
+  "Lesende REST-API unter": "Read-only REST API at",
+  "OpenAPI-Spec (JSON)": "OpenAPI spec (JSON)",
+  "– importierbar in Swagger Editor/Postman.": "– importable into Swagger Editor/Postman.",
+  "Bearer-Token (im Dashboard unter „Verwaltung → API-Tokens\" erzeugen)":
+    "Bearer token (create it in the dashboard under „Administration → API tokens“)",
+  "Wird nur lokal im Browser gespeichert und bei „Ausführen\" als":
+    "Stored only locally in the browser and sent along on „Run“ as",
+  "mitgeschickt. Angemeldete Admins können auch ohne Token testen (Session-Cookie).":
+    ". Signed-in admins can also test without a token (session cookie).",
+  "Self-contained – kein externes Swagger-UI/CDN. Details je Feld: siehe OpenAPI-Spec.":
+    "Self-contained – no external Swagger UI/CDN. Field details: see the OpenAPI spec.",
+  "Parameter": "Parameter", "Bedeutung": "Meaning", "Wert (optional)": "Value (optional)",
+  "Ausführen": "Run", "OpenAPI-Spec nicht ladbar.": "Could not load the OpenAPI spec.",
+  "Fehler: ": "Error: "
+};
+function tr(s) { return IS_DE ? s : (L_EN[(s || "").replace(/\s+/g, " ").trim()] || s); }
+if (!IS_DE) {
+  document.documentElement.lang = "en";
+  document.title = tr(document.title);
+  const walk = n => {
+    if (n.nodeType === 3) {
+      const lead = n.data.match(/^\s*/)[0], tail = n.data.match(/\s*$/)[0];
+      const t = tr(n.data);
+      if (t !== n.data) n.data = lead + t + tail;
+      return;
+    }
+    if (n.nodeType !== 1 || /^(SCRIPT|STYLE|PRE|CODE|INPUT)$/.test(n.nodeName)) return;
+    let c = n.firstChild;
+    while (c) { const nx = c.nextSibling; walk(c); c = nx; }
+  };
+  walk(document.body);
+}
+
 fetch("openapi.json").then(r => r.json()).then(spec => {
   const box = document.getElementById("eps");
   Object.keys(spec.paths).forEach(p => {
@@ -1668,7 +1729,7 @@ fetch("openapi.json").then(r => r.json()).then(spec => {
     const prows = params.map(pa => `<tr><td style="width:130px"><code>${esc(pa.name)}</code></td>
       <td>${esc(pa.description || "")}${pa.schema && pa.schema.enum ? ' <span style="color:var(--muted)">('+pa.schema.enum.map(esc).join(" | ")+')</span>' : ''}</td>
       <td style="width:180px"><input data-p="${esc(pa.name)}" data-ep="${id}" placeholder="${pa.schema && pa.schema.enum ? esc(pa.schema.enum[0]) : ''}"></td></tr>`).join("");
-    const ptable = params.length ? `<table><tr><th>Parameter</th><th>Bedeutung</th><th>Wert (optional)</th></tr>${prows}</table>` : "";
+    const ptable = params.length ? `<table><tr><th>${tr("Parameter")}</th><th>${tr("Bedeutung")}</th><th>${tr("Wert (optional)")}</th></tr>${prows}</table>` : "";
     box.insertAdjacentHTML("beforeend", `<div class="ep">
       <div class="ephead" onclick="var b=this.nextElementSibling; b.style.display = b.style.display==='none'?'':'none';">
         <span class="method">GET</span><span class="path">${esc(p)}</span>
@@ -1676,12 +1737,12 @@ fetch("openapi.json").then(r => r.json()).then(spec => {
       <div class="epbody" style="display:none">
         <p>${esc(op.description || "")}</p>
         ${ptable}
-        <button class="btn" onclick="run('${id}','${esc(p)}')">Ausführen</button>
+        <button class="btn" onclick="run('${id}','${esc(p)}')">${tr("Ausführen")}</button>
         <div class="status" id="st_${id}"></div>
         <pre id="out_${id}" style="display:none"></pre>
       </div></div>`);
   });
-}).catch(() => { document.getElementById("eps").textContent = "OpenAPI-Spec nicht ladbar."; });
+}).catch(() => { document.getElementById("eps").textContent = tr("OpenAPI-Spec nicht ladbar."); });
 
 function run(id, path) {
   const st = document.getElementById("st_" + id), out = document.getElementById("out_" + id);
@@ -1699,7 +1760,7 @@ function run(id, path) {
     st.textContent = "HTTP " + r.status + " · " + url;
     out.style.display = "";
     out.textContent = ct.includes("json") ? JSON.stringify(JSON.parse(body), null, 2) : body;
-  }).catch(e => { st.textContent = "Fehler: " + e.message; out.style.display = "none"; });
+  }).catch(e => { st.textContent = tr("Fehler: ") + e.message; out.style.display = "none"; });
 }
 </script>
 </body>
@@ -4946,24 +5007,39 @@ def serve(args, password):
         except ValueError:
             return ""
 
-    def res_csv(rows):
+    # Englische CSV-Fassung: nur Spaltennamen und Status-Anzeigewerte – die
+    # JSON-API-Felder und -Werte bleiben unverändert (stabiler v1-Vertrag).
+    CSV_STATUS_EN = {"beantragt": "requested", "in Prüfung": "in review",
+                     "genehmigt": "approved", "abgelehnt": "rejected",
+                     "storniert": "cancelled"}
+
+    def res_csv(rows, lang="de"):
         import csv
         import io
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=";")
-        w.writerow(["id", "name", "change", "cluster", "vcpu", "ram_gb",
-                    "storage_gb", "von", "abteilung", "gilt_ab", "gueltig_bis",
-                    "status", "entschieden_von", "freigaben", "kommentar"])
+        if lang == "en":
+            w.writerow(["id", "name", "change", "cluster", "vcpu", "ram_gb",
+                        "storage_gb", "requested_by", "team", "valid_from",
+                        "valid_until", "status", "decided_by", "approvals",
+                        "comment"])
+        else:
+            w.writerow(["id", "name", "change", "cluster", "vcpu", "ram_gb",
+                        "storage_gb", "von", "abteilung", "gilt_ab", "gueltig_bis",
+                        "status", "entschieden_von", "freigaben", "kommentar"])
         for r in rows:
             freigaben = "; ".join(
                 f"{a.get('team') or '?'}: {a.get('by') or '?'}"
                 for a in (r.get("approvals") or []))
+            status = res_status(r)
+            if lang == "en":
+                status = CSV_STATUS_EN.get(status, status)
             w.writerow([r.get("id", ""), r.get("name", ""), r.get("change", ""),
                         r.get("cluster", ""), r.get("vcpu", 0),
                         r.get("ram_gb", 0), r.get("storage_gb", 0),
                         r.get("von", ""),
                         r.get("abteilung", ""), r.get("created", ""),
-                        valid_until(r), res_status(r),
+                        valid_until(r), status,
                         r.get("approved_by") or r.get("rejected_by") or "",
                         freigaben, r.get("comment", "")])
         return buf.getvalue()
@@ -5306,6 +5382,19 @@ def serve(args, password):
             except Exception:
                 return None
 
+        def _lang(self):
+            """Antwortsprache für CSV/OpenAPI: ?lang=de|en gewinnt, sonst
+            Accept-Language (de* -> de, sonst en); ohne Header (curl/Skripte)
+            bleibt es Deutsch – bestehende Consumer sehen keine Änderung."""
+            q = urllib.parse.urlsplit(self.path).query
+            forced = (urllib.parse.parse_qs(q).get("lang") or [""])[0].lower()
+            if forced in ("de", "en"):
+                return forced
+            al = (self.headers.get("Accept-Language") or "").strip().lower()
+            if not al:
+                return "de"
+            return "de" if al.startswith("de") else "en"
+
         # ---- Sitzungen / Berechtigungen ----
         def _cookie_token(self):
             for part in (self.headers.get("Cookie") or "").split(";"):
@@ -5403,7 +5492,7 @@ def serve(args, password):
                     prune_reservations()
                     self._json(visible_res(s))
             elif route == "/api/v1/openapi.json":
-                self._send(json.dumps(openapi_spec(), ensure_ascii=False, indent=2),
+                self._send(json.dumps(openapi_spec(self._lang()), ensure_ascii=False, indent=2),
                            "application/json; charset=utf-8")
             elif route in ("/api/v1/docs", "/api/v1/docs/"):
                 self._send(API_DOCS_HTML.replace("__VERSION__", VERSION),
@@ -5442,7 +5531,8 @@ def serve(args, password):
                         data = [r for r in data
                                 if res_status(r) == query["status"][0]]
                     if query.get("format", [""])[0] == "csv":
-                        self._send(res_csv(data), "text/csv; charset=utf-8")
+                        self._send(res_csv(data, self._lang()),
+                                   "text/csv; charset=utf-8")
                     else:
                         self._json(data)
             elif route == "/api/tokens":
