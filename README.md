@@ -65,7 +65,8 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Anmeldung („Verstanden"-Merker je Benutzer); Textänderung zeigt sie allen
   erneut. Ideal für Release-News, neue Datacenter oder Wartungsfenster
 - **Schreibgeschütztes Konfig-Sheet** (alle gesetzten Werte, Passwörter nur als „gesetzt: ja/nein")
-- **API-Tokens** für die lesende v1-REST-API, Backup-auf-Knopfdruck
+- **API-Tokens** für die v1-REST-API; **Schreibrechte je Token per Klick**
+  (Reservierungen anlegen/stornieren, Genehmigen/Ablehnen), Backup-auf-Knopfdruck
 
 **Betrieb & Technik**
 - Datenhaltung als **JSON-Dateien oder SQLite** (`--storage`), **atomare** Schreibvorgänge
@@ -400,7 +401,7 @@ eigene Dateien.
 
 ## API für externe Anwendungen
 
-Unter `/api/v1/` gibt es eine stabile, **lesende** REST-API für externe
+Unter `/api/v1/` gibt es eine stabile REST-API für externe
 Anwendungen (Grafana, CMDB, Reporting …). Admins erzeugen dafür im Tab
 „Verwaltung" benannte Bearer-Tokens (werden nur einmal angezeigt, nur der
 Hash wird gespeichert, einzeln widerrufbar, Nutzung im Audit-Log):
@@ -410,8 +411,13 @@ curl -H "Authorization: Bearer kapa_..." \
   "https://host/capa/api/v1/reservations?status=genehmigt&format=csv"
 ```
 
-Endpunkte: `/api/v1/reservations` (Filter: `cluster`, `status`, `abteilung`;
-`format=csv`), `/api/v1/data` (Cluster-Kapazitäten), `/api/v1/status`.
+Endpunkte (lesend): `/api/v1/reservations` (Filter: `cluster`, `status`,
+`abteilung`; `format=csv`), `/api/v1/data` (Cluster-Kapazitäten),
+`/api/v1/status`. **Schreibend** (Schreibrechte je Token per Klick in der
+Verwaltung, Audit-geloggt): `POST /api/v1/reservations` (anlegen) und
+`…/{id}/cancel` mit Recht „Reservierungen", `…/{id}/approve` und
+`…/{id}/reject` mit Recht „Genehmigungen" — Details in
+[`config/API.md`](config/API.md).
 
 **Sprache:** Die JSON-Feldnamen und Statuswerte sind Teil des stabilen
 v1-Vertrags und bleiben deutsch. **CSV-Spalten/Statuswerte** und die

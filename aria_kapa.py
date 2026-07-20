@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.2.1"
+VERSION = "2.3"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1729,9 +1729,69 @@ def openapi_spec(lang="de"):
                     "application/json": {"schema": {"type": "array",
                         "items": {"$ref": "#/components/schemas/Reservation"}}},
                     "text/csv": {"schema": {"type": "string"}}}},
-                    "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}}}},
+                    "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}},
+                },
+                "post": {
+                    "summary": T("Reservierung anlegen (Schreibrecht „Reservierungen“)",
+                                 "Create a reservation (write permission „Reservations“)"),
+                    "description": T(
+                        "Legt eine Kapazitätsanfrage an (Status „beantragt“, "
+                        "durchläuft den normalen Genehmigungsprozess). Erfordert "
+                        "ein Token mit dem Schreibrecht „Reservierungen“ "
+                        "(Verwaltung → API-Tokens) oder eine Admin-Session.",
+                        "Creates a capacity request (status „requested“, passes "
+                        "through the normal approval process). Requires a token "
+                        "with the „Reservations“ write permission "
+                        "(Administration → API tokens) or an admin session."),
+                    "requestBody": {"required": True, "content": {"application/json": {
+                        "schema": {"type": "object", "required": ["name"],
+                            "properties": {
+                                "name": {"type": "string"},
+                                "cluster": {"type": "string"},
+                                "change": {"type": "string"},
+                                "vcpu": {"type": "integer"},
+                                "ram_gb": {"type": "integer"},
+                                "storage_gb": {"type": "integer"},
+                                "von": {"type": "string", "description": T("Anforderer (Standard: api:<Tokenname>)", "requester (default: api:<token name>)")},
+                                "abteilung": {"type": "string", "description": T("Team des Anforderers (für die Team-Sichtbarkeit)", "requester's team (for team visibility)")}}}}}},
+                    "responses": {"201": {"description": T("angelegt", "created")},
+                                  "401": {"description": T("Token fehlt/ungültig", "token missing/invalid")},
+                                  "403": {"description": T("Token ohne Schreibrecht", "token lacks write permission")}}},
+            },
+            "/api/v1/reservations/{id}/approve": {"post": _v1_decide(
+                T, "approve",
+                T("Antrag freigeben (aktuelle Stufe; Schreibrecht „Genehmigungen“)",
+                  "Approve the request's current stage (write permission „Approvals“)"))},
+            "/api/v1/reservations/{id}/reject": {"post": _v1_decide(
+                T, "reject",
+                T("Antrag ablehnen (Schreibrecht „Genehmigungen“)",
+                  "Reject the request (write permission „Approvals“)"))},
+            "/api/v1/reservations/{id}/cancel": {"post": _v1_decide(
+                T, "cancel",
+                T("Antrag stornieren (Schreibrecht „Reservierungen“)",
+                  "Cancel the request (write permission „Reservations“)"))},
         },
     }
+
+
+def _v1_decide(T, op, summary):
+    """POST-Operation für approve/reject/cancel in der OpenAPI-Spec."""
+    return {
+        "summary": summary,
+        "description": T("Wirkt wie eine Admin-Entscheidung (keine "
+                         "Team-Beschränkung); Actor im Audit-Log: api:<Tokenname>.",
+                         "Acts like an admin decision (no team restriction); "
+                         "actor in the audit log: api:<token name>."),
+        "parameters": [{"name": "id", "in": "path", "required": True,
+                        "schema": {"type": "string"},
+                        "description": T("Kapa-ID der Reservierung", "capa ID of the reservation")}],
+        "requestBody": {"required": False, "content": {"application/json": {
+            "schema": {"type": "object", "properties": {
+                "comment": {"type": "string", "maxLength": 64}}}}}},
+        "responses": {"200": {"description": "OK"},
+                      "401": {"description": T("Token fehlt/ungültig", "token missing/invalid")},
+                      "403": {"description": T("Token ohne Schreibrecht", "token lacks write permission")},
+                      "404": {"description": T("nicht gefunden oder bereits entschieden", "not found or already decided")}}}
 
 
 # Selbst-enthaltene, offline lauffähige API-Doku (kein CDN/Swagger-UI nötig);
@@ -1763,6 +1823,7 @@ API_DOCS_HTML = r"""<!DOCTYPE html>
   .ephead { display:flex; align-items:center; gap:10px; padding:12px 16px; cursor:pointer; }
   .method { font-weight:700; font-size:12px; padding:3px 8px; border-radius:6px;
             background:rgba(14,165,233,.15); color:var(--get); letter-spacing:.5px; }
+  .method.post { background:rgba(34,197,94,.15); color:var(--ok); }
   .path { font-family:monospace; font-size:14px; }
   .summary { color:var(--muted); margin-left:auto; font-size:13px; }
   .epbody { padding:0 16px 16px; border-top:1px solid var(--line); }
@@ -1824,7 +1885,7 @@ const L_EN = {
     "Self-contained – no external Swagger UI/CDN. Field details: see the OpenAPI spec.",
   "Parameter": "Parameter", "Bedeutung": "Meaning", "Wert (optional)": "Value (optional)",
   "Ausführen": "Run", "OpenAPI-Spec nicht ladbar.": "Could not load the OpenAPI spec.",
-  "Fehler: ": "Error: "
+  "Fehler: ": "Error: ", "JSON-Body (optional)": "JSON body (optional)", "Pfad": "path"
 };
 function tr(s) { return IS_DE ? s : (L_EN[(s || "").replace(/\s+/g, " ").trim()] || s); }
 if (!IS_DE) {
@@ -1847,38 +1908,51 @@ if (!IS_DE) {
 fetch("openapi.json").then(r => r.json()).then(spec => {
   const box = document.getElementById("eps");
   Object.keys(spec.paths).forEach(p => {
-    const op = spec.paths[p].get; if (!op) return;
-    const id = p.replace(/\W+/g, "_");
-    const params = op.parameters || [];
-    const prows = params.map(pa => `<tr><td style="width:130px"><code>${esc(pa.name)}</code></td>
-      <td>${esc(pa.description || "")}${pa.schema && pa.schema.enum ? ' <span style="color:var(--muted)">('+pa.schema.enum.map(esc).join(" | ")+')</span>' : ''}</td>
-      <td style="width:180px"><input data-p="${esc(pa.name)}" data-ep="${id}" placeholder="${pa.schema && pa.schema.enum ? esc(pa.schema.enum[0]) : ''}"></td></tr>`).join("");
-    const ptable = params.length ? `<table><tr><th>${tr("Parameter")}</th><th>${tr("Bedeutung")}</th><th>${tr("Wert (optional)")}</th></tr>${prows}</table>` : "";
-    box.insertAdjacentHTML("beforeend", `<div class="ep">
-      <div class="ephead" onclick="var b=this.nextElementSibling; b.style.display = b.style.display==='none'?'':'none';">
-        <span class="method">GET</span><span class="path">${esc(p)}</span>
-        <span class="summary">${esc(op.summary || "")}</span></div>
-      <div class="epbody" style="display:none">
-        <p>${esc(op.description || "")}</p>
-        ${ptable}
-        <button class="btn" onclick="run('${id}','${esc(p)}')">${tr("Ausführen")}</button>
-        <div class="status" id="st_${id}"></div>
-        <pre id="out_${id}" style="display:none"></pre>
-      </div></div>`);
+    ["get", "post"].forEach(m => {
+      const op = spec.paths[p][m]; if (!op) return;
+      const id = m + "_" + p.replace(/\W+/g, "_");
+      const params = (op.parameters || []).filter(pa => pa.in !== "path");
+      const pathParams = (op.parameters || []).filter(pa => pa.in === "path");
+      const prows = params.concat(pathParams).map(pa => `<tr><td style="width:130px"><code>${esc(pa.name)}</code>${pa.in === "path" ? ' <span style="color:var(--muted)">(' + tr("Pfad") + ')</span>' : ''}</td>
+        <td>${esc(pa.description || "")}${pa.schema && pa.schema.enum ? ' <span style="color:var(--muted)">('+pa.schema.enum.map(esc).join(" | ")+')</span>' : ''}</td>
+        <td style="width:180px"><input data-p="${esc(pa.name)}" data-in="${esc(pa.in)}" data-ep="${id}" placeholder="${pa.schema && pa.schema.enum ? esc(pa.schema.enum[0]) : ''}"></td></tr>`).join("");
+      const ptable = prows ? `<table><tr><th>${tr("Parameter")}</th><th>${tr("Bedeutung")}</th><th>${tr("Wert (optional)")}</th></tr>${prows}</table>` : "";
+      const bodyBox = (m === "post") ? `<div style="margin-top:6px">
+        <label style="font-size:12px;color:var(--muted)">${tr("JSON-Body (optional)")}</label>
+        <textarea id="body_${id}" style="width:100%;min-height:70px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-family:monospace;font-size:12px" placeholder='{"comment": "..."}'></textarea></div>` : "";
+      box.insertAdjacentHTML("beforeend", `<div class="ep">
+        <div class="ephead" onclick="var b=this.nextElementSibling; b.style.display = b.style.display==='none'?'':'none';">
+          <span class="method${m === "post" ? " post" : ""}">${m.toUpperCase()}</span><span class="path">${esc(p)}</span>
+          <span class="summary">${esc(op.summary || "")}</span></div>
+        <div class="epbody" style="display:none">
+          <p>${esc(op.description || "")}</p>
+          ${ptable}${bodyBox}
+          <button class="btn" onclick="run('${id}','${esc(p)}','${m}')">${tr("Ausführen")}</button>
+          <div class="status" id="st_${id}"></div>
+          <pre id="out_${id}" style="display:none"></pre>
+        </div></div>`);
+    });
   });
 }).catch(() => { document.getElementById("eps").textContent = tr("OpenAPI-Spec nicht ladbar."); });
 
-function run(id, path) {
+function run(id, path, method) {
   const st = document.getElementById("st_" + id), out = document.getElementById("out_" + id);
   const qs = [];
+  let p2 = path;
   document.querySelectorAll(`input[data-ep="${id}"]`).forEach(i => {
-    if (i.value.trim()) qs.push(encodeURIComponent(i.dataset.p) + "=" + encodeURIComponent(i.value.trim()));
+    const v = i.value.trim();
+    if (!v) return;
+    if (i.dataset.in === "path") p2 = p2.replace("{" + i.dataset.p + "}", encodeURIComponent(v));
+    else qs.push(encodeURIComponent(i.dataset.p) + "=" + encodeURIComponent(v));
   });
-  const url = BASE + path.replace(/^\/api\/v1/, "") + (qs.length ? "?" + qs.join("&") : "");
+  const url = BASE + p2.replace(/^\/api\/v1/, "") + (qs.length ? "?" + qs.join("&") : "");
   const h = {};
   if (tokEl.value.trim()) h["Authorization"] = "Bearer " + tokEl.value.trim();
+  const opts = { headers: h, method: (method || "get").toUpperCase() };
+  const bEl = document.getElementById("body_" + id);
+  if (bEl && bEl.value.trim()) { h["Content-Type"] = "application/json"; opts.body = bEl.value; }
   st.textContent = "… " + url;
-  fetch(url, { headers: h }).then(async r => {
+  fetch(url, opts).then(async r => {
     const ct = r.headers.get("content-type") || "";
     const body = await r.text();
     st.textContent = "HTTP " + r.status + " · " + url;
@@ -2373,7 +2447,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <tbody id="selbody"></tbody>
 </table>
 </div>
-<div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)</div>
+<div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   📖 <a href="api/v1/docs" target="_blank" rel="noopener">API-Dokumentation öffnen</a>
   (interaktiv, mit „Ausführen") · <a href="api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI-Spec</a>
@@ -2382,7 +2456,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="tablewrap">
 <table class="kt" id="ttable">
   <thead><tr><th>Anwendung</th><th>Token-Anfang</th><th>erstellt</th><th>von</th>
-    <th>zuletzt benutzt</th><th class="nosort">Aktion</th></tr></thead>
+    <th>zuletzt benutzt</th><th class="nosort">Schreibrechte</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="ttbody"></tbody>
 </table>
 </div>
@@ -3348,15 +3422,32 @@ function renderTokenTable() {
        <td style="font-family:monospace">${esc(t.prefix || "")}</td>
        <td>${fmtDate(t.created)}</td><td>${esc(t.created_by || "–")}</td>
        <td>${t.last_used ? esc(String(t.last_used).replace("T", " ")) : "nie"}</td>
+       <td style="white-space:nowrap">
+         <label title="POST /api/v1/reservations + /cancel"><input type="checkbox"
+           ${t.write_res ? "checked" : ""} onchange="setTokenScope('${esc(id)}')"
+           data-scope="res" data-tid="${esc(id)}"> Reservierungen</label><br>
+         <label title="POST /api/v1/reservations/{id}/approve + /reject"><input type="checkbox"
+           ${t.write_approve ? "checked" : ""} onchange="setTokenScope('${esc(id)}')"
+           data-scope="approve" data-tid="${esc(id)}"> Genehmigungen</label></td>
        <td><button class="del" onclick="delToken('${esc(id)}')">✕ Widerrufen</button></td></tr>`; })
     .join("");
   document.getElementById("ttbody").innerHTML =
-    `<tr><td colspan="5"><input class="filterbox" style="width:100%" id="tknName"
+    `<tr><td colspan="6"><input class="filterbox" style="width:100%" id="tknName"
        placeholder="Name der Anwendung, z. B. Grafana oder CMDB-Sync"
        onkeydown="if(event.key==='Enter')addToken()"></td>
      <td><button class="btn approve" onclick="addToken()">+ Token erzeugen</button></td></tr>` +
-    (rows || `<tr><td colspan="6" style="color:var(--muted)">Keine API-Tokens vorhanden.</td></tr>`);
+    (rows || `<tr><td colspan="7" style="color:var(--muted)">Keine API-Tokens vorhanden.</td></tr>`);
   reSort("ttable"); renderColMenu("ttable"); applyCols("ttable");
+}
+function setTokenScope(id) {
+  const get = sc => { const el = document.querySelector(`input[data-tid="${CSS.escape(id)}"][data-scope="${sc}"]`);
+                      return !!(el && el.checked); };
+  fetch("api/tokens/" + encodeURIComponent(id), { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ write_res: get("res"), write_approve: get("approve") }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => { if (d) { TOKENS = d; renderTokenTable(); } })
+    .catch(() => notify("Ändern der Token-Rechte fehlgeschlagen."));
 }
 
 // ---- Audit-Log (nur Admins) ----
@@ -4401,7 +4492,7 @@ const I18N = {
 "Noch keine Tag-Kategorien – erst nach dem ersten Aria-Abruf verfügbar.": "No tag categories yet – available after the first Aria refresh.",
 "✓ Selektor speichern": "✓ Save selector",
 "⚠ derzeit ohne Werte": "⚠ currently without values",
-"API-Tokens für externe Anwendungen (nur lesend, Endpunkte unter /api/v1/)": "API tokens for external applications (read-only, endpoints under /api/v1/)",
+"API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)": "API tokens for external applications (endpoints under /api/v1/; write permissions per token, one click)",
 "API-Dokumentation öffnen": "Open API documentation",
 "(interaktiv, mit „Ausführen\") ·": "(interactive, with \"Run\") ·",
 "OpenAPI-Spec": "OpenAPI spec", "zum Import in Swagger/Postman.": "for import into Swagger/Postman.",
@@ -4478,7 +4569,10 @@ const I18N = {
 "Speichern der Ankündigung fehlgeschlagen.": "Saving the announcement failed.",
 // --- Tanzu-Namespaces ---
 "davon Tanzu-Namespaces": "of which Tanzu namespaces",
-"Namespace": "Namespace", "CPU (MHz)": "CPU (MHz)", "vCPU-Äquiv.": "vCPU equiv."
+"Namespace": "Namespace", "CPU (MHz)": "CPU (MHz)", "vCPU-Äquiv.": "vCPU equiv.",
+// --- Token-Schreibrechte ---
+"Schreibrechte": "Write permissions",
+"Ändern der Token-Rechte fehlgeschlagen.": "Changing the token permissions failed."
 };
 // Muster mit variablen Teilen (ganzer Text)
 const I18N_RX = [
@@ -5279,7 +5373,7 @@ def serve(args, password):
 
     reservations = load_res()
 
-    # ---- API-Tokens für externe Anwendungen (nur lesend) ----
+    # ---- API-Tokens für externe Anwendungen (lesend + optionale Schreibrechte) ----
     tokens_lock = threading.Lock()
 
     def load_tokens():
@@ -5738,7 +5832,7 @@ def serve(args, password):
             return s
 
         def _bearer(self):
-            """API-Token aus dem Authorization-Header prüfen (nur lesend)."""
+            """API-Token aus dem Authorization-Header prüfen."""
             h = self.headers.get("Authorization") or ""
             if not h.startswith("Bearer "):
                 return None
@@ -5753,6 +5847,30 @@ def serve(args, password):
                             save_tokens()
                         return dict(t, id=tid)
             audit(None, "API-Zugriff abgewiesen", "ungültiges Bearer-Token")
+            return None
+
+        def _bearer_scope(self, flag, label):
+            """Schreibzugriff der v1-API: Bearer-Token mit dem jeweiligen
+            Schreibrecht (per Klick in der Verwaltung) ODER eine angemeldete
+            Admin-Session (zum Testen im Browser). Rückgabe: Actor-Name oder
+            None – die Fehlerantwort ist dann bereits gesendet."""
+            h = self.headers.get("Authorization") or ""
+            if h.startswith("Bearer "):
+                t = self._bearer()
+                if not t:
+                    self._json({"error": "Ungültiges oder widerrufenes Token"}, 401)
+                    return None
+                if not t.get(flag):
+                    audit(None, "API-Schreibzugriff abgewiesen",
+                          f"Token '{t.get('name')}' ohne Recht „{label}“")
+                    self._json({"error": f"Token ohne Schreibrecht „{label}“ "
+                                         "(in der Verwaltung aktivierbar)"}, 403)
+                    return None
+                return "api:" + (t.get("name") or t.get("id") or "?")
+            s = self._session()
+            if s and s["role"] == "admin":
+                return s["user"] or "Admin"
+            self._json({"error": "Bearer-Token mit Schreibrecht erforderlich"}, 401)
             return None
 
         def do_GET(self):
@@ -6000,6 +6118,135 @@ def serve(args, password):
                     audit(self._session()["user"], "Datenabruf aus Aria gestartet")
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"started": True}, 202)
+            # ---- v1-API: Schreib-Endpunkte (Bearer-Token mit Schreibrecht) ----
+            # Bewusst kompakte Spiegelungen der Session-Handler mit
+            # Admin-Semantik (keine Team-Beschränkung); Actor = "api:<Tokenname>".
+            elif self.path == "/api/v1/reservations":
+                actor = self._bearer_scope("write_res", "Reservierungen")
+                if not actor:
+                    return
+                item = self._body()
+                if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+                    self._json({"error": "Ungültige Reservierung (name erforderlich)"}, 400)
+                    return
+                oneline = lambda v, n: " ".join(str(v or "").split())[:n]
+                von = oneline(item.get("von"), 120) or actor
+                try:
+                    entry = {"id": new_res_id(),
+                             "cluster": oneline(item.get("cluster"), 120),
+                             "name": oneline(item.get("name"), 120),
+                             "change": oneline(item.get("change"), 60),
+                             "vcpu": int(float(item.get("vcpu") or 0)),
+                             "ram_gb": int(float(item.get("ram_gb") or 0)),
+                             "storage_gb": int(float(item.get("storage_gb") or 0)),
+                             "von": von,
+                             "von_mail": von if "@" in von else "",
+                             "abteilung": oneline(item.get("abteilung"), 60),
+                             "created": datetime.now().date().isoformat(),
+                             "approvals": [],
+                             "approved": False}
+                except (TypeError, ValueError):
+                    self._json({"error": "Ungültige Zahlenwerte"}, 400)
+                    return
+                with res_lock:
+                    prune_reservations()
+                    reservations.append(entry)
+                    res_put(entry)
+                self._json({"reservation": public_res(entry)}, 201)
+                audit(actor, "Antrag erstellt (API)", res_detail(entry))
+                mail_event("created", entry, actor=actor)
+                if approval_teams:
+                    mail_event("team_turn", entry, team=current_team(entry),
+                               actor=actor)
+            elif (self.path.startswith("/api/v1/reservations/")
+                    and self.path.endswith(("/approve", "/reject", "/cancel"))):
+                op = self.path.rsplit("/", 1)[1]
+                flag, label = (("write_approve", "Genehmigungen")
+                               if op in ("approve", "reject")
+                               else ("write_res", "Reservierungen"))
+                actor = self._bearer_scope(flag, label)
+                if not actor:
+                    return
+                rid = urllib.parse.unquote(
+                    self.path[len("/api/v1/reservations/"):-(len(op) + 1)])
+                comment = str((self._body() or {}).get("comment") or "").strip()[:64]
+                today = datetime.now().date().isoformat()
+                notify = None
+                action = None
+                err = None
+                with res_lock:
+                    r = next((x for x in reservations if x.get("id") == rid
+                              and not x.get("rejected") and not x.get("cancelled")
+                              and (op == "cancel" or not x.get("approved"))), None)
+                    if r is None:
+                        err = ("Antrag nicht gefunden oder bereits entschieden.", 404)
+                    elif op == "approve":
+                        team = current_team(r)
+                        if approval_teams:
+                            r.setdefault("approvals", []).append(
+                                {"team": team, "by": actor, "on": today,
+                                 "comment": comment})
+                            if len(r["approvals"]) >= len(approval_teams):
+                                r["approved"] = True
+                                r["approved_on"] = today
+                                r["approved_by"] = actor
+                                if comment:
+                                    r["comment"] = comment
+                                action = "genehmigt"
+                            else:
+                                action = f"von {team} freigegeben"
+                        else:
+                            r["approved"] = True
+                            r["approved_on"] = today
+                            r["approved_by"] = actor
+                            if comment:
+                                r["comment"] = comment
+                            action = "genehmigt"
+                        notify = dict(r)
+                        res_put(r)
+                    elif op == "reject":
+                        team = current_team(r)
+                        r["rejected"] = True
+                        r["rejected_on"] = today
+                        r["rejected_by"] = actor
+                        if team:
+                            r["rejected_team"] = team
+                        if comment:
+                            r["comment"] = comment
+                        notify = dict(r)
+                        res_put(r)
+                    else:                       # cancel
+                        r["cancelled"] = True
+                        r["cancelled_on"] = today
+                        r["cancelled_by"] = actor
+                        if comment:
+                            r["comment"] = comment
+                        notify = dict(r)
+                        res_put(r)
+                if err:
+                    self._json({"error": err[0]}, err[1])
+                    return
+                self._json({"reservation": public_res(notify)})
+                cmt = f", Kommentar: {comment}" if comment else ""
+                if op == "approve":
+                    verb = ("Antrag genehmigt" if action == "genehmigt"
+                            else "Antrag freigegeben")
+                    audit(actor, verb + " (API)",
+                          res_detail(notify) + f" – {action}{cmt}")
+                    if notify.get("approved"):
+                        mail_event("approved", notify, actor=actor)
+                    else:
+                        nt = current_team(notify)
+                        if nt:
+                            mail_event("team_turn", notify, team=nt, actor=actor)
+                elif op == "reject":
+                    audit(actor, "Antrag abgelehnt (API)", res_detail(notify)
+                          + (f" (Stufe {notify.get('rejected_team')})"
+                             if notify.get("rejected_team") else "") + cmt)
+                    mail_event("rejected", notify, actor=actor)
+                else:
+                    audit(actor, "Antrag storniert (API)",
+                          res_detail(notify) + cmt)
             elif self.path == "/api/reservations":
                 s = self._require("admin", "anforderer")
                 if not s:
@@ -6248,7 +6495,7 @@ def serve(args, password):
                                    "last_used": ""}
                     save_tokens()
                 audit(s["user"], "API-Token erstellt",
-                      f"{name} ({raw[:11]}…, nur lesend)")
+                      f"{name} ({raw[:11]}…, lesend – Schreibrechte per Klick)")
                 self._json({"token": raw, "tokens": token_list()})
             elif self.path == "/api/roles":
                 if not self._require("admin"):
@@ -6462,6 +6709,31 @@ def serve(args, password):
                     "html": render_template(th, _mail_values(
                         sample, "genehmigt", "tom.weber", args.res_ttl_days,
                         "Team Security", html=True))})
+            elif self.path.startswith("/api/tokens/"):
+                # Schreibrechte eines Tokens per Klick setzen (Verwaltung)
+                s = self._require("admin")
+                if not s:
+                    return
+                tid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+                body = self._body() or {}
+                with tokens_lock:
+                    t = tokens.get(tid)
+                    if not t:
+                        self._json({"error": "Token nicht gefunden"}, 404)
+                        return
+                    t["write_res"] = bool(body.get("write_res"))
+                    t["write_approve"] = bool(body.get("write_approve"))
+                    t["scope"] = ("read"
+                                  + ("+res" if t["write_res"] else "")
+                                  + ("+approve" if t["write_approve"] else ""))
+                    save_tokens()
+                    name = t.get("name", tid)
+                    self._json(token_list())
+                rights = [lbl for flag, lbl in (("write_res", "Reservierungen"),
+                                                ("write_approve", "Genehmigungen"))
+                          if body.get(flag)]
+                audit(s["user"], "API-Token-Rechte geändert",
+                      f"{name}: " + " + ".join(["lesen"] + rights))
             elif self.path == "/api/prefs":
                 s = self._require()
                 if not s:

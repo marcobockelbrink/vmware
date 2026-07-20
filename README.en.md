@@ -65,7 +65,8 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   marker per user); changing the text shows it to everyone again. Ideal for
   release news, new datacenters or maintenance windows
 - **Read-only configuration sheet** (all configured values, passwords only as "set: yes/no")
-- **API tokens** for the read-only v1 REST API, one-click backup
+- **API tokens** for the v1 REST API; **write permissions per token, one click**
+  (create/cancel reservations, approve/reject), one-click backup
 
 **Operations & tech**
 - Data stored as **JSON files or SQLite** (`--storage`), **atomic** writes
@@ -375,7 +376,7 @@ switching back to `json` stays possible at any time. The audit log
 
 ## API for external applications
 
-Under `/api/v1/` there is a stable, **read-only** REST API for external
+Under `/api/v1/` there is a stable REST API for external
 applications (Grafana, CMDB, reporting …). Admins create named bearer tokens
 in the "Administration" tab (shown only once, only the hash is stored,
 individually revocable, usage audit-logged):
@@ -385,8 +386,13 @@ curl -H "Authorization: Bearer kapa_..." \
   "https://host/capa/api/v1/reservations?status=genehmigt&format=csv"
 ```
 
-Endpoints: `/api/v1/reservations` (filters: `cluster`, `status`, `abteilung`;
-`format=csv`), `/api/v1/data` (cluster capacities), `/api/v1/status`.
+Read endpoints: `/api/v1/reservations` (filters: `cluster`, `status`,
+`abteilung`; `format=csv`), `/api/v1/data` (cluster capacities),
+`/api/v1/status`. **Write** (write permissions per token, one click in the
+administration, audit-logged): `POST /api/v1/reservations` (create) and
+`…/{id}/cancel` with the "Reservations" permission, `…/{id}/approve` and
+`…/{id}/reject` with the "Approvals" permission — details in
+[`config/API.md`](config/API.md).
 
 **Language:** JSON field names and status values are part of the stable v1
 contract and stay German (`status=genehmigt` etc.). **CSV headers/status

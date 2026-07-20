@@ -1,4 +1,4 @@
-# API für externe Anwendungen (v1, nur lesend)
+# API für externe Anwendungen (v1)
 
 > **Interaktiv im Dashboard:** `/api/v1/docs` (Swagger-artige Seite mit
 > „Ausführen", offline lauffähig) · **OpenAPI-Spec:** `/api/v1/openapi.json`
@@ -108,7 +108,40 @@ die Reservierungen liefert `/api/v1/reservations` (Status `genehmigt`).
   Vertrag). CSV-Spalten/Statuswerte und die OpenAPI-Beschreibungen folgen
   `Accept-Language` bzw. `?lang=de|en`; ohne Header (curl/Skripte) unverändert
   Deutsch.
-- Tokens sind rein lesend — Schreibzugriffe (Anträge stellen) sind für eine
-  spätere Version mit eigenem `write`-Scope vorgesehen.
 - Browser-Sessions (angemeldete Admins) können die v1-Endpunkte ebenfalls
   aufrufen, z. B. zum Testen.
+
+## Schreib-Endpunkte (Schreibrechte je Token)
+
+Tokens sind standardmäßig **lesend**. In der Verwaltung (Abschnitt
+„API-Tokens") lassen sich je Token **per Klick** zwei Schreibrechte
+aktivieren; jede Änderung landet im Audit-Log:
+
+| Schreibrecht | Endpunkte |
+|---|---|
+| **Reservierungen** | `POST /api/v1/reservations` (anlegen), `POST /api/v1/reservations/{id}/cancel` (stornieren) |
+| **Genehmigungen** | `POST /api/v1/reservations/{id}/approve` (aktuelle Stufe freigeben), `POST /api/v1/reservations/{id}/reject` (ablehnen) |
+
+```bash
+# Anlegen (Status „beantragt", durchläuft den normalen Workflow):
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"SAP-Erweiterung","cluster":"Cluster-01","vcpu":8,"ram_gb":64,
+       "storage_gb":500,"von":"cmdb@firma.local","abteilung":"Team Netzwerk"}' \
+  $BASE/api/v1/reservations
+
+# Freigeben / Ablehnen / Stornieren (Kommentar optional, max. 64 Zeichen):
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"comment":"passt"}' $BASE/api/v1/reservations/KAPA-1a2b3c/approve
+```
+
+Hinweise:
+
+- API-Entscheidungen wirken wie **Admin-Entscheidungen** (keine
+  Team-Beschränkung); `approve` gibt die jeweils **aktuelle Stufe** frei —
+  erst wenn alle Stufen freigegeben sind, ist der Antrag genehmigt.
+- Actor in Audit-Log und Mails ist `api:<Tokenname>`; bei `POST
+  /api/v1/reservations` lassen sich `von` (Anforderer) und `abteilung`
+  (Team, für die Team-Sichtbarkeit) mitgeben.
+- Mail-Benachrichtigungen laufen wie bei Aktionen im UI.
+- Fehler: `403` = Token ohne das nötige Schreibrecht, `404` = Antrag nicht
+  gefunden oder bereits entschieden.
