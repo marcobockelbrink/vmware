@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.6"
+VERSION = "2.7"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1711,11 +1711,28 @@ def openapi_spec(lang="de"):
             "/api/v1/data": {"get": {
                 "summary": T("Cluster-Kapazitäten", "Cluster capacities"),
                 "description": T("Cluster-Kennzahlen aus dem letzten Aria-Abruf. "
-                                 "vcpuFree/ramFree sind VOR Abzug genehmigter Reservierungen.",
+                                 "vcpuFree/ramFree sind VOR Abzug genehmigter "
+                                 "Reservierungen. Als CSV (format=csv) zusätzlich "
+                                 "mit effektiv freien Werten nach Reservierungen "
+                                 "und Tanzu-Namespaces.",
                                  "Cluster metrics from the last Aria refresh. "
-                                 "vcpuFree/ramFree are BEFORE subtracting approved reservations."),
-                "responses": {"200": {"description": "OK", "content": {"application/json": {
-                    "schema": {"$ref": "#/components/schemas/Data"}}}},
+                                 "vcpuFree/ramFree are BEFORE subtracting approved "
+                                 "reservations. As CSV (format=csv) additionally "
+                                 "with effective free values after reservations "
+                                 "and Tanzu namespaces."),
+                "parameters": [
+                    {"name": "format", "in": "query", "schema": {"type": "string",
+                     "enum": ["json", "csv"], "default": "json"}},
+                    {"name": "lang", "in": "query", "schema": {"type": "string",
+                     "enum": ["de", "en"]},
+                     "description": T("Sprache der CSV-Spalten (Standard: "
+                                      "Accept-Language, sonst Deutsch)",
+                                      "language of the CSV headers (default: "
+                                      "Accept-Language, else German)")},
+                ],
+                "responses": {"200": {"description": "OK", "content": {
+                    "application/json": {"schema": {"$ref": "#/components/schemas/Data"}},
+                    "text/csv": {"schema": {"type": "string"}}}},
                     "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}}}},
             "/api/v1/reservations": {"get": {
                 "summary": T("Reservierungen (Kapazitätsanfragen)", "Reservations (capacity requests)"),
@@ -2302,7 +2319,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <div id="kapaView">
 <div class="selbar" id="clusterSelector" style="display:none"></div>
-<div style="text-align:right;margin-bottom:8px"><span id="colctl_ktable"></span></div>
+<div style="text-align:right;margin-bottom:8px">
+  <a class="btn" href="api/v1/data?format=csv" download="kapazitaet.csv"
+     title="Kapazitätstabelle als CSV (Semikolon, für Excel) – inkl. effektiv freier Werte">Kapazität als CSV</a>
+  <span id="colctl_ktable"></span></div>
 <div class="tablewrap">
 <table class="kt" id="ktable">
   <thead><tr><th>Cluster</th><th class="num">Hosts</th><th class="num">VMs</th>
@@ -3381,13 +3401,17 @@ function setView(v) {
   document.getElementById("filter").placeholder =
     v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
+  hideCard();   // VOR dem Hash-Schreiben: räumt ggf. den #cluster-Hash weg
   try {
+    // Einen Deep-Link-Hash (#cluster=…) erhalten – er überlebt so das
+    // initiale setView() und öffnet danach die Detailkarte.
+    const keep = location.hash.startsWith("#cluster=") ? location.hash : "";
     history.replaceState(null, "",
-      v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
+      keep ? location.pathname + keep
+      : v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
       : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
-  hideCard();
   if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); }
   if (v === "log") loadLog();
   render();
@@ -4161,12 +4185,16 @@ function showCard(idx, rowEl) {
   hc.innerHTML = '<button class="hc-close" title="Schließen" onclick="hideCard()">✕</button>' +
                  card(idx === -1 ? TOTAL : CLUSTERS[idx], idx, idx === -1);
   hc.style.display = "block";
-  const r = rowEl.getBoundingClientRect();
+  // Ohne rowEl (Deep-Link) oben links positionieren
+  const r = rowEl ? rowEl.getBoundingClientRect() : { bottom: 90, left: 40 };
   let top = r.bottom + 6;
   if (top + hc.offsetHeight > innerHeight - 10)
     top = Math.max(10, innerHeight - hc.offsetHeight - 10);
   hc.style.top = top + "px";
   hc.style.left = Math.min(Math.max(10, r.left + 60), Math.max(10, innerWidth - hc.offsetWidth - 10)) + "px";
+  // Deep-Link: geöffneter Cluster steht teilbar in der URL (#cluster=Name)
+  if (idx >= 0 && CLUSTERS[idx])
+    history.replaceState(null, "", "#cluster=" + encodeURIComponent(CLUSTERS[idx].name));
 }
 function toggleCard(idx, cell) {
   if (hoverIdx === idx && hc.style.display === "block") hideCard();
@@ -4176,7 +4204,14 @@ function openStorage(idx, cell) {
   CARD_TAB = "storage";           // Klick auf den Storage-Wert -> Storage-Reiter
   showCard(idx, cell.parentElement);
 }
-function hideCard() { hc.style.display = "none"; hoverIdx = null; }
+function hideCard() {
+  const wasOpen = hc.style.display === "block";
+  hc.style.display = "none"; hoverIdx = null;
+  // Hash nur löschen, wenn die Karte wirklich offen war – sonst würde der
+  // Deep-Link-Hash beim initialen setView() verloren gehen.
+  if (wasOpen && location.hash.startsWith("#cluster="))
+    history.replaceState(null, "", location.pathname);
+}
 // Klick außerhalb schließt die Detailkarte. WICHTIG: in der Capture-Phase (true)
 // prüfen – Elemente in der Karte (Reiter, Sortier-Links) ersetzen beim Klick den
 // Karteninhalt. In der Bubble-Phase wäre e.target dann schon aus dem DOM entfernt
@@ -4357,6 +4392,18 @@ if (SERVE) {
 }
 maybeShowAnnounce();
 
+// Deep-Link: #cluster=Name öffnet die Detailkarte direkt (auch teilbar in
+// Tickets/Chats); reagiert zusätzlich auf Hash-Änderungen zur Laufzeit.
+function openClusterHash() {
+  const m = location.hash.match(/^#cluster=(.+)$/);
+  if (!m) return;
+  const name = decodeURIComponent(m[1]);
+  const i = CLUSTERS.findIndex(c => c.name === name);
+  if (i >= 0) showCard(i, null);
+}
+openClusterHash();
+window.addEventListener("hashchange", openClusterHash);
+
 // ============================================================================
 // Sprache: Deutsch ist die Quelle im Code. Browser auf Deutsch -> alles bleibt
 // wie es ist. Jede andere Browsersprache -> Englisch: ein Wörterbuch übersetzt
@@ -4380,6 +4427,9 @@ const I18N = {
 "Reservierungen exportieren (JSON)": "Export reservations (JSON)",
 "Reservierungen importieren (JSON)": "Import reservations (JSON)",
 "Reservierungen als CSV (Semikolon, für Excel)": "Reservations as CSV (semicolon, Excel-ready)",
+"Kapazität als CSV": "Capacity as CSV",
+"Kapazitätstabelle als CSV (Semikolon, für Excel) – inkl. effektiv freier Werte":
+  "Capacity table as CSV (semicolon, Excel-ready) – incl. effective free values",
 "Cluster filtern …": "Filter clusters …", "Cluster suchen …": "Search clusters …",
 "Schließen": "Close", "Ausblenden": "Hide", "Abbrechen": "Cancel", "Bestätigen": "Confirm",
 "Hinweis": "Notice", "Übernehmen": "Apply", "Zurücksetzen": "Reset",
@@ -5501,6 +5551,57 @@ def serve(args, password):
                         freigaben, r.get("comment", "")])
         return buf.getvalue()
 
+    def data_csv(clusters, lang="de"):
+        """Kapazitätstabelle als CSV — inkl. effektiv freier Werte nach Abzug
+        genehmigter Reservierungen und Tanzu-Namespaces (wie im UI)."""
+        import csv
+        import io
+        with res_lock:
+            rv = {}
+            for r in reservations:
+                if r.get("approved") and not r.get("cancelled"):
+                    e = rv.setdefault(r.get("cluster") or "", [0, 0.0, 0.0])
+                    e[0] += int(r.get("vcpu") or 0)
+                    e[1] += float(r.get("ram_gb") or 0)
+                    e[2] += float(r.get("storage_gb") or 0)
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";")
+        if lang == "en":
+            w.writerow(["cluster", "source", "hosts", "vms", "cores",
+                        "vcpu_cap", "vcpu_used", "vcpu_free",
+                        "reserved_vcpu", "tanzu_vcpu", "vcpu_free_effective",
+                        "ram_cap_gb", "ram_used_gb", "ram_free_gb",
+                        "reserved_ram_gb", "tanzu_ram_gb", "ram_free_effective_gb",
+                        "storage_cap_gb", "storage_used_gb", "storage_free_gb",
+                        "reserved_storage_gb", "storage_free_effective_gb",
+                        "workload_pct"])
+        else:
+            w.writerow(["cluster", "quelle", "hosts", "vms", "cores",
+                        "vcpu_kap", "vcpu_belegt", "vcpu_frei",
+                        "reserviert_vcpu", "tanzu_vcpu", "vcpu_frei_effektiv",
+                        "ram_kap_gb", "ram_belegt_gb", "ram_frei_gb",
+                        "reserviert_ram_gb", "tanzu_ram_gb", "ram_frei_effektiv_gb",
+                        "storage_kap_gb", "storage_belegt_gb", "storage_frei_gb",
+                        "reserviert_storage_gb", "storage_frei_effektiv_gb",
+                        "workload_pct"])
+        for c in clusters:
+            rc, rr, rs = rv.get(c.get("name") or "", [0, 0.0, 0.0])
+            tz_c = int(c.get("tanzuVcpu") or 0)
+            tz_r = float(c.get("tanzuRamGb") or 0)
+            w.writerow([
+                c.get("name", ""), c.get("source") or "",
+                c.get("hostCount", 0), c.get("vmCount", 0), c.get("cores", 0),
+                c.get("vcpuCap", 0), c.get("vcpuUsed", 0), c.get("vcpuFree", 0),
+                rc, tz_c, c.get("vcpuFree", 0) - rc - tz_c,
+                c.get("ramCap", 0), c.get("ramUsed", 0), c.get("ramFree", 0),
+                round(rr, 1), tz_r,
+                round(float(c.get("ramFree") or 0) - rr - tz_r, 1),
+                c.get("storageCap", 0), c.get("storageUsed", 0),
+                c.get("storageFree", 0), round(rs, 1),
+                round(float(c.get("storageFree") or 0) - rs, 1),
+                c.get("workload", "")])
+        return buf.getvalue()
+
     # ---- Audit-Log (JSONL, nur für Admins einsehbar) ----
     # Rotation: ab LOG_MAX_BYTES wird die Datei zu .1 (…, .LOG_KEEP) weggerollt,
     # damit sie nicht unbegrenzt wächst. Gelesen wird nur das Dateiende.
@@ -6070,6 +6171,20 @@ def serve(args, password):
             elif route in ("/api/v1/docs", "/api/v1/docs/"):
                 self._send(API_DOCS_HTML.replace("__VERSION__", VERSION),
                            "text/html; charset=utf-8")
+            elif route == "/healthz":
+                # Monitoring-Endpunkt: bewusst OHNE Authentifizierung, dafür
+                # nur unkritische Betriebsdaten (keine Cluster-/Nutzerdaten).
+                age = (int(time.time() - state["last"]) if state.get("last")
+                       else None)
+                self._json({
+                    "status": ("error" if state.get("error")
+                               and not state.get("clusters") else "ok"),
+                    "version": VERSION,
+                    "updated": state["updated"] or None,
+                    "data_age_seconds": age,
+                    "refreshing": bool(state["refreshing"]),
+                    "clusters": len(state.get("clusters") or []),
+                    "error": state.get("error") or None})
             elif route in ("/api/v1/reservations", "/api/v1/data", "/api/v1/status"):
                 # Stabile v1-API für externe Anwendungen: Bearer-Token oder Session
                 tok = self._bearer()
@@ -6089,9 +6204,12 @@ def serve(args, password):
                 elif route == "/api/v1/data":
                     # Token = externe Anwendung (Workload ok); Session eines
                     # Anforderers bekommt den Workload wie im UI nicht.
-                    self._json({"updated": state["updated"],
-                                "clusters": (state["clusters"] if tok
-                                             else clusters_for(s["role"]))})
+                    cl = state["clusters"] if tok else clusters_for(s["role"])
+                    if query.get("format", [""])[0] == "csv":
+                        self._send(data_csv(cl, self._lang()),
+                                   "text/csv; charset=utf-8")
+                    else:
+                        self._json({"updated": state["updated"], "clusters": cl})
                 else:
                     with res_lock:
                         prune_reservations()

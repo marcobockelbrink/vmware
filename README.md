@@ -77,7 +77,8 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 - **Performance**: gzip-komprimierte Antworten (Seite ~¼, JSON ~⅛ der Größe) und ein
   **VLAN-Cache** — Portgruppen-VLANs werden zwischen Abrufen wiederverwendet (einmal
   täglich Voll-Abruf), statt je Portgruppe einen API-Aufruf zu machen
-- **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend)
+- **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend), **`/healthz`**
+  fürs Monitoring (ohne Anmeldung: Status, Datenalter, Cluster-Anzahl)
 - **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**
 - Auslieferung als **systemd + nginx**, **RPM**, **Ansible** oder **Container** (fertiges Image auf **GHCR**, bei jedem Release automatisch gebaut)
 
@@ -144,7 +145,12 @@ Details zu jedem Bereich in den folgenden Abschnitten.
   liest nur das Dateiende – das Log kann also nicht unbegrenzt wachsen oder
   den Aufruf ausbremsen.
 - **Export**: Reservierungen als **CSV** (Semikolon, direkt Excel-tauglich)
-  oder als JSON über die Knöpfe in der Kopfleiste.
+  oder als JSON über die Knöpfe in der Kopfleiste; die **Kapazitätstabelle**
+  als CSV über den Knopf „Kapazität als CSV" (inkl. effektiv freier Werte
+  nach Reservierungen und Tanzu; auch per API: `/api/v1/data?format=csv`).
+- **Deep-Links**: `#cluster=Name` in der URL öffnet die Detailkarte direkt —
+  ein geöffneter Cluster steht automatisch teilbar in der Adresszeile
+  (praktisch für Tickets und Chats).
 - **Auto-Aktualisierung** im Serve-Modus (Standard: alle 30 Minuten, sichtbarer
   Countdown) plus Knopf „⟳ Jetzt aktualisieren"
 

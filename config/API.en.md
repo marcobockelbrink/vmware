@@ -89,6 +89,11 @@ Cluster capacities from the last Aria refresh:
 Note: `vcpuFree`/`ramFree` are **before** subtracting approved reservations;
 the reservations come from `/api/v1/reservations` (status `genehmigt`).
 
+**CSV export** (`format=csv`, semicolon; headers follow `Accept-Language`
+or `?lang=de|en`): additionally with `reserved_*`, `tanzu_*` and
+`*_free_effective` columns — the free capacity **after** approved
+reservations and Tanzu namespaces, as in the UI.
+
 ### GET /api/v1/status
 
 ```json
@@ -97,6 +102,13 @@ the reservations come from `/api/v1/reservations` (status `genehmigt`).
 ```
 
 `next` = seconds until the next automatic refresh.
+
+### GET /healthz
+
+Monitoring endpoint **without authentication** (deliberately only
+uncritical operational data): `status` (ok/error), `version`, `updated`,
+`data_age_seconds`, `refreshing`, `clusters` (count), `error`.
+Lives outside `/api/v1/` and is meant for uptime checks.
 
 ## Error codes
 

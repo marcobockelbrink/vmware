@@ -77,7 +77,8 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 - **Performance**: gzip-compressed responses (page ~¼, JSON ~⅛ of the size) and a
   **VLAN cache** — port group VLANs are reused between refreshes (full re-read
   once a day) instead of one API call per port group
-- **SFTP backup** with rotation, **audit log** (JSONL, rotating)
+- **SFTP backup** with rotation, **audit log** (JSONL, rotating), **`/healthz`**
+  for monitoring (no sign-in: status, data age, cluster count)
 - **One INI** for all non-secret settings, secrets as `.pass` files; optional **Aria proxy**
 - Ships as **systemd + nginx**, **RPM**, **Ansible** or **container** (ready-made image on **GHCR**, built automatically on every release)
 
@@ -136,7 +137,12 @@ Details for each area in the sections below.
   10 MB (`.1` … `.3`) and the view only reads the file tail — the log can
   neither grow without bounds nor slow down page loads.
 - **Export**: reservations as **CSV** (semicolon, Excel-ready) or as JSON via
-  the header buttons.
+  the header buttons; the **capacity table** as CSV via the "Capacity as CSV"
+  button (incl. effective free values after reservations and Tanzu; also via
+  API: `/api/v1/data?format=csv`).
+- **Deep links**: `#cluster=Name` in the URL opens the detail card directly —
+  an open cluster automatically appears shareable in the address bar
+  (handy for tickets and chats).
 - **Auto-refresh** in serve mode (default: every 30 minutes, visible
   countdown) plus a "⟳ Refresh now" button
 
