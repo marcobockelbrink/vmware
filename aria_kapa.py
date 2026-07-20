@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.7"
+VERSION = "2.8"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1833,10 +1833,22 @@ API_DOCS_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>/* Theme vor dem ersten Rendern setzen (kein Flackern). ?theme=light|dark
+   in der URL überstimmt einmalig (z. B. für Kiosk-Anzeigen), sonst gilt die
+   gespeicherte Wahl bzw. die Systemeinstellung. */
+try { var _t = new URLSearchParams(location.search).get("theme")
+            || localStorage.getItem("kapa_theme");
+  if (!_t && window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) _t = "light";
+  if (_t === "light") document.documentElement.setAttribute("data-theme", "light");
+} catch (e) {}</script>
 <title>API-Dokumentation – VMware Kapazitätsplanung</title>
 <style>
   :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
-          --accent:#38bdf8; --ok:#22c55e; --get:#0ea5e9; }
+          --accent:#38bdf8; --ok:#22c55e; --get:#0ea5e9; --field:#0b1220; }
+  html[data-theme="light"] { --bg:#eef2f7; --card:#ffffff; --line:#d4dbe5;
+          --text:#1e293b; --muted:#5b6b7f; --accent:#0369a1; --ok:#15803d;
+          --get:#0284c7; --field:#f6f8fb; }
+  html[data-theme="light"] .btn { color:#ffffff; }
   * { box-sizing:border-box; }
   body { background:var(--bg); color:var(--text); font:14px/1.55 "Segoe UI",system-ui,sans-serif;
          margin:0; padding:24px; }
@@ -1847,7 +1859,7 @@ API_DOCS_HTML = r"""<!DOCTYPE html>
   .authbox { background:var(--card); border:1px solid var(--line); border-radius:12px;
              padding:14px 16px; margin-bottom:20px; }
   .authbox label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
-  .authbox input { width:100%; background:#0b1220; border:1px solid var(--line); color:var(--text);
+  .authbox input { width:100%; background:var(--field); border:1px solid var(--line); color:var(--text);
                    border-radius:8px; padding:9px 12px; font-size:13px; font-family:monospace; }
   .hint { color:var(--muted); font-size:12px; margin-top:6px; }
   .ep { background:var(--card); border:1px solid var(--line); border-radius:12px;
@@ -1863,11 +1875,11 @@ API_DOCS_HTML = r"""<!DOCTYPE html>
   table { border-collapse:collapse; width:100%; font-size:13px; margin:8px 0; }
   th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
   th { color:var(--muted); font-weight:600; }
-  td input { background:#0b1220; border:1px solid var(--line); color:var(--text);
+  td input { background:var(--field); border:1px solid var(--line); color:var(--text);
              border-radius:6px; padding:5px 8px; font-size:13px; width:100%; }
   .btn { background:var(--accent); color:#08131f; border:none; border-radius:8px;
          padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; margin-top:6px; }
-  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:12px;
+  pre { background:var(--field); border:1px solid var(--line); border-radius:8px; padding:12px;
         overflow:auto; font-size:12px; max-height:360px; }
   .status { font-weight:600; margin:8px 0 4px; }
   .foot { color:var(--muted); font-size:12px; margin-top:24px; }
@@ -1951,7 +1963,7 @@ fetch("openapi.json").then(r => r.json()).then(spec => {
       const ptable = prows ? `<table><tr><th>${tr("Parameter")}</th><th>${tr("Bedeutung")}</th><th>${tr("Wert (optional)")}</th></tr>${prows}</table>` : "";
       const bodyBox = (m === "post") ? `<div style="margin-top:6px">
         <label style="font-size:12px;color:var(--muted)">${tr("JSON-Body (optional)")}</label>
-        <textarea id="body_${id}" style="width:100%;min-height:70px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-family:monospace;font-size:12px" placeholder='{"comment": "..."}'></textarea></div>` : "";
+        <textarea id="body_${id}" style="width:100%;min-height:70px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-family:monospace;font-size:12px" placeholder='{"comment": "..."}'></textarea></div>` : "";
       box.insertAdjacentHTML("beforeend", `<div class="ep">
         <div class="ephead" onclick="var b=this.nextElementSibling; b.style.display = b.style.display==='none'?'':'none';">
           <span class="method${m === "post" ? " post" : ""}">${m.toUpperCase()}</span><span class="path">${esc(p)}</span>
@@ -2002,19 +2014,32 @@ LOGIN_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>/* Theme vor dem ersten Rendern setzen (kein Flackern). ?theme=light|dark
+   in der URL überstimmt einmalig (z. B. für Kiosk-Anzeigen), sonst gilt die
+   gespeicherte Wahl bzw. die Systemeinstellung. */
+try { var _t = new URLSearchParams(location.search).get("theme")
+            || localStorage.getItem("kapa_theme");
+  if (!_t && window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) _t = "light";
+  if (_t === "light") document.documentElement.setAttribute("data-theme", "light");
+} catch (e) {}</script>
 <title>Anmeldung – VMware Kapazitätsplanung</title>
 <style>
-  body { background:#0f172a; color:#e2e8f0; font:14px/1.5 "Segoe UI",system-ui,sans-serif;
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0;
+          --muted:#94a3b8; --accent:#38bdf8; --field:#0b1220; --accent-text:#0b1220; }
+  html[data-theme="light"] { --bg:#eef2f7; --card:#ffffff; --line:#d4dbe5;
+          --text:#1e293b; --muted:#5b6b7f; --accent:#0369a1; --field:#f6f8fb;
+          --accent-text:#ffffff; }
+  body { background:var(--bg); color:var(--text); font:14px/1.5 "Segoe UI",system-ui,sans-serif;
          display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
-  .box { background:#1e293b; border:1px solid #334155; border-radius:12px;
+  .box { background:var(--card); border:1px solid var(--line); border-radius:12px;
          padding:28px; width:340px; }
-  h1 { font-size:17px; margin:0 0 4px; color:#38bdf8; }
-  p { color:#94a3b8; font-size:12px; margin:0 0 16px; }
-  label { display:block; font-size:12px; color:#94a3b8; margin:12px 0 4px; }
-  input { width:100%; box-sizing:border-box; background:#0b1220; border:1px solid #334155;
-          color:#e2e8f0; border-radius:6px; padding:8px 10px; font-size:13px; }
-  input:focus { outline:none; border-color:#38bdf8; }
-  button { width:100%; margin-top:18px; background:#38bdf8; color:#0b1220; border:none;
+  h1 { font-size:17px; margin:0 0 4px; color:var(--accent); }
+  p { color:var(--muted); font-size:12px; margin:0 0 16px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; box-sizing:border-box; background:var(--field); border:1px solid var(--line);
+          color:var(--text); border-radius:6px; padding:8px 10px; font-size:13px; }
+  input:focus { outline:none; border-color:var(--accent); }
+  button { width:100%; margin-top:18px; background:var(--accent); color:var(--accent-text); border:none;
            border-radius:8px; padding:9px; font-size:13px; font-weight:600; cursor:pointer; }
   .err { color:#ef4444; font-size:12px; margin-top:10px; min-height:16px; }
 </style>
@@ -2080,11 +2105,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>/* Theme vor dem ersten Rendern setzen (kein Flackern). ?theme=light|dark
+   in der URL überstimmt einmalig (z. B. für Kiosk-Anzeigen), sonst gilt die
+   gespeicherte Wahl bzw. die Systemeinstellung. */
+try { var _t = new URLSearchParams(location.search).get("theme")
+            || localStorage.getItem("kapa_theme");
+  if (!_t && window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) _t = "light";
+  if (_t === "light") document.documentElement.setAttribute("data-theme", "light");
+} catch (e) {}</script>
 <title>VMware Kapazitätsübersicht pro Cluster</title>
 <style>
   :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0;
           --muted:#94a3b8; --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444;
-          --accent:#38bdf8; --res:#818cf8; }
+          --accent:#38bdf8; --res:#818cf8; --field:#0b1220; --accent-text:#08131f; }
+  /* Helles Theme: per Knopf in der Kopfleiste, gespeichert je Benutzer */
+  html[data-theme="light"] {
+    --bg:#eef2f7; --card:#ffffff; --line:#d4dbe5; --text:#1e293b;
+    --muted:#5b6b7f; --ok:#15803d; --warn:#b45309; --crit:#dc2626;
+    --accent:#0369a1; --res:#4f46e5; --field:#f6f8fb; --accent-text:#ffffff; }
+  html[data-theme="light"] .btn.primary { color:#ffffff; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--text);
          font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:24px; }
@@ -2093,7 +2132,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .tablewrap { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow-x:auto; }
   .kt { width:100%; border-collapse:collapse; font-size:13px; margin:0; }
   .kt th, .kt td { padding:9px 14px; border-bottom:1px solid var(--line); }
-  .kt thead th { color:var(--muted); font-size:12px; background:#0b1220; }
+  .kt thead th { color:var(--muted); font-size:12px; background:var(--field); }
   .kt thead th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
   .kt thead th.sortable:hover { color:var(--text); }
   .kt thead th .sarr { opacity:.85; font-size:10px; margin-left:2px; }
@@ -2115,7 +2154,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .meta { color:var(--muted); font-size:12px; margin-bottom:12px; }
   .metric { margin-bottom:14px; }
   .metric .row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
-  .bar { height:10px; background:#0b1220; border-radius:5px; overflow:hidden; display:flex; }
+  .bar { height:10px; background:var(--field); border-radius:5px; overflow:hidden; display:flex; }
   .bar i { display:block; height:100%; }
   .bar .r { background:repeating-linear-gradient(45deg,var(--res),var(--res) 4px,#4f46e5 4px,#4f46e5 8px); }
   .free { font-weight:600; }
@@ -2124,27 +2163,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .ctabs .tab { padding:5px 11px; font-size:12px; }
   .tagbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .tagbox h3 { font-size:12px; color:var(--muted); font-weight:600; margin-bottom:6px; }
-  .srcbadge { display:inline-block; font-size:10px; background:#0b1220; border:1px solid var(--line);
+  .srcbadge { display:inline-block; font-size:10px; background:var(--field); border:1px solid var(--line);
               border-radius:6px; padding:0 6px; margin-left:6px; color:var(--muted);
               vertical-align:middle; white-space:nowrap; }
-  .tag { display:inline-block; background:#0b1220; border:1px solid var(--line);
+  .tag { display:inline-block; background:var(--field); border:1px solid var(--line);
          border-radius:6px; padding:2px 8px; margin:0 4px 4px 0;
          font-size:11px; color:var(--text); }
   .selbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-            background:#0b1220; border:1px solid var(--line); border-radius:10px;
+            background:var(--field); border:1px solid var(--line); border-radius:10px;
             padding:10px 14px; margin-bottom:12px; }
   .selbar .sellabel { font-size:12px; color:var(--muted); font-weight:600; }
   .selbar label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
-  .selbar select { background:#0f172a; border:1px solid var(--line); color:var(--text);
+  .selbar select { background:var(--bg); border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:13px; }
   .selbar .btn { padding:5px 10px; }
   .netbox { margin-top:12px; }
   .netbox:first-child { margin-top:0; }
   .netbox h3 { font-size:13px; color:var(--text); margin-bottom:6px; }
   .vlanbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-  .vlanbar input { flex:1; max-width:520px; background:#0f172a; border:1px solid var(--line);
+  .vlanbar input { flex:1; max-width:520px; background:var(--bg); border:1px solid var(--line);
                    color:var(--text); border-radius:8px; padding:9px 12px; font-size:14px; }
-  .kpi { background:#0b1220; border-radius:8px; padding:8px 12px; font-size:12px; color:var(--muted); }
+  .kpi { background:var(--field); border-radius:8px; padding:8px 12px; font-size:12px; color:var(--muted); }
   .kpi b { display:block; font-size:16px; color:var(--text); }
   details { margin-top:12px; }
   summary { cursor:pointer; color:var(--muted); font-size:12px; }
@@ -2155,17 +2194,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .off { color:var(--muted); font-style:italic; }
   .total { background:linear-gradient(135deg,#1e293b,#16233b); border-color:#3b5479; }
   .toolbar { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
-  .filterbox { background:#0b1220; border:1px solid var(--line); color:var(--text);
+  .filterbox { background:var(--field); border:1px solid var(--line); color:var(--text);
                border-radius:8px; padding:6px 12px; font-size:12px; width:220px; }
   .filterbox:focus { outline:none; border-color:var(--accent); }
-  .tabs { display:inline-flex; background:#0b1220; border:1px solid var(--line);
+  .tabs { display:inline-flex; background:var(--field); border:1px solid var(--line);
           border-radius:10px; padding:3px; gap:3px; margin-bottom:16px; }
   .tab { padding:6px 14px; font-size:13px; color:var(--muted); cursor:pointer; border-radius:8px; }
   .tab.active { background:var(--card); color:var(--text); }
   .subtabs { margin-bottom:18px; }
   .colmenu { position:relative; display:inline-block; font-size:12px; }
   .colmenu > summary { cursor:pointer; color:var(--muted); list-style:none; user-select:none;
-                       border:1px solid var(--line); border-radius:8px; padding:5px 10px; background:#0b1220; }
+                       border:1px solid var(--line); border-radius:8px; padding:5px 10px; background:var(--field); }
   .colmenu > summary::-webkit-details-marker { display:none; }
   .colmenu[open] > summary { color:var(--text); }
   .colmenu > div { position:absolute; z-index:16; top:calc(100% + 4px); right:0; min-width:180px;
@@ -2192,21 +2231,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .hc-close:hover { color:var(--text); }
   .foot { margin-top:28px; text-align:center; color:var(--muted); font-size:11px; }
   .sechead { font-size:13px; color:var(--muted); margin-bottom:8px; }
-  .btn { background:#0b1220; border:1px solid var(--line); color:var(--text);
+  .btn { background:var(--field); border:1px solid var(--line); color:var(--text);
          border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
   a.btn { text-decoration:none; display:inline-block; line-height:normal; }
   .resbox { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
   .resbox h3 { font-size:13px; color:var(--res); margin-bottom:6px; }
   .resform { display:grid; grid-template-columns:2fr 1.4fr 80px 90px 90px; gap:6px; margin-top:8px; }
-  .resform input { background:#0b1220; border:1px solid var(--line); color:var(--text);
+  .resform input { background:var(--field); border:1px solid var(--line); color:var(--text);
                    border-radius:6px; padding:5px 8px; font-size:12px; width:100%; }
   .resform input:focus { outline:none; border-color:var(--res); }
   .resform button { grid-column:1 / -1; }   /* Beantragen-Knopf über die volle Breite */
   .del { background:none; border:none; color:var(--crit); cursor:pointer; font-size:13px; }
   .edit { background:none; border:none; color:var(--accent); cursor:pointer; font-size:13px; }
   .err { color:var(--crit); font-size:12px; margin-top:4px; display:none; }
-  .btn.primary { background:var(--res); color:#0b1220; border-color:var(--res); font-weight:600; }
+  .btn.primary { background:var(--res); color:var(--field); border-color:var(--res); font-weight:600; }
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none;
               align-items:center; justify-content:center; z-index:10; }
   .modal-bg.open { display:flex; }
@@ -2215,7 +2254,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .modal h2 { color:var(--res); font-size:16px; margin-bottom:8px; }
   .modal label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
   .modal input, .modal select, .modal textarea { width:100%; box-sizing:border-box;
-           background:#0b1220; border:1px solid var(--line); color:var(--text);
+           background:var(--field); border:1px solid var(--line); color:var(--text);
            border-radius:6px; padding:7px 9px; font-size:13px; font-family:inherit; resize:vertical; }
   .modal input:focus, .modal select:focus, .modal textarea:focus { outline:none; border-color:var(--res); }
   .modal .hint { font-size:12px; color:var(--accent); margin-top:10px; }
@@ -2256,6 +2295,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
   <label class="btn" id="importBtn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
   <span id="userbox" style="font-size:12px;color:var(--muted)"></span>
+  <button class="btn" id="themeBtn" onclick="toggleTheme()" title="Hell/Dunkel umschalten">☀️</button>
   <button class="btn" id="logoutBtn" style="display:none" onclick="logout()">Abmelden</button>
 </div>
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
@@ -2424,7 +2464,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <input id="annCfgTitle" class="filterbox" style="width:100%;max-width:520px;margin-bottom:10px"
        placeholder="z. B. Neu: Datacenter RZ-Sued verfügbar">
 <label style="font-size:12px;color:var(--muted)">Text</label>
-<textarea id="annCfgText" style="width:100%;max-width:640px;min-height:140px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;line-height:1.5"
+<textarea id="annCfgText" style="width:100%;max-width:640px;min-height:140px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;line-height:1.5"
           placeholder="Der Text des Popups (Zeilenumbrüche bleiben erhalten, kein HTML)."></textarea>
 <div style="margin-top:10px">
   <label style="font-size:13px"><input type="checkbox" id="annCfgActive"> aktiv – Popup wird angezeigt</label>
@@ -2533,7 +2573,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div style="margin-top:8px;font-size:13px">
   Erinnerung nach
   <input id="ntReminderDays" type="number" min="1" max="30" value="2"
-         style="width:60px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;text-align:center">
+         style="width:60px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;text-align:center">
   Tagen Wartezeit – danach alle so viele Tage erneut, bis entschieden ist.
 </div>
 <button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Mail-Regeln speichern</button>
@@ -2548,7 +2588,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <label style="font-size:12px;color:var(--muted)">Betreff</label>
 <input id="tplSubject" class="filterbox" style="width:100%;margin-bottom:10px" placeholder="Standardbetreff" onfocus="MAIL_TPL_FOCUS='tplSubject'">
 <label style="font-size:12px;color:var(--muted)">HTML-Text</label>
-<textarea id="tplHtml" style="width:100%;min-height:220px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5" placeholder="Standardvorlage (leer lassen)" onfocus="MAIL_TPL_FOCUS='tplHtml'"></textarea>
+<textarea id="tplHtml" style="width:100%;min-height:220px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5" placeholder="Standardvorlage (leer lassen)" onfocus="MAIL_TPL_FOCUS='tplHtml'"></textarea>
 <div style="margin-top:8px">
   <button class="btn approve" onclick="saveMailTemplate()">✓ Vorlage speichern</button>
   <button class="btn" onclick="previewMail()">Vorschau</button>
@@ -2716,20 +2756,50 @@ let COLHIDE = (function () {
   try { return JSON.parse(localStorage.getItem("kapa_cols") || "{}"); } catch (e) { return {}; }
 })();
 let _prefsTimer = null;
+// Kompletter Prefs-Body: der Server ersetzt die Prefs bei jedem PUT komplett,
+// deshalb müssen alle Teile (Spalten, Ankündigungs-Merker, Theme) immer mit.
+function prefsBody() {
+  const b = { cols: COLHIDE };
+  if (PREFS && PREFS.announce_seen) b.announce_seen = PREFS.announce_seen;
+  if (PREFS && PREFS.theme) b.theme = PREFS.theme;
+  return b;
+}
 function saveColPrefs() {
   if (USE_SERVER_PREFS) {
     clearTimeout(_prefsTimer);
     _prefsTimer = setTimeout(() => {
-      // announce_seen mitschicken: der Server ersetzt die Prefs komplett
-      const body = { cols: COLHIDE };
-      if (PREFS && PREFS.announce_seen) body.announce_seen = PREFS.announce_seen;
       fetch("api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body) }).catch(() => {});
+        body: JSON.stringify(prefsBody()) }).catch(() => {});
     }, 400);
   } else {
     try { localStorage.setItem("kapa_cols", JSON.stringify(COLHIDE)); } catch (e) {}
   }
 }
+
+// ---- Hell/Dunkel-Umschalter (Kopfleiste), gespeichert je Benutzer ----
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+function applyTheme(t) {
+  if (t === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  const b = document.getElementById("themeBtn");
+  if (b) { b.textContent = t === "light" ? "🌙" : "☀️";
+           b.title = t === "light" ? "Dunkles Design" : "Helles Design"; }
+  try { localStorage.setItem("kapa_theme", t); } catch (e) {}
+}
+function toggleTheme() {
+  const t = currentTheme() === "light" ? "dark" : "light";
+  PREFS = PREFS || {};
+  PREFS.theme = t;
+  applyTheme(t);
+  if (USE_SERVER_PREFS)
+    fetch("api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefsBody()) }).catch(() => {});
+}
+// Init: Server-Einstellung gewinnt (gilt über Geräte hinweg); sonst bleibt,
+// was das Head-Snippet aus localStorage/prefers-color-scheme gesetzt hat.
+applyTheme(USE_SERVER_PREFS && PREFS && PREFS.theme ? PREFS.theme : currentTheme());
 
 // ---- Ankündigungs-Popup (einmal je Benutzer, Merker in den Prefs) ----
 function announceSeenId() {
@@ -2751,7 +2821,7 @@ function closeAnnounce() {
     PREFS = PREFS || {};
     PREFS.announce_seen = ANNOUNCE.id;
     fetch("api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cols: COLHIDE, announce_seen: ANNOUNCE.id }) }).catch(() => {});
+      body: JSON.stringify(prefsBody()) }).catch(() => {});
   } else {
     try { localStorage.setItem("kapa_announce_seen", ANNOUNCE.id); } catch (e) {}
   }
@@ -4428,6 +4498,8 @@ const I18N = {
 "Reservierungen importieren (JSON)": "Import reservations (JSON)",
 "Reservierungen als CSV (Semikolon, für Excel)": "Reservations as CSV (semicolon, Excel-ready)",
 "Kapazität als CSV": "Capacity as CSV",
+"Hell/Dunkel umschalten": "Toggle light/dark", "Helles Design": "Light theme",
+"Dunkles Design": "Dark theme",
 "Kapazitätstabelle als CSV (Semikolon, für Excel) – inkl. effektiv freier Werte":
   "Capacity table as CSV (semicolon, Excel-ready) – incl. effective free values",
 "Cluster filtern …": "Filter clusters …", "Cluster suchen …": "Search clusters …",
@@ -4768,9 +4840,15 @@ if (LANG === "en") {
   new MutationObserver(muts => {
     for (const m of muts) {
       if (m.type === "characterData") i18nTree(m.target);
-      else m.addedNodes.forEach(n => i18nTree(n));
+      else if (m.type === "attributes") {
+        // dynamisch gesetzte title/placeholder (z. B. Theme-Knopf) übersetzen
+        const el = m.target, v = el.getAttribute(m.attributeName);
+        if (v) { const t = i18nText(v); if (t !== v) el.setAttribute(m.attributeName, t); }
+      } else m.addedNodes.forEach(n => i18nTree(n));
     }
-  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }).observe(document.body, { childList: true, subtree: true, characterData: true,
+                              attributes: true,
+                              attributeFilter: ["title", "placeholder", "aria-label"] });
 }
 </script>
 </body>
@@ -5166,6 +5244,9 @@ def serve(args, password):
         seen = (body or {}).get("announce_seen") if isinstance(body, dict) else None
         if isinstance(seen, str) and seen.strip():
             out["announce_seen"] = seen.strip()[:16]
+        theme = (body or {}).get("theme") if isinstance(body, dict) else None
+        if theme in ("light", "dark"):
+            out["theme"] = theme
         return out
 
     def user_prefs(user):
