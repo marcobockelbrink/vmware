@@ -32,6 +32,9 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Drilldown je Cluster, `tanzu-mhz-per-vcpu` für die MHz→vCPU-Umrechnung
 - **Cluster-Selektor**: vROps-Quellen-Filter + bis zu 3 kaskadierende Tag-Filter; **Filter-/Suchfelder**, **sortierbare Tabellen**
 - **Spalten ein-/ausblenden** in allen Datentabellen („⚙ Spalten", je Benutzer gespeichert)
+- **Hell/Dunkel-Modus**: ☀️/🌙-Knopf in der Kopfleiste, je Benutzer gespeichert;
+  folgt sonst der Systemeinstellung (`prefers-color-scheme`); `?theme=light|dark`
+  überstimmt einmalig (z. B. Kiosk-Anzeigen)
 - **Auto-Aktualisierung** mit geschätztem Prozent-Fortschritt; Export als **CSV/JSON**
 
 **Netzwerk & VLAN**

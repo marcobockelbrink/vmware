@@ -32,6 +32,9 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   per-cluster drill-down, `tanzu-mhz-per-vcpu` for the MHz→vCPU conversion
 - **Cluster selector**: vROps source filter + up to 3 cascading tag filters; **filter/search fields**, **sortable tables**
 - **Show/hide columns** in all data tables ("⚙ Columns", stored per user)
+- **Light/dark mode**: ☀️/🌙 button in the header, stored per user; otherwise
+  follows the system setting (`prefers-color-scheme`); `?theme=light|dark`
+  overrides once (e.g. kiosk displays)
 - **Auto-refresh** with estimated progress; export as **CSV/JSON**
 
 **Network & VLAN**
