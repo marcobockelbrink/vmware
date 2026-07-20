@@ -1,27 +1,36 @@
 # Beispiel-Compose für die VMware Kapazitätsplanung.
+# Example compose file for VMware Capacity Planning.
 # Start:  docker compose -f deploy/docker/docker-compose.yml up -d
-# (funktioniert genauso mit "podman compose")
+# (funktioniert genauso mit "podman compose" / works the same with "podman compose")
 services:
   kapa:
     # Fertiges Image von GitHub Packages (bei jedem Release automatisch gebaut).
-    # Für Produktion besser eine feste Version taggen, z. B. :1.30
+    # Für Produktion besser eine feste Version taggen, z. B. :2.3
+    # Ready-made image from GitHub Packages (built automatically per release).
+    # For production, prefer pinning a fixed version, e.g. :2.3
     image: ghcr.io/marcobockelbrink/kapa-dashboard:latest
     # Alternativ selbst bauen: image-Zeile oben entfernen und einkommentieren –
     # Context ist die Projektwurzel, damit aria_kapa.py kopiert werden kann.
+    # Alternatively build yourself: drop the image line above and uncomment –
+    # the context is the project root so aria_kapa.py can be copied.
     #build:
     #  context: ../..
     #  dockerfile: deploy/docker/Dockerfile
     # Nur an localhost binden – davor gehört ein Reverse Proxy mit TLS.
+    # Bind to localhost only – a reverse proxy with TLS belongs in front.
     ports:
       - "127.0.0.1:8080:8080"
     environment:
       # Secrets als Umgebungsvariablen (oder besser: Docker/Podman-Secrets).
+      # Secrets as environment variables (better: Docker/Podman secrets).
       ARIA_PASSWORD: "${ARIA_PASSWORD:?ARIA_PASSWORD muss gesetzt sein}"
       # SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
     volumes:
       # Persistente Laufzeitdaten (Reservierungen, Rollen, Log, Tokens)
+      # Persistent runtime data (reservations, roles, log, tokens)
       - kapa-data:/opt/kapa/data
       # Konfiguration: eigene INI read-only einhängen
+      # Configuration: mount your own INI read-only
       - ./kapa.ini:/etc/kapa/kapa.ini:ro
     restart: unless-stopped
 

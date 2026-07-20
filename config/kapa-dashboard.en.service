@@ -1,35 +1,36 @@
 # =============================================================================
-# systemd-Unit für die VMware Kapazitätsplanung
-# (English version: kapa-dashboard.en.service — identical unit, translated comments)
+# systemd unit for VMware Capacity Planning
+# (English twin of kapa-dashboard.service — the unit itself is identical,
+#  install either one as kapa-dashboard.service.)
 # =============================================================================
 # Installation:
 #   sudo useradd --system --home /opt/kapa --shell /usr/sbin/nologin kapa
 #   sudo mkdir -p /opt/kapa && sudo cp aria_kapa.py /opt/kapa/
 #   sudo chown kapa:kapa /opt/kapa/aria_kapa.py
-#   # Laufzeitdaten BEWUSST außerhalb von /opt/kapa (CI/CD darf sie nicht löschen):
+#   # Runtime data DELIBERATELY outside /opt/kapa (CI/CD must not delete it):
 #   sudo mkdir -p /var/lib/kapa && sudo chown kapa:kapa /var/lib/kapa && sudo chmod 750 /var/lib/kapa
 #
-#   # EINE Konfigurationsdatei (nicht-geheim), Mode 640:
+#   # ONE configuration file (non-secret), mode 640:
 #   sudo mkdir -p /etc/kapa
-#   sudo cp config/kapa.ini.example /etc/kapa/kapa.ini   # und Werte eintragen!
+#   sudo cp config/kapa.ini.en.example /etc/kapa/kapa.ini   # and fill in values!
 #   sudo chown root:kapa /etc/kapa/kapa.ini && sudo chmod 640 /etc/kapa/kapa.ini
 #
-#   # Geheimnisse als eigene Dateien (root:kapa, 0640) – Pfade stehen in der INI:
-#   sudo sh -c 'echo "DAS-ARIA-PASSWORT" > /etc/kapa/aria.pass'
+#   # Secrets as separate files (root:kapa, 0640) – paths are set in the INI:
+#   sudo sh -c 'echo "THE-ARIA-PASSWORD" > /etc/kapa/aria.pass'
 #   sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
-#   #  (analog ad_bind.pass / smtp.pass / backup.pass, falls genutzt)
+#   #  (same for ad_bind.pass / smtp.pass / backup.pass, if used)
 #
-#   sudo cp config/kapa-dashboard.service /etc/systemd/system/
+#   sudo cp config/kapa-dashboard.en.service /etc/systemd/system/kapa-dashboard.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now kapa-dashboard
 # Logs: journalctl -u kapa-dashboard -f
 #
-# Hinweis: Es gibt bewusst KEINE kapa.env mehr. Alle nicht-geheimen Werte stehen
-# in kapa.ini, Passwörter in eigenen .pass-Dateien (deren Pfad die INI nennt).
+# Note: there is deliberately NO kapa.env anymore. All non-secret values live
+# in kapa.ini, passwords in separate .pass files (whose paths the INI names).
 # =============================================================================
 
 [Unit]
-Description=VMware Kapazitätsplanung (Aria Operations Dashboard)
+Description=VMware Capacity Planning (Aria Operations dashboard)
 Documentation=https://github.com/marcobockelbrink/vmware
 After=network-online.target
 Wants=network-online.target
@@ -45,8 +46,8 @@ ExecStart=/usr/bin/python3 /opt/kapa/aria_kapa.py --config /etc/kapa/kapa.ini --
 Restart=on-failure
 RestartSec=10
 
-# Härtung: nur /var/lib/kapa (die Laufzeitdaten) ist beschreibbar, sonst read-only.
-# /etc/kapa (INI + .pass) bleibt lesbar (ProtectSystem=strict macht es nur read-only).
+# Hardening: only /var/lib/kapa (the runtime data) is writable, rest read-only.
+# /etc/kapa (INI + .pass) stays readable (ProtectSystem=strict makes it read-only).
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
