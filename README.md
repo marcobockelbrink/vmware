@@ -59,7 +59,7 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
 **Verwaltung (Admin-UI)**
-- Unter-Reiter **Benutzer & Rollen / Mail / Ankündigung / Backup & Konfiguration**
+- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / API-Tokens / Backup & Konfiguration**
 - **Ankündigungs-Popup**: Admins veröffentlichen bei Bedarf eine Ankündigung
   (Titel + Text, aktivierbar) — jeder Benutzer sieht sie **einmal** nach der
   Anmeldung („Verstanden"-Merker je Benutzer); Textänderung zeigt sie allen
@@ -106,7 +106,7 @@ Details zu jedem Bereich in den folgenden Abschnitten.
   sich nach der gewählten Quelle. Stufe 2 zeigt nur Werte, die zur Wahl in
   Stufe 1 passen. Welche
   Tag-Kategorien die Stufen bilden, konfigurierst du frei im Tab „Verwaltung"
-  (Abschnitt „Cluster-Selektor"); pro Stufe lässt sich ein eigener
+  (Unterreiter „Cluster-Selektor"); pro Stufe lässt sich ein eigener
   **Anzeigename** vergeben (z. B. Kategorie „Standort" → Beschriftung
   „Rechenzentrum"). Gespeichert wird per Knopf „✓ Selektor speichern". Die
   Werte kommen live aus den Tags.
@@ -159,8 +159,9 @@ mehrstufigen Freigabe und der Schaltfläche für das jeweils zuständige Team:
 ![Genehmigungen](docs/screenshot-genehmigungen.png)
 
 **Verwaltung** (nur Admins) — Benutzer **und AD-Gruppen** mit Rolle und Team,
-frei wählbare Rollen-Bezeichnungen, die Genehmigungs-Teams in ihrer
-Prüfreihenfolge sowie API-Tokens für externe Anwendungen:
+frei wählbare Rollen-Bezeichnungen und die Genehmigungs-Teams in ihrer
+Prüfreihenfolge; Cluster-Selektor, Mail, Ankündigung, API-Tokens und
+Konfiguration liegen in eigenen Unterreitern:
 
 ![Verwaltung](docs/screenshot-verwaltung.png)
 

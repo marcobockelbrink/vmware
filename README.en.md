@@ -59,7 +59,7 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
 **Administration (admin UI)**
-- Sub-tabs **Users & roles / Mail / Announcement / Backup & configuration**
+- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / API tokens / Backup & configuration**
 - **Announcement popup**: admins publish an announcement on demand (title +
   text, activatable) — every user sees it **once** after sign-in ("Got it"
   marker per user); changing the text shows it to everyone again. Ideal for
@@ -102,7 +102,7 @@ Details for each area in the sections below.
   location → operations team); tag values follow the chosen source. Level 2
   only shows values matching the level-1 choice. Which tag categories form the
   levels is freely configured in the "Administration" tab ("Cluster selector"
-  section); each level can carry its own **display name** (e.g. category
+  sub-tab); each level can carry its own **display name** (e.g. category
   "Standort" → label "Data center"). Saved via "✓ Save selector". Values come
   live from the tags.
 - **Sortable tables**: clicking a column header sorts ascending/descending
@@ -151,8 +151,9 @@ approval and the button for the team currently up:
 ![Approvals](docs/screenshot-genehmigungen.png)
 
 **Administration** (admins only) — users **and AD groups** with role and team,
-freely renamable role labels, the approval teams in their review order and API
-tokens for external applications:
+freely renamable role labels and the approval teams in their review order;
+cluster selector, mail, announcement, API tokens and configuration live in
+their own sub-tabs:
 
 ![Administration](docs/screenshot-verwaltung.png)
 

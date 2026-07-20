@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.3.1"
+VERSION = "2.4"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2371,8 +2371,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="admView" style="display:none">
 <div class="tabs subtabs">
   <span class="tab active" id="atabUsers" onclick="setAdmTab('users')">Benutzer &amp; Rollen</span>
+  <span class="tab" id="atabSel" onclick="setAdmTab('sel')">Cluster-Selektor</span>
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
+  <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
 
@@ -2434,8 +2436,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 </div>
 <button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Team-Adressen speichern</button>
+</div><!-- admGrpUsers -->
 
-<div class="sechead" style="margin-top:20px">Cluster-Selektor (Filter nach vSphere-Tags)</div>
+<div id="admGrpSel" style="display:none">
+<div class="sechead">Cluster-Selektor (Filter nach vSphere-Tags)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   Bis zu 3 Stufen, jede Stufe eine Tag-Kategorie. In der Kapazitätsübersicht
   erscheinen dann kaskadierende Auswahllisten (Stufe 2 zeigt nur Werte, die zur
@@ -2447,7 +2451,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <tbody id="selbody"></tbody>
 </table>
 </div>
-<div class="sechead" style="margin-top:20px">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
+</div><!-- admGrpSel -->
+
+<div id="admGrpTok" style="display:none">
+<div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   📖 <a href="api/v1/docs" target="_blank" rel="noopener">API-Dokumentation öffnen</a>
   (interaktiv, mit „Ausführen") · <a href="api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI-Spec</a>
@@ -2467,7 +2474,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button class="btn" style="margin-left:10px"
           onclick="document.getElementById('newToken').style.display='none'">Ausblenden</button>
 </div>
-</div><!-- admGrpUsers -->
+</div><!-- admGrpTok -->
 
 <div id="admGrpMail" style="display:none">
 <div class="sechead">Mail-Benachrichtigungen (je interner Rolle)</div>
@@ -3753,8 +3760,10 @@ function previewMail() {
 let ADM_TAB = "users";
 function setAdmTab(t) {
   ADM_TAB = t;
-  const tabs = { users: "atabUsers", mail: "atabMail", ann: "atabAnn", conf: "atabConf" };
-  const grps = { users: "admGrpUsers", mail: "admGrpMail", ann: "admGrpAnn", conf: "admGrpConf" };
+  const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
+                 ann: "atabAnn", tok: "atabTok", conf: "atabConf" };
+  const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
+                 ann: "admGrpAnn", tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -4570,7 +4579,8 @@ const I18N = {
 // --- Tanzu-Namespaces ---
 "davon Tanzu-Namespaces": "of which Tanzu namespaces",
 "Namespace": "Namespace", "CPU (MHz)": "CPU (MHz)", "vCPU-Äquiv.": "vCPU equiv.",
-// --- Token-Schreibrechte ---
+// --- Token-Schreibrechte / Verwaltungs-Reiter ---
+"Cluster-Selektor": "Cluster selector", "API-Tokens": "API tokens",
 "Schreibrechte": "Write permissions",
 "Ändern der Token-Rechte fehlgeschlagen.": "Changing the token permissions failed."
 };
