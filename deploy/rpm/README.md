@@ -1,5 +1,7 @@
 # RPM-Paket (RHEL/Alma/Rocky 9)
 
+> 🇬🇧 [English version: README.en.md](README.en.md)
+
 Native Installation als `dnf`-Paket – inklusive Dienst-Benutzer, systemd-Unit,
 Konfigurationsvorlagen unter `/etc/kapa` und sauberer Upgrade-Pfad (die
 Konfiguration wird bei Updates dank `%config(noreplace)` **nicht** überschrieben).

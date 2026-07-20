@@ -1,5 +1,7 @@
 # Container-Image (Docker / Podman, Basis: UBI 9)
 
+> 🇬🇧 [English version: README.en.md](README.en.md)
+
 Für Umgebungen mit Container-Runtime. Das Image basiert auf Red Hat
 `ubi9/ubi-minimal` und enthält nur `python3` plus das Skript – wenige MB, keine
 externen Abhängigkeiten. Es läuft als **nicht-root** (UID 1001).

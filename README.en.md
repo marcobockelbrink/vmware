@@ -392,7 +392,7 @@ Read endpoints: `/api/v1/reservations` (filters: `cluster`, `status`,
 administration, audit-logged): `POST /api/v1/reservations` (create) and
 `…/{id}/cancel` with the "Reservations" permission, `…/{id}/approve` and
 `…/{id}/reject` with the "Approvals" permission — details in
-[`config/API.md`](config/API.md).
+[`config/API.en.md`](config/API.en.md).
 
 **Language:** JSON field names and status values are part of the stable v1
 contract and stay German (`status=genehmigt` etc.). **CSV headers/status
@@ -404,7 +404,7 @@ keep getting German, so existing consumers see no change.
 "Administration → API tokens") — a self-contained, offline-capable
 Swagger-style page with a "Run" button per endpoint. The machine-readable
 **OpenAPI 3.0 spec** lives at **`/api/v1/openapi.json`** and imports into
-Swagger Editor, Postman etc. Text version: [`config/API.md`](config/API.md).
+Swagger Editor, Postman etc. Text version: [`config/API.en.md`](config/API.en.md).
 
 ## Role concept and AD sign-in
 
@@ -483,7 +483,7 @@ every setting has **exactly one source**:
 
 | What | Where |
 |---|---|
-| **All non-secret settings** (Aria URL/user, calculation, network, mail server, backup target, AD connection, server port …) | **`kapa.ini`** (template: [`config/kapa.ini.example`](config/kapa.ini.example)) |
+| **All non-secret settings** (Aria URL/user, calculation, network, mail server, backup target, AD connection, server port …) | **`kapa.ini`** (template: [`config/kapa.ini.en.example`](config/kapa.ini.en.example)) |
 | **Secrets** (passwords, SSH key) | separate **`.pass` files** (root:kapa, `0640`); the INI only names the **path** (`password-file`, `ad-bind-password-file`, …) |
 | **Business data** (roles, teams, mail rules, selector, tokens) | **admin UI** → data store under `--data-dir` |
 
@@ -513,7 +513,7 @@ installed. Admins can trigger a backup **manually** at any time — in the
 "Administration" tab ("Backup" section) or directly via `POST /api/backup`.
 Results (including errors) land in the audit log.
 
-**Restore**: step-by-step guide in [`config/RESTORE.md`](config/RESTORE.md).
+**Restore**: step-by-step guide in [`config/RESTORE.en.md`](config/RESTORE.en.md).
 
 ## Options
 
@@ -581,7 +581,7 @@ Ready-made templates live under [`config/`](config/):
   failure, hardened sandbox. Simply calls `--config /etc/kapa/kapa.ini
   --serve` (no `EnvironmentFile`, no `${VARS}`). Installation steps are
   documented as comments in the file.
-- **`config/kapa.ini.example`** — the single configuration file
+- **`config/kapa.ini.example`** (English: `kapa.ini.en.example`) — the single configuration file
   (`/etc/kapa/kapa.ini`, mode 640): Aria, calculation, network, server, AD,
   mail, backup. Recommendation: use a dedicated **read-only service account**
   in Aria Operations — the script only reads.
@@ -628,4 +628,4 @@ variants live under [`deploy/`](deploy/) — same script, three packagings:
   **GitHub package**: `docker pull ghcr.io/marcobockelbrink/kapa-dashboard:latest`
   (amd64 + arm64, fixed version tags like `:1.30` for rollbacks).
 
-Details and the decision guide are in [`deploy/README.md`](deploy/README.md).
+Details and the decision guide are in [`deploy/README.en.md`](deploy/README.en.md).

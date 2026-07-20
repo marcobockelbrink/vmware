@@ -1,5 +1,7 @@
 # Ansible / AAP-Rollout
 
+> 🇬🇧 [English version: README.en.md](README.en.md)
+
 Rollt das [RPM](../rpm/) über eine ganze RHEL-9-Flotte aus, pflegt die
 Konfiguration, legt das Aria-Passwort ab, setzt den nötigen SELinux-Schalter
 und startet den Dienst – idempotent. Secrets kommen aus dem Ansible-Vault.

@@ -1,4 +1,5 @@
 # =============================================================================
+# English version of this template: kapa.ini.en.example (identical keys)
 # Konfigurationsdatei für aria_kapa.py — die EINZIGE Stelle für alle
 # nicht-geheimen Einstellungen.  Vorlage -> /etc/kapa/kapa.ini
 # =============================================================================

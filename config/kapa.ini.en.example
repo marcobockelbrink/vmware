@@ -1,0 +1,140 @@
+# =============================================================================
+# Configuration file for aria_kapa.py — the ONE place for all non-secret
+# settings.  Template -> /etc/kapa/kapa.ini
+# (English twin of kapa.ini.example — the keys are identical, use either one.)
+# =============================================================================
+# Usage:  python3 aria_kapa.py --config /etc/kapa/kapa.ini --serve
+# Keys = command-line options (with - or _).
+#
+# CONFIGURATION MODEL (deliberately simple):
+#   * Secrets (passwords/keys)       -> separate files, only the PATH goes here
+#                                        (password-file, ad-bind-password-file, …)
+#   * Everything else                -> right here in this INI
+#   * Business data (roles, teams,   -> admin UI, stored under data-dir
+#     mail rules, selector, tokens)
+#   => Every setting has EXACTLY ONE source. No duplicate upkeep in env/INI.
+#
+# The systemd unit only calls `--config /etc/kapa/kapa.ini --serve` –
+# there are no ${VARS} left that could override INI values.
+#
+# Permissions:  chown root:kapa /etc/kapa/kapa.ini && chmod 640 /etc/kapa/kapa.ini
+# (Passwords do NOT live here but in separate 0640 files, see below.)
+# =============================================================================
+
+[kapa]
+# --- Aria Operations ----------------------------------------------------------
+url = https://aria-ops.example.com
+user = svc-kapa-readonly
+# Optional display name of the source (like the section name of [quelle:NAME]):
+# shows up as the source badge on each cluster and in the vROps quick filter.
+#source-name = DC-North
+# Aria password NOT here but as its own file (root:kapa, 0640):
+#   sudo sh -c 'echo "THE-ARIA-PASSWORD" > /etc/kapa/aria.pass'
+#   sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
+password-file = /etc/kapa/aria.pass
+auth-source = local
+#insecure = true                 ; accept self-signed certificates
+#aria-proxy = http://proxy.example.com:3128   ; optional proxy (empty = direct)
+
+# --- Multiple vROps data sources (optional) -----------------------------------
+# Instead of the single source above, several named vROps systems can be mixed
+# in: one [quelle:NAME] section each ("source:NAME" works too). The name after
+# the colon is shown as a badge on each cluster. Each source has its own
+# URL/user/password file and optionally its own proxy. REQUIREMENT: cluster
+# names must be UNIQUE across all sources. As soon as [quelle:*] sections
+# exist, url/user from [kapa] are ignored (the other [kapa] values stay global).
+#
+#[quelle:DC-North]
+#url = https://aria-north.example.com
+#user = svc-kapa-readonly
+#password-file = /etc/kapa/aria-north.pass
+#auth-source = local
+##aria-proxy =                    ; without proxy
+#
+#[quelle:DC-South]
+#url = https://aria-south.example.com
+#user = svc-kapa-readonly
+#password-file = /etc/kapa/aria-south.pass
+#aria-proxy = http://proxy.example.com:3128   ; with proxy
+##insecure = true
+
+# --- Calculation --------------------------------------------------------------
+cpu-factor = 6
+failover-hosts = 1
+vsan-factor = 0.5                 ; vSAN gross capacity only partially usable
+res-ttl-days = 31
+# Tanzu/vSphere namespaces: their CPU/RAM reservations automatically count
+# against free capacity (without Tanzu nothing happens). The CPU reservation
+# arrives in MHz from vROps and is converted to vCPU equivalents like this:
+#tanzu-mhz-per-vcpu = 2500        ; MHz per vCPU (0 = do not count CPU, RAM only)
+
+# --- Capa ID of new reservations ----------------------------------------------
+# Format: <id-prefix><random part>. Prefix optional (letters/digits/-/_),
+# id-length = number of hex characters of the random part (4–40). Example:
+#   id-prefix = KAPA-  and  id-length = 6   ->   KAPA-004fb0
+#id-prefix =
+#id-length = 12
+
+# --- Network / VLAN -----------------------------------------------------------
+# Uplink/trunk port groups (name contains "uplink" or VLAN 0-4094) are hidden
+# by default. Set to 'true' to show them.
+#show-uplink-portgroups = true
+# Exclude systems carrying this vROps tag from the evaluation (empty = off):
+#exclude-tag = Kapa_Filter:Ja
+#tag-property = summary|tag       ; prefix for the cluster's vSphere tags
+
+# --- Web server ---------------------------------------------------------------
+bind = 127.0.0.1
+port = 8080
+refresh-interval = 1800
+
+# --- Contact / imprint --------------------------------------------------------
+contact-info = IT Operations Example Corp · kapa-support@example.com
+
+# --- Data location ------------------------------------------------------------
+# Base folder for all runtime data. DELIBERATELY outside the deploy directory,
+# otherwise a CI/CD pipeline wipes the data (data/ is gitignored).
+data-dir = /var/lib/kapa
+
+# --- Data store ---------------------------------------------------------------
+# json (default) = one editable .json file per collection in data-dir.
+# sqlite         = a single data/kapa.db (stdlib, no server); only worth it
+#                  with very many (several thousand) active reservations.
+#storage = json
+
+# --- Approval teams (initial seeding only) ------------------------------------
+# Afterwards teams are managed on the administration page (data/kapa_teams.json).
+#approval-teams = Network team, Security team, Operations team
+
+# --- Active Directory sign-in (empty = no login) ------------------------------
+ad-url = ldaps://dc01.example.com
+ad-domain = example.com
+admin-user = first.last@example.com
+#ad-insecure = true
+#cookie-insecure = true           ; cookie without Secure – local HTTP tests only
+# AD group authorization + the AD mail attribute need a service account:
+#ad-bind-dn = CN=svc-kapa,OU=Service,DC=example,DC=com
+#ad-base-dn = DC=example,DC=com
+#ad-bind-password-file = /etc/kapa/ad_bind.pass     ; separate file (root:kapa 0640)
+# Read the requester's recipient address from an AD attribute instead of the UPN:
+#ad-mail-attribute = mail
+
+# --- Mail delivery (empty = no mails; rules are managed in the admin UI) ------
+smtp-server = mail.example.com:25
+smtp-from = kapa-dashboard@example.com
+# smtp-to only serves as the fallback address for the "admin" role if no admin
+# distribution address is set in the admin UI:
+#smtp-to = vmware-team@example.com
+#smtp-tls = true
+#smtp-user = kapa
+#smtp-password-file = /etc/kapa/smtp.pass           ; only if the server requires auth
+
+# --- SFTP backup (empty = no backup) ------------------------------------------
+#backup-target = backup@backupsrv.example.com:/backup/kapa
+#backup-port = 22
+# SSH key (recommended) – do NOT put it in a home directory (systemd
+# ProtectHome); owned by the service user: chown kapa:kapa, chmod 600:
+#backup-key = /etc/kapa/backup_id_ed25519
+#backup-password-file = /etc/kapa/backup.pass       ; alternative, needs sshpass
+backup-interval = 43200          ; twice a day
+backup-keep-days = 30            ; delete older archives on the target

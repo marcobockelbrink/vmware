@@ -1,5 +1,7 @@
 # API für externe Anwendungen (v1)
 
+> 🇬🇧 [English version: API.en.md](API.en.md)
+
 > **Interaktiv im Dashboard:** `/api/v1/docs` (Swagger-artige Seite mit
 > „Ausführen", offline lauffähig) · **OpenAPI-Spec:** `/api/v1/openapi.json`
 > (Import in Swagger Editor/Postman). Diese Datei ist die Textfassung.

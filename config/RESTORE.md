@@ -1,5 +1,7 @@
 # Restore-Anleitung — VMware Kapazitätsplanung
 
+> 🇬🇧 [English version: RESTORE.en.md](RESTORE.en.md)
+
 Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 
 | Datei | Inhalt | Kritisch? |

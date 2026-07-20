@@ -1,5 +1,7 @@
 # Deployment-Varianten
 
+> 🇬🇧 [English version: README.en.md](README.en.md)
+
 Die Anwendung ist ein einzelnes Python-Skript (`aria_kapa.py`, nur
 Standardbibliothek, Python 3.8+). Dasselbe Artefakt lässt sich auf mehrere
 Arten ausliefern – wähle nach Umgebung:
