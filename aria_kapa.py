@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.3"
+VERSION = "2.3.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -6830,10 +6830,20 @@ def apply_config_file(ap, path):
     ap.set_defaults(**defaults)
 
 
-def parse_sources(path):
+_SOURCE_KEYS = {"url", "user", "auth-source", "auth_source", "insecure",
+                "aria-proxy", "aria_proxy", "password", "password-file",
+                "password_file"}
+
+
+def parse_sources(path, ap=None):
     """[quelle:Name]-Sektionen der INI als benannte vROps-Datenquellen einlesen.
     Schlüssel je Quelle: url, user, auth-source, insecure, aria-proxy, password,
-    password-file. Der Sektionsname nach 'quelle:' ist der Anzeigename."""
+    password-file. Der Sektionsname nach 'quelle:' ist der Anzeigename.
+
+    Fremde Schlüssel in einer [quelle:*]-Sektion sind fast immer ein
+    verrutschter [kapa]-Eintrag (in INI-Dateien gehört ALLES nach einem
+    Sektions-Header zu dieser Sektion!) – deshalb harter Fehler mit Hinweis,
+    statt z. B. einen 'port' stillschweigend zu verschlucken."""
     import configparser
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     try:
@@ -6848,6 +6858,17 @@ def parse_sources(path):
             continue
         name = section.split(":", 1)[1].strip() or "vROps"
         s = cp[section]
+        alien = [k for k in s if k.strip().lower() not in _SOURCE_KEYS]
+        if alien:
+            msg = (f"Option(en) {', '.join(sorted(alien))} stehen in der Sektion "
+                   f"[{section}], gehören aber vermutlich nach [kapa]. In "
+                   "INI-Dateien gehört alles nach einem [Sektions]-Header zu "
+                   "dieser Sektion – bitte die [kapa]-Schlüssel VOR die "
+                   "[quelle:*]-Sektionen verschieben (oder die [quelle:*]-"
+                   "Sektionen ans Dateiende).")
+            if ap is not None:
+                ap.error(msg)
+            print(f"WARNUNG: {msg}", file=sys.stderr)
         pw = (s.get("password") or "").strip()
         pf = (s.get("password-file") or s.get("password_file") or "").strip()
         if not pw and pf:
@@ -7123,7 +7144,7 @@ def main():
     # Rückwärtskompatibilität – die eine Quelle aus --url/--user. Über
     # --source-name (INI: source-name) bekommt auch sie einen Anzeigenamen
     # (Quellen-Badge + vROps-Quickfilter), wie die [quelle:*]-Quellen.
-    args.sources = parse_sources(pre.config) if pre.config else []
+    args.sources = parse_sources(pre.config, ap) if pre.config else []
     if not args.sources and args.url:
         args.sources = [{"name": (args.source_name or "").strip(),
                          "url": args.url, "user": args.user,

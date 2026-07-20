@@ -36,28 +36,6 @@ auth-source = local
 #insecure = true                 ; accept self-signed certificates
 #aria-proxy = http://proxy.example.com:3128   ; optional proxy (empty = direct)
 
-# --- Multiple vROps data sources (optional) -----------------------------------
-# Instead of the single source above, several named vROps systems can be mixed
-# in: one [quelle:NAME] section each ("source:NAME" works too). The name after
-# the colon is shown as a badge on each cluster. Each source has its own
-# URL/user/password file and optionally its own proxy. REQUIREMENT: cluster
-# names must be UNIQUE across all sources. As soon as [quelle:*] sections
-# exist, url/user from [kapa] are ignored (the other [kapa] values stay global).
-#
-#[quelle:DC-North]
-#url = https://aria-north.example.com
-#user = svc-kapa-readonly
-#password-file = /etc/kapa/aria-north.pass
-#auth-source = local
-##aria-proxy =                    ; without proxy
-#
-#[quelle:DC-South]
-#url = https://aria-south.example.com
-#user = svc-kapa-readonly
-#password-file = /etc/kapa/aria-south.pass
-#aria-proxy = http://proxy.example.com:3128   ; with proxy
-##insecure = true
-
 # --- Calculation --------------------------------------------------------------
 cpu-factor = 6
 failover-hosts = 1
@@ -138,3 +116,32 @@ smtp-from = kapa-dashboard@example.com
 #backup-password-file = /etc/kapa/backup.pass       ; alternative, needs sshpass
 backup-interval = 43200          ; twice a day
 backup-keep-days = 30            ; delete older archives on the target
+
+# =============================================================================
+# IMPORTANT: the [quelle:*] sections deliberately sit at the VERY END of the
+# file. In INI files EVERYTHING after a [section] header belongs to that
+# section – a 'port = 8888' below [quelle:X] would silently belong to the
+# source and be ignored (the dashboard now reports this as an error).
+# All [kapa] keys must come BEFORE these sections.
+# =============================================================================
+# --- Multiple vROps data sources (optional) -----------------------------------
+# Instead of the single source above, several named vROps systems can be mixed
+# in: one [quelle:NAME] section each ("source:NAME" works too). The name after
+# the colon is shown as a badge on each cluster. Each source has its own
+# URL/user/password file and optionally its own proxy. REQUIREMENT: cluster
+# names must be UNIQUE across all sources. As soon as [quelle:*] sections
+# exist, url/user from [kapa] are ignored (the other [kapa] values stay global).
+#
+#[quelle:DC-North]
+#url = https://aria-north.example.com
+#user = svc-kapa-readonly
+#password-file = /etc/kapa/aria-north.pass
+#auth-source = local
+##aria-proxy =                    ; without proxy
+#
+#[quelle:DC-South]
+#url = https://aria-south.example.com
+#user = svc-kapa-readonly
+#password-file = /etc/kapa/aria-south.pass
+#aria-proxy = http://proxy.example.com:3128   ; with proxy
+##insecure = true

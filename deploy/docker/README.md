@@ -57,6 +57,11 @@ docker run -d --name kapa \
 
 (Beim selbst gebauten Image entsprechend `kapa-dashboard:latest`.)
 
+> **Port im Container:** Der ENTRYPOINT setzt `--port 8080` fest — ein
+> `port = …` in der INI wird im Container **ignoriert** (CLI schlägt INI).
+> Den Außen-Port bestimmst du über das Host-Mapping, z. B.
+> `-p 127.0.0.1:8888:8080`.
+
 Der Dienst lauscht im Container auf `0.0.0.0:8080`; nach außen wird er nur an
 `127.0.0.1` gemappt – **davor gehört ein Reverse Proxy mit TLS** (das Dashboard
 selbst terminiert kein HTTPS). Ohne TLS-Proxy zusätzlich `--cookie-insecure` in
