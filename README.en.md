@@ -628,6 +628,19 @@ dashboard itself speaks plain HTTP on localhost.
 The running version is shown in the web UI footer and via
 `aria_kapa.py --version`.
 
+### Smoke tests
+
+An end-to-end test suite (standard library only, no pytest) runs against a
+freshly started sample server before every release:
+
+```bash
+python3 tests/smoke.py     # 23 checks, ~15 s, exit code 0 = green
+```
+
+Covered: gzip, free-text hardening, token write permissions incl. two-stage
+approval, CSV/language, OpenAPI, mail rules/template, announcement, prefs
+and the INI section guard.
+
 ### Delivery: RPM, Ansible/AAP, container
 
 Besides the manual installation from `config/`, ready-made deployment

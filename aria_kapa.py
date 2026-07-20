@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.8"
+VERSION = "2.8.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -5816,6 +5816,74 @@ def serve(args, password):
                 print(f"Mail-Versand fehlgeschlagen: {e}", file=sys.stderr)
         threading.Thread(target=worker, daemon=True).start()
 
+    # ---- Gemeinsame Zustandsübergänge (Session-UI UND v1-API nutzen sie) ----
+    # Eine einzige Stelle für die Entscheidungs-Logik, damit UI- und
+    # API-Verhalten nicht auseinanderlaufen können.
+
+    def res_find_open(rid, for_cancel=False):
+        """Offenen Antrag finden (unter res_lock aufrufen). Freigeben/Ablehnen
+        nur solange unentschieden; Storno auch für bereits genehmigte."""
+        return next((x for x in reservations if x.get("id") == rid
+                     and not x.get("rejected") and not x.get("cancelled")
+                     and (for_cancel or not x.get("approved"))), None)
+
+    def res_apply_approve(r, actor, comment):
+        """Aktuelle Stufe freigeben (unter res_lock). Rückgabe: Action-Text."""
+        today = datetime.now().date().isoformat()
+        if approval_teams:
+            team = current_team(r)
+            r.setdefault("approvals", []).append(
+                {"team": team, "by": actor, "on": today, "comment": comment})
+            if len(r["approvals"]) < len(approval_teams):
+                return f"von {team} freigegeben"
+        r["approved"] = True
+        r["approved_on"] = today
+        r["approved_by"] = actor
+        if comment:
+            r["comment"] = comment
+        return "genehmigt"
+
+    def res_apply_reject(r, actor, comment):
+        """Ablehnen in der aktuellen Stufe (unter res_lock)."""
+        team = current_team(r)
+        r["rejected"] = True
+        r["rejected_on"] = datetime.now().date().isoformat()
+        r["rejected_by"] = actor
+        if team:
+            r["rejected_team"] = team
+        if comment:
+            r["comment"] = comment
+
+    def res_apply_cancel(r, actor, comment):
+        """Stornieren (unter res_lock)."""
+        r["cancelled"] = True
+        r["cancelled_on"] = datetime.now().date().isoformat()
+        r["cancelled_by"] = actor
+        if comment:
+            r["comment"] = comment
+
+    def res_decision_notify(op, snap, actor, comment, action=None, api=False):
+        """Audit + Mails nach einer Entscheidung (AUSSERHALB von res_lock)."""
+        tag = " (API)" if api else ""
+        cmt = f", Kommentar: {comment}" if comment else ""
+        if op == "approve":
+            verb = ("Antrag genehmigt" if action == "genehmigt"
+                    else "Antrag freigegeben")
+            audit(actor, verb + tag, res_detail(snap) + f" – {action}{cmt}")
+            if snap.get("approved"):
+                mail_event("approved", snap, actor=actor)
+            else:
+                nt = current_team(snap)
+                if nt:
+                    mail_event("team_turn", snap, team=nt, actor=actor)
+        elif op == "reject":
+            audit(actor, "Antrag abgelehnt" + tag, res_detail(snap)
+                  + (f" (Stufe {snap.get('rejected_team')})"
+                     if snap.get("rejected_team") else "") + cmt)
+            mail_event("rejected", snap, actor=actor)
+        else:
+            audit(actor, "Antrag storniert" + tag, res_detail(snap) + cmt)
+
     def public_res(r):
         """Reservierung ohne serverinterne Felder (z. B. die aufgelöste
         Empfänger-Mailadresse von_mail) – so wie sie an Clients gehen darf."""
@@ -6507,83 +6575,26 @@ def serve(args, password):
                 rid = urllib.parse.unquote(
                     self.path[len("/api/v1/reservations/"):-(len(op) + 1)])
                 comment = str((self._body() or {}).get("comment") or "").strip()[:64]
-                today = datetime.now().date().isoformat()
                 notify = None
                 action = None
-                err = None
                 with res_lock:
-                    r = next((x for x in reservations if x.get("id") == rid
-                              and not x.get("rejected") and not x.get("cancelled")
-                              and (op == "cancel" or not x.get("approved"))), None)
-                    if r is None:
-                        err = ("Antrag nicht gefunden oder bereits entschieden.", 404)
-                    elif op == "approve":
-                        team = current_team(r)
-                        if approval_teams:
-                            r.setdefault("approvals", []).append(
-                                {"team": team, "by": actor, "on": today,
-                                 "comment": comment})
-                            if len(r["approvals"]) >= len(approval_teams):
-                                r["approved"] = True
-                                r["approved_on"] = today
-                                r["approved_by"] = actor
-                                if comment:
-                                    r["comment"] = comment
-                                action = "genehmigt"
-                            else:
-                                action = f"von {team} freigegeben"
+                    r = res_find_open(rid, for_cancel=(op == "cancel"))
+                    if r is not None:
+                        if op == "approve":
+                            action = res_apply_approve(r, actor, comment)
+                        elif op == "reject":
+                            res_apply_reject(r, actor, comment)
                         else:
-                            r["approved"] = True
-                            r["approved_on"] = today
-                            r["approved_by"] = actor
-                            if comment:
-                                r["comment"] = comment
-                            action = "genehmigt"
+                            res_apply_cancel(r, actor, comment)
                         notify = dict(r)
                         res_put(r)
-                    elif op == "reject":
-                        team = current_team(r)
-                        r["rejected"] = True
-                        r["rejected_on"] = today
-                        r["rejected_by"] = actor
-                        if team:
-                            r["rejected_team"] = team
-                        if comment:
-                            r["comment"] = comment
-                        notify = dict(r)
-                        res_put(r)
-                    else:                       # cancel
-                        r["cancelled"] = True
-                        r["cancelled_on"] = today
-                        r["cancelled_by"] = actor
-                        if comment:
-                            r["comment"] = comment
-                        notify = dict(r)
-                        res_put(r)
-                if err:
-                    self._json({"error": err[0]}, err[1])
+                if notify is None:
+                    self._json({"error": "Antrag nicht gefunden oder bereits "
+                                         "entschieden."}, 404)
                     return
                 self._json({"reservation": public_res(notify)})
-                cmt = f", Kommentar: {comment}" if comment else ""
-                if op == "approve":
-                    verb = ("Antrag genehmigt" if action == "genehmigt"
-                            else "Antrag freigegeben")
-                    audit(actor, verb + " (API)",
-                          res_detail(notify) + f" – {action}{cmt}")
-                    if notify.get("approved"):
-                        mail_event("approved", notify, actor=actor)
-                    else:
-                        nt = current_team(notify)
-                        if nt:
-                            mail_event("team_turn", notify, team=nt, actor=actor)
-                elif op == "reject":
-                    audit(actor, "Antrag abgelehnt (API)", res_detail(notify)
-                          + (f" (Stufe {notify.get('rejected_team')})"
-                             if notify.get("rejected_team") else "") + cmt)
-                    mail_event("rejected", notify, actor=actor)
-                else:
-                    audit(actor, "Antrag storniert (API)",
-                          res_detail(notify) + cmt)
+                res_decision_notify(op, notify, actor, comment,
+                                    action=action, api=True)
             elif self.path == "/api/reservations":
                 s = self._require("admin", "anforderer")
                 if not s:
@@ -6627,53 +6638,35 @@ def serve(args, password):
                     mail_event("team_turn", entry, team=current_team(entry),
                                actor=s["user"] or "")
             elif (self.path.startswith("/api/reservations/")
-                    and self.path.endswith("/approve")):
+                    and self.path.endswith(("/approve", "/reject"))):
+                op = self.path.rsplit("/", 1)[1]
                 s = self._require("admin", "reviewer")
                 if not s:
                     return
                 rid = urllib.parse.unquote(
-                    self.path[len("/api/reservations/"):-len("/approve")])
+                    self.path[len("/api/reservations/"):-(len(op) + 1)])
                 comment = str((self._body() or {}).get("comment") or "").strip()[:64]
                 notify = None
                 action = None
                 err = None
                 with res_lock:
-                    r = next((x for x in reservations
-                              if x.get("id") == rid and not x.get("rejected")
-                              and not x.get("approved")), None)
+                    r = res_find_open(rid)
                     if r is None:
                         err = ("Antrag nicht gefunden oder bereits entschieden.", 404)
                     else:
                         team = current_team(r)
-                        # Reviewer dürfen nur freigeben, wenn ihr Team an der Reihe ist
+                        # Reviewer nur, wenn ihr Team gerade an der Reihe ist
                         if s["role"] == "reviewer" and (
                                 not approval_teams
                                 or (s.get("abteilung") or "") != (team or "")):
                             err = ("Ihr Team ist für diesen Antrag gerade nicht "
                                    "an der Reihe.", 403)
+                        elif op == "approve":
+                            action = res_apply_approve(r, s["user"] or "", comment)
+                            notify = dict(r)
+                            res_put(r)
                         else:
-                            today = datetime.now().date().isoformat()
-                            if approval_teams:
-                                r.setdefault("approvals", []).append(
-                                    {"team": team, "by": s["user"] or "",
-                                     "on": today, "comment": comment})
-                                if len(r["approvals"]) >= len(approval_teams):
-                                    r["approved"] = True
-                                    r["approved_on"] = today
-                                    r["approved_by"] = s["user"] or ""
-                                    if comment:
-                                        r["comment"] = comment
-                                    action = "genehmigt"
-                                else:
-                                    action = f"von {team} freigegeben"
-                            else:
-                                # einstufig (keine Teams konfiguriert)
-                                r["approved"] = True
-                                r["approved_on"] = today
-                                r["approved_by"] = s["user"] or ""
-                                if comment:
-                                    r["comment"] = comment
-                                action = "genehmigt"
+                            res_apply_reject(r, s["user"] or "", comment)
                             notify = dict(r)
                             res_put(r)
                     resp = None if err else visible_res(s)
@@ -6682,61 +6675,8 @@ def serve(args, password):
                     return
                 self._json(resp)
                 if notify:
-                    verb = ("Antrag genehmigt" if action == "genehmigt"
-                            else "Antrag freigegeben")
-                    audit(s["user"], verb, res_detail(notify) + f" – {action}"
-                          + (f", Kommentar: {comment}" if comment else ""))
-                    if notify.get("approved"):    # letzte Stufe -> endgültig genehmigt
-                        mail_event("approved", notify, actor=s["user"] or "")
-                    else:                          # Zwischenstufe -> nächstes Team ist dran
-                        nt = current_team(notify)
-                        if nt:
-                            mail_event("team_turn", notify, team=nt,
-                                       actor=s["user"] or "")
-            elif (self.path.startswith("/api/reservations/")
-                    and self.path.endswith("/reject")):
-                s = self._require("admin", "reviewer")
-                if not s:
-                    return
-                rid = urllib.parse.unquote(
-                    self.path[len("/api/reservations/"):-len("/reject")])
-                comment = str((self._body() or {}).get("comment") or "").strip()[:64]
-                notify = None
-                err = None
-                with res_lock:
-                    r = next((x for x in reservations
-                              if x.get("id") == rid and not x.get("approved")
-                              and not x.get("rejected")), None)
-                    if r is None:
-                        err = ("Antrag nicht gefunden oder bereits entschieden.", 404)
-                    else:
-                        team = current_team(r)
-                        if s["role"] == "reviewer" and (
-                                not approval_teams
-                                or (s.get("abteilung") or "") != (team or "")):
-                            err = ("Ihr Team ist für diesen Antrag gerade nicht "
-                                   "an der Reihe.", 403)
-                        else:
-                            r["rejected"] = True
-                            r["rejected_on"] = datetime.now().date().isoformat()
-                            r["rejected_by"] = s["user"] or ""
-                            if team:
-                                r["rejected_team"] = team
-                            if comment:
-                                r["comment"] = comment
-                            notify = dict(r)
-                            res_put(r)
-                    resp = None if err else visible_res(s)
-                if err:
-                    self._json({"error": err[0]}, err[1])
-                    return
-                self._json(resp)
-                if notify:
-                    audit(s["user"], "Antrag abgelehnt", res_detail(notify)
-                          + (f" (Stufe {notify.get('rejected_team')})"
-                             if notify.get("rejected_team") else "")
-                          + (f" – Kommentar: {comment}" if comment else ""))
-                    mail_event("rejected", notify, actor=s["user"] or "")
+                    res_decision_notify(op, notify, s["user"] or "", comment,
+                                        action=action)
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/cancel")):
                 # Storno: jemand aus derselben Abteilung (oder der Anforderer
@@ -6752,9 +6692,7 @@ def serve(args, password):
                 notify = None
                 err = None
                 with res_lock:
-                    r = next((x for x in reservations
-                              if x.get("id") == rid and not x.get("rejected")
-                              and not x.get("cancelled")), None)
+                    r = res_find_open(rid, for_cancel=True)
                     if r is None:
                         err = ("Antrag nicht gefunden oder bereits "
                                "abgeschlossen.", 404)
@@ -6766,11 +6704,7 @@ def serve(args, password):
                             err = ("Nur die eigene Abteilung (oder ein Admin) "
                                    "darf diese Anfrage stornieren.", 403)
                         else:
-                            r["cancelled"] = True
-                            r["cancelled_on"] = datetime.now().date().isoformat()
-                            r["cancelled_by"] = s["user"] or ""
-                            if comment:
-                                r["comment"] = comment
+                            res_apply_cancel(r, s["user"] or "", comment)
                             notify = dict(r)
                             res_put(r)
                     resp = None if err else visible_res(s)
@@ -6779,8 +6713,7 @@ def serve(args, password):
                     return
                 self._json(resp)
                 if notify:
-                    audit(s["user"], "Antrag storniert", res_detail(notify)
-                          + (f" – Kommentar: {comment}" if comment else ""))
+                    res_decision_notify("cancel", notify, s["user"] or "", comment)
             elif self.path == "/api/backup":
                 s = self._require("admin")
                 if not s:

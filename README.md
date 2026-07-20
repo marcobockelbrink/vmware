@@ -662,6 +662,19 @@ Reverse-Proxy; das Dashboard selbst spricht nur HTTP auf localhost.
 Die laufende Version wird im Footer der Weboberfläche und per
 `aria_kapa.py --version` angezeigt.
 
+### Smoke-Tests
+
+Vor jedem Release läuft eine End-zu-End-Testsuite (nur Standardbibliothek,
+kein pytest) gegen einen frisch gestarteten Sample-Server:
+
+```bash
+python3 tests/smoke.py     # 23 Checks, ~15 s, Exit-Code 0 = grün
+```
+
+Geprüft werden u. a. gzip, Freitext-Härtung, Token-Schreibrechte samt
+zweistufiger Freigabe, CSV/Sprache, OpenAPI, Mail-Regeln/-Vorlage,
+Ankündigung, Prefs und der INI-Sektions-Wächter.
+
 ### Auslieferung: RPM, Ansible/AAP, Container
 
 Neben der manuellen Installation aus `config/` gibt es fertige
