@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.8.1"
+VERSION = "2.8.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2263,6 +2263,12 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </head>
 <body>
 <h1>Kapazitätsübersicht pro Cluster</h1>
+<!-- Benutzer / Theme / Abmelden: fest oben rechts, gegenüber von Info & Hilfe -->
+<div id="userarea" style="position:absolute;top:22px;right:24px;display:flex;gap:8px;align-items:center">
+  <span id="userbox" style="font-size:12px;color:var(--muted)"></span>
+  <button class="btn" id="themeBtn" onclick="toggleTheme()" title="Hell/Dunkel umschalten">☀️</button>
+  <button class="btn" id="logoutBtn" style="display:none" onclick="logout()">Abmelden</button>
+</div>
 <div class="sub">
   <button class="btn" onclick="showInfo('infoCalc','Info Kapa-Berechnung')">ℹ Info Kapa-Berechnung</button>
   <button class="btn" onclick="showInfo('infoHelp','Hilfe')">? Hilfe</button>
@@ -2294,9 +2300,6 @@ try { var _t = new URLSearchParams(location.search).get("theme")
      download="reservierungen.csv" title="Reservierungen als CSV (Semikolon, für Excel)">CSV exportieren</a>
   <button class="btn" onclick="exportRes()">Reservierungen exportieren (JSON)</button>
   <label class="btn" id="importBtn">Reservierungen importieren (JSON)<input type="file" accept=".json" hidden onchange="importRes(event)"></label>
-  <span id="userbox" style="font-size:12px;color:var(--muted)"></span>
-  <button class="btn" id="themeBtn" onclick="toggleTheme()" title="Hell/Dunkel umschalten">☀️</button>
-  <button class="btn" id="logoutBtn" style="display:none" onclick="logout()">Abmelden</button>
 </div>
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
