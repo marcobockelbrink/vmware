@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.4"
+VERSION = "2.5"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -33,24 +33,25 @@ DEFAULT_ROLE_NAMES = {"admin": "Administrator", "anforderer": "Anforderer",
 #   anforderer -> der Antragsteller (r.von), kein eigenes Adressfeld
 #   admin/auditor -> feste Verteiler-Adresse (Feld "email")
 #   reviewer/team_turn -> die pro Team hinterlegte Adresse (team_email)
-NOTIFY_EVENTS = ("created", "rejected", "approved", "team_turn")
+NOTIFY_EVENTS = ("created", "rejected", "approved", "team_turn", "reminder")
 # Welche Ereignisse je Rolle überhaupt wählbar sind (Rest wird als "–" gezeigt):
 NOTIFY_ROLE_EVENTS = {
     "anforderer": ("created", "rejected", "approved"),
-    "admin":      ("created", "rejected", "approved", "team_turn"),
+    "admin":      ("created", "rejected", "approved", "team_turn", "reminder"),
     "auditor":    ("created", "rejected", "approved", "team_turn"),
-    "reviewer":   ("team_turn",),
+    "reviewer":   ("team_turn", "reminder"),
 }
 DEFAULT_NOTIFY = {
     "role": {
         "anforderer": {"created": False, "rejected": True,  "approved": True},
         "admin":      {"created": False, "rejected": False, "approved": False,
-                       "team_turn": False, "email": ""},
+                       "team_turn": False, "reminder": False, "email": ""},
         "auditor":    {"created": False, "rejected": False, "approved": False,
                        "team_turn": False, "email": ""},
-        "reviewer":   {"team_turn": True},
+        "reviewer":   {"team_turn": True, "reminder": False},
     },
     "team_email": {},        # {Team-Name: Verteiler-Adresse}
+    "reminder_days": 2,      # Erinnerung nach N Tagen Wartezeit (dann alle N Tage)
 }
 
 import argparse
@@ -2483,14 +2484,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   jeweilige Antragsteller (automatisch). <b>Admin/Auditor</b> = die eingetragene
   Verteiler-Adresse. <b>Reviewer / „Team ist dran"</b> = die Team-Adresse aus der
   Teams-Tabelle (Reiter „Benutzer &amp; Rollen"). Voraussetzung ist ein
-  konfigurierter SMTP-Server. „Freigabe" meint die endgültige Genehmigung.</div>
+  konfigurierter SMTP-Server. „Freigabe" meint die endgültige Genehmigung.
+  <b>„Erinnerung"</b> mailt das gerade zuständige Team (bzw. den Admin-Verteiler),
+  wenn ein Antrag zu lange auf seine Freigabe wartet.</div>
 <div class="tablewrap">
 <table class="kt" id="notifytable">
   <thead><tr><th style="width:150px">Interne Rolle</th><th>Verteiler-Adresse</th>
     <th class="num nosort">Anlage</th><th class="num nosort">Ablehnung</th>
-    <th class="num nosort">Freigabe</th><th class="num nosort">Team ist dran</th></tr></thead>
+    <th class="num nosort">Freigabe</th><th class="num nosort">Team ist dran</th>
+    <th class="num nosort">Erinnerung</th></tr></thead>
   <tbody id="ntbody"></tbody>
 </table>
+</div>
+<div style="margin-top:8px;font-size:13px">
+  Erinnerung nach
+  <input id="ntReminderDays" type="number" min="1" max="30" value="2"
+         style="width:60px;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;text-align:center">
+  Tagen Wartezeit – danach alle so viele Tage erneut, bis entschieden ist.
 </div>
 <button class="btn approve" style="margin-top:8px" onclick="saveNotify()">✓ Mail-Regeln speichern</button>
 <span id="notifySaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
@@ -2750,12 +2760,12 @@ function renderColMenu(tableId) {
   if (box) box.innerHTML = colMenuHtml(tableId);
 }
 // Welche Ereignisse je Rolle wählbar sind (Rest = "–"); Reihenfolge = Spalten
-const NOTIFY_EVENTS = [["created","Anlage"],["rejected","Ablehnung"],["approved","Freigabe"],["team_turn","Team ist dran"]];
+const NOTIFY_EVENTS = [["created","Anlage"],["rejected","Ablehnung"],["approved","Freigabe"],["team_turn","Team ist dran"],["reminder","Erinnerung"]];
 const NOTIFY_ROLE_EVENTS = {
   anforderer: ["created","rejected","approved"],
-  admin:      ["created","rejected","approved","team_turn"],
+  admin:      ["created","rejected","approved","team_turn","reminder"],
   auditor:    ["created","rejected","approved","team_turn"],
-  reviewer:   ["team_turn"],
+  reviewer:   ["team_turn","reminder"],
 };
 // Löschen von Reservierungsanfragen ist deaktiviert – stattdessen Storno.
 function canDel(r) { return false; }
@@ -3630,6 +3640,8 @@ function renderNotify() {
       <td>${addr}</td>${cells}</tr>`;
   }).join("");
   document.getElementById("ntbody").innerHTML = rows;
+  const rd = document.getElementById("ntReminderDays");
+  if (rd && document.activeElement !== rd) rd.value = NOTIFY.reminder_days || 2;
 }
 function collectNotifyBody() {
   const body = { role: {}, team_email: {} };
@@ -3650,6 +3662,8 @@ function collectNotifyBody() {
   const s = document.getElementById("tplSubject"), h = document.getElementById("tplHtml");
   body.template_subject = s ? s.value.trim() : (NOTIFY.template_subject || "");
   body.template_html = h ? h.value : (NOTIFY.template_html || "");
+  const rd = document.getElementById("ntReminderDays");
+  body.reminder_days = rd ? (parseInt(rd.value, 10) || 2) : (NOTIFY.reminder_days || 2);
   return body;
 }
 function saveNotify() {
@@ -4470,7 +4484,13 @@ const I18N = {
 "pro Team (Tabelle oben)": "per team (table above)",
 "Admin/Auditor": "Admin/Auditor", "Reviewer / „Team ist dran\"": "Reviewer / \"team's turn\"",
 "Anlage": "Created", "Ablehnung": "Rejection", "Freigabe": "Approval",
-"Verteiler-Adresse": "Distribution address",
+"Erinnerung": "Reminder", "Verteiler-Adresse": "Distribution address",
+"„Erinnerung\"": "„Reminder“",
+"mailt das gerade zuständige Team (bzw. den Admin-Verteiler), wenn ein Antrag zu lange auf seine Freigabe wartet.":
+  "mails the team currently up (or the admin list) when a request has been waiting too long for its approval.",
+"Erinnerung nach": "Remind after",
+"Tagen Wartezeit – danach alle so viele Tage erneut, bis entschieden ist.":
+  "days of waiting – then again every that many days until decided.",
 "✓ Mail-Regeln speichern": "✓ Save mail rules",
 "Mail-Vorlage (HTML)": "Mail template (HTML)",
 "Betreff und HTML-Text der Reservierungs-Mails. Verfügbare Variablen unten einfach anklicken, um sie an der Cursor-Position einzufügen. Leer lassen = eingebaute Standardvorlage. „Vorschau\" rendert die Vorlage mit Beispieldaten.":
@@ -5037,6 +5057,13 @@ def serve(args, password):
                 cfg["template_html"] = th[:20000]
             if isinstance(ts, str) and ts.strip():
                 cfg["template_subject"] = ts.strip()[:300]
+        # Erinnerungs-Intervall (Tage Wartezeit bis zur Reminder-Mail, dann
+        # alle N Tage erneut) – 1..30, Standard 2
+        try:
+            days = int((raw or {}).get("reminder_days"))
+        except (TypeError, ValueError):
+            days = DEFAULT_NOTIFY["reminder_days"]
+        cfg["reminder_days"] = min(30, max(1, days))
         return cfg
 
     def load_notify():
@@ -5553,12 +5580,13 @@ def serve(args, password):
             if rc.get(kind):
                 em = rc.get("email") or (args.smtp_to if role == "admin" else "")
                 to += _split_addrs(em)
-        # Team ist dran -> Adresse des aktuell zuständigen Teams
-        if kind == "team_turn" and (roles.get("reviewer") or {}).get("team_turn") and team:
+        # Team ist dran / Erinnerung -> Adresse des aktuell zuständigen Teams
+        if kind in ("team_turn", "reminder") \
+                and (roles.get("reviewer") or {}).get(kind) and team:
             to += _split_addrs(team_email.get(team))
         return to
 
-    def mail_event(kind, r, team=None, actor=""):
+    def mail_event(kind, r, team=None, actor="", days=None):
         """Ereignis-Mail nach den Mail-Regeln im Hintergrund verschicken."""
         if not args.smtp_server:
             return
@@ -5567,6 +5595,9 @@ def serve(args, password):
             return
         if kind == "team_turn":
             action = f"wartet auf Freigabe durch {team}"
+        elif kind == "reminder":
+            action = (f"wartet seit {days} Tagen auf Freigabe"
+                      + (f" durch {team}" if team else ""))
         else:
             action = {"created": "beantragt", "rejected": "abgelehnt",
                       "approved": "genehmigt"}.get(kind, kind)
@@ -5729,6 +5760,63 @@ def serve(args, password):
                 time.sleep(1)
             else:
                 time.sleep(min(wait, 10))
+
+    def check_reminders():
+        """Offene Anträge, die zu lange auf die aktuelle Stufe warten, per Mail
+        erinnern (Team-Adresse und/oder Admin-Verteiler, je nach Mail-Regeln).
+        Erinnert nach reminder_days Tagen Wartezeit und danach alle
+        reminder_days erneut; der Merker (reminded_on/reminded_stage) liegt am
+        Antrag, eine neue Stufe setzt ihn zurück."""
+        if not args.smtp_server:
+            return
+        with notify_lock:
+            days_cfg = int(notify_cfg.get("reminder_days") or 2)
+        today = datetime.now().date()
+        due = []
+        with res_lock:
+            for r in reservations:
+                if r.get("approved") or r.get("rejected") or r.get("cancelled"):
+                    continue
+                appr = r.get("approvals") or []
+                since_s = str((appr[-1].get("on") if appr else r.get("created")) or "")
+                try:
+                    since = datetime.strptime(since_s[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                waiting = (today - since).days
+                if waiting < days_cfg:
+                    continue
+                stage = len(appr)
+                last = None
+                try:
+                    last = datetime.strptime(
+                        str(r.get("reminded_on") or "")[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    pass
+                if (r.get("reminded_stage") == stage and last
+                        and (today - last).days < days_cfg):
+                    continue          # für diese Stufe erst kürzlich erinnert
+                team = current_team(r)
+                if not mail_recipients("reminder", r, team):
+                    continue          # Erinnerung in den Mail-Regeln nicht aktiv
+                r["reminded_on"] = today.isoformat()
+                r["reminded_stage"] = stage
+                res_put(r)
+                due.append((dict(r), team, waiting))
+        for snap, team, waiting in due:
+            audit(None, "Erinnerung gesendet",
+                  res_detail(snap) + f" – wartet seit {waiting} Tagen"
+                  + (f" auf {team}" if team else ""))
+            mail_event("reminder", snap, team=team, actor="System", days=waiting)
+
+    def reminder_loop():
+        time.sleep(90)   # nach dem Anlauf; danach stündlich prüfen
+        while True:
+            try:
+                check_reminders()
+            except Exception as e:
+                print(f"Erinnerungs-Prüfung fehlgeschlagen: {e}", file=sys.stderr)
+            time.sleep(3600)
 
     def backup_loop():
         time.sleep(60)   # erst nach dem Anlauf (Cache/Migration abgeschlossen)
@@ -6793,6 +6881,7 @@ def serve(args, password):
 
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=maintenance, daemon=True).start()
+    threading.Thread(target=reminder_loop, daemon=True).start()
     if args.backup_target:
         threading.Thread(target=backup_loop, daemon=True).start()
     srv = ThreadingHTTPServer((args.bind, args.port), Handler)

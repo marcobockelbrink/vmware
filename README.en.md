@@ -51,7 +51,11 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 - Hardening: CSP/security headers, `Secure` cookies, **login throttle**, stored-XSS-safe rendering
 
 **Mail notifications**
-- Configurable per internal role: **created / rejected / approved / "team's turn"**
+- Configurable per internal role: **created / rejected / approved / "team's turn" / reminder**
+- **Reminder mails** for stalled requests: if a request waits longer than
+  x days (configurable, default 2) for its current approval stage, the team
+  currently up (and/or the admin list) is reminded — then again every x days
+  until decided
 - Mixed recipients: requester automatically, admin/auditor via distribution list, teams via their own address
 - Clean **HTML emails** (+ plain-text fallback)
 - **Editable mail template** (Administration → Mail): subject + HTML fully customizable with

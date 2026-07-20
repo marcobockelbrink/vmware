@@ -51,7 +51,11 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 - Härtung: CSP/Security-Header, `Secure`-Cookies, **Login-Bremse**, Stored-XSS-sicheres Rendering
 
 **Mail-Benachrichtigungen**
-- Pro interner Rolle konfigurierbar: **Anlage / Ablehnung / Freigabe / „Team ist dran"**
+- Pro interner Rolle konfigurierbar: **Anlage / Ablehnung / Freigabe / „Team ist dran" / Erinnerung**
+- **Erinnerungs-Mails** für liegengebliebene Anträge: wartet ein Antrag länger als
+  x Tage (einstellbar, Standard 2) auf seine aktuelle Freigabe-Stufe, wird das
+  zuständige Team (und/oder der Admin-Verteiler) erinnert — danach alle x Tage
+  erneut, bis entschieden ist
 - Empfänger gemischt: Antragsteller automatisch, Admin/Auditor per Verteiler, Teams per eigener Adresse
 - Dezente **HTML-Mails** (+ Klartext-Fallback)
 - **Editierbare Mail-Vorlage** (Verwaltung → Mail): Betreff + HTML frei anpassbar mit
