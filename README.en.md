@@ -74,6 +74,9 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 
 **Operations & tech**
 - Data stored as **JSON files or SQLite** (`--storage`), **atomic** writes
+- **Performance**: gzip-compressed responses (page ~¼, JSON ~⅛ of the size) and a
+  **VLAN cache** — port group VLANs are reused between refreshes (full re-read
+  once a day) instead of one API call per port group
 - **SFTP backup** with rotation, **audit log** (JSONL, rotating)
 - **One INI** for all non-secret settings, secrets as `.pass` files; optional **Aria proxy**
 - Ships as **systemd + nginx**, **RPM**, **Ansible** or **container** (ready-made image on **GHCR**, built automatically on every release)
@@ -212,7 +215,9 @@ rejections, cancellations and backups:
   works — as with storage — via the attached hosts
   (dvSwitch → HostSystem → `summary|parentCluster`); the VLAN number is read
   best effort from the port group properties (per port group via
-  `/resources/{id}/properties`, any key containing "vlan"). If the fetch
+  `/resources/{id}/properties`, any key containing "vlan"). VLANs of known port
+  groups come from the **cache of the previous refresh** (a full re-read runs
+  once a day — log: `VLANs: X aus Cache, Y per API`). If the fetch
   fails, the network tab stays empty and everything else keeps working. The
   log reports `dvSwitches: N, Portgruppen: M · zugeordnet: …` — check there
   after the next refresh.

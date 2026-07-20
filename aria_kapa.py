@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.5"
+VERSION = "2.6"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -56,6 +56,7 @@ DEFAULT_NOTIFY = {
 
 import argparse
 import getpass
+import gzip
 import hashlib
 import hmac
 import json
@@ -1022,7 +1023,7 @@ def strip_uplinks(clusters, hide=True):
 
 
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
-            tag_property="", vsan_factor=0.5, tanzu_mhz=2500):
+            tag_property="", vsan_factor=0.5, tanzu_mhz=2500, vlan_hint=None):
     # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
     # grob geschätzten Prozentwert über report().
     log = lambda m: print(m, file=sys.stderr)
@@ -1300,7 +1301,19 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             s = str(v).strip()
             return "" if s.lower() in ("", "none", "null") else s
 
+        vlan_cached = [0]
+
         def pg_vlan(pid):
+            # VLAN-Cache: bekannte Portgruppen (per Name, aus dem letzten
+            # Abruf) sparen den teuersten Teil – einen API-Aufruf JE
+            # Portgruppe. Neue Portgruppen werden normal gelesen; einmal am
+            # Tag liest do_refresh alles frisch (falls sich ein VLAN einer
+            # bestehenden Portgruppe ändert).
+            if vlan_hint:
+                v = vlan_hint.get(pg_name.get(pid, ""))
+                if v:
+                    vlan_cached[0] += 1
+                    return v
             props = pg_props(pid)
             vlanish = [(k, v) for k, v in props.items() if "vlan" in k.lower()]
             # bevorzugt einen konkreten ...vlanId-Wert
@@ -1363,7 +1376,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             + (", ".join(f"{cl}={len(d['portgroups'])}"
                          for cl, d in data.items() if d["portgroups"])
                or "keinem Cluster (Beziehungen prüfen)")
-            + (f" · {n_pg} Portgruppen sichtbar" if n_pg else ""))
+            + (f" · {n_pg} Portgruppen sichtbar" if n_pg else "")
+            + f" · VLANs: {vlan_cached[0]} aus Cache, {len(pg_prop_cache)} per API")
     except Exception as e:
         log(f"Netzwerk-Daten (dvSwitch) nicht verfügbar: {e}")
 
@@ -5665,6 +5679,7 @@ def serve(args, password):
         return out
 
     sources = getattr(args, "sources", []) or []
+    vlan_full_ts = [0.0]   # Zeitpunkt des letzten VLAN-Voll-Abrufs
 
     def do_refresh():
         state.update(refreshing=True, error=None, progress="0 %")
@@ -5672,6 +5687,17 @@ def serve(args, password):
         n = len(sources)
         label = ", ".join(s["name"] or s["url"] for s in sources) or "Demo"
         print(f"Aria-Abruf gestartet ({label}) ...", file=sys.stderr)
+        # VLAN-Cache: bekannte Portgruppen-VLANs aus dem letzten Stand
+        # wiederverwenden (spart einen API-Aufruf je Portgruppe); einmal am
+        # Tag alles frisch lesen, falls sich ein VLAN geändert hat.
+        if time.time() - vlan_full_ts[0] >= 86400:
+            vlan_full_ts[0] = time.time()
+            vlan_hint = None
+            print("VLAN-Cache: täglicher Voll-Abruf", file=sys.stderr)
+        else:
+            vlan_hint = {p.get("name"): p.get("vlan")
+                         for c in (state.get("clusters") or [])
+                         for p in (c.get("portgroups") or []) if p.get("vlan")}
         try:
             if args.sample:
                 time.sleep(2)  # Demo: Ladezeit simulieren
@@ -5695,7 +5721,8 @@ def serve(args, password):
                                      exclude_tag=args.exclude_tag,
                                      tag_property=args.tag_property,
                                      vsan_factor=args.vsan_factor,
-                                     tanzu_mhz=args.tanzu_mhz_per_vcpu)
+                                     tanzu_mhz=args.tanzu_mhz_per_vcpu,
+                                     vlan_hint=vlan_hint)
                         for c in cl:
                             if s["name"]:
                                 c["source"] = s["name"]
@@ -5852,8 +5879,21 @@ def serve(args, password):
     class Handler(BaseHTTPRequestHandler):
         def _send(self, body, ctype, code=200, headers=None):
             data = body.encode() if isinstance(body, str) else body
+            # Text-/JSON-Antworten ab 1 KiB gzip-komprimieren, wenn der Client
+            # es kann – die Hauptseite mit eingebetteten Daten schrumpft damit
+            # auf rund ein Fünftel (Level 5: guter Kompromiss aus CPU/Größe).
+            encoding = None
+            if (len(data) >= 1024
+                    and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+                    and ctype.split(";")[0].strip() in (
+                        "text/html", "application/json", "text/csv", "text/plain")):
+                data = gzip.compress(data, 5)
+                encoding = "gzip"
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            if encoding:
+                self.send_header("Content-Encoding", encoding)
+            self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             # Sicherheits-Header (Defense-in-depth): Clickjacking verhindern,

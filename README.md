@@ -74,6 +74,9 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 
 **Betrieb & Technik**
 - Datenhaltung als **JSON-Dateien oder SQLite** (`--storage`), **atomare** Schreibvorgänge
+- **Performance**: gzip-komprimierte Antworten (Seite ~¼, JSON ~⅛ der Größe) und ein
+  **VLAN-Cache** — Portgruppen-VLANs werden zwischen Abrufen wiederverwendet (einmal
+  täglich Voll-Abruf), statt je Portgruppe einen API-Aufruf zu machen
 - **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend)
 - **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**
 - Auslieferung als **systemd + nginx**, **RPM**, **Ansible** oder **Container** (fertiges Image auf **GHCR**, bei jedem Release automatisch gebaut)
@@ -222,7 +225,9 @@ Ablehnungen, Stornos und Backups:
   Cluster läuft — wie beim Storage — über die angedockten Hosts
   (dvSwitch → HostSystem → `summary|parentCluster`); die VLAN-Nummer wird best
   effort aus den Portgruppen-Eigenschaften gelesen (pro Portgruppe über
-  `/resources/{id}/properties`, jeder Schlüssel mit „vlan" im Namen). Schlägt der
+  `/resources/{id}/properties`, jeder Schlüssel mit „vlan" im Namen). Die VLANs bekannter
+  Portgruppen kommen aus dem **Cache des letzten Abrufs** (einmal täglich wird
+  alles frisch gelesen — Log: `VLANs: X aus Cache, Y per API`). Schlägt der
   Abruf fehl, bleibt der Netzwerk-Reiter leer und der Rest läuft weiter. Das Log
   meldet `dvSwitches: N, Portgruppen: M · zugeordnet: …` — dort nach dem nächsten
   Abruf gegenprüfen.
