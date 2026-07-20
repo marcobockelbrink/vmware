@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.2"
+VERSION = "2.2.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -6604,6 +6604,10 @@ def main():
     ap = argparse.ArgumentParser(description="Aria Ops Kapazitätsauswertung pro Cluster")
     ap.add_argument("--version", action="version", version=f"aria_kapa {VERSION}")
     ap.add_argument("--url", help="Basis-URL, z.B. https://aria-ops.firma.de")
+    ap.add_argument("--source-name", default="",
+                    help="Anzeigename der (einen) vROps-Quelle aus --url – wie "
+                         "der Sektionsname bei [quelle:NAME]; erscheint als "
+                         "Quellen-Badge am Cluster und im vROps-Quickfilter")
     ap.add_argument("--user", help="Benutzername")
     ap.add_argument("--password",
                     help="Passwort (alternativ --password-file oder Umgebungsvariable "
@@ -6844,10 +6848,13 @@ def main():
         args.ad_base_dn = ",".join("DC=" + p for p in args.ad_domain.split("."))
 
     # Datenquellen: mehrere benannte vROps aus [quelle:*]-Sektionen ODER – zur
-    # Rückwärtskompatibilität – die eine Quelle aus --url/--user (Name leer).
+    # Rückwärtskompatibilität – die eine Quelle aus --url/--user. Über
+    # --source-name (INI: source-name) bekommt auch sie einen Anzeigenamen
+    # (Quellen-Badge + vROps-Quickfilter), wie die [quelle:*]-Quellen.
     args.sources = parse_sources(pre.config) if pre.config else []
     if not args.sources and args.url:
-        args.sources = [{"name": "", "url": args.url, "user": args.user,
+        args.sources = [{"name": (args.source_name or "").strip(),
+                         "url": args.url, "user": args.user,
                          "auth_source": args.auth_source, "insecure": args.insecure,
                          "aria_proxy": args.aria_proxy, "password": args.password}]
 

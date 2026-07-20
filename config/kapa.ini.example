@@ -24,6 +24,9 @@
 # --- Aria Operations ----------------------------------------------------------
 url = https://aria-ops.firma.de
 user = svc-kapa-readonly
+# Optionaler Anzeigename der Quelle (wie der Sektionsname bei [quelle:NAME]):
+# erscheint als Quellen-Badge am Cluster und im vROps-Quickfilter des Selektors.
+#source-name = RZ-Nord
 # Aria-Passwort NICHT hier, sondern als eigene Datei (root:kapa, 0640):
 #   sudo sh -c 'echo "DAS-ARIA-PASSWORT" > /etc/kapa/aria.pass'
 #   sudo chown root:kapa /etc/kapa/aria.pass && sudo chmod 640 /etc/kapa/aria.pass
