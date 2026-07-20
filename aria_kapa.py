@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.8.2"
+VERSION = "2.8.3"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2049,7 +2049,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <h1>VMware Kapazitätsplanung</h1>
   <p>Anmeldung mit Active-Directory-Konto</p>
   <label>Benutzername</label>
-  <input id="u" autocomplete="username" placeholder="vorname.nachname" autofocus>
+  <input id="u" autocomplete="username" placeholder="__LOGIN_HINT__" autofocus>
   <label>Passwort</label>
   <input id="p" type="password" autocomplete="current-password">
   <button>Anmelden</button>
@@ -2078,6 +2078,7 @@ const L_EN = {
   "Anmeldung mit Active-Directory-Konto": "Sign in with your Active Directory account",
   "Benutzername": "Username", "Passwort": "Password", "Anmelden": "Sign in",
   "vorname.nachname": "first.last",
+  "Active-Directory-Benutzername": "Active Directory user name",
   "Anmeldung fehlgeschlagen.": "Sign-in failed.",
   "Server nicht erreichbar.": "Server unreachable.",
   "Benutzername oder Passwort falsch.": "Wrong username or password.",
@@ -6273,7 +6274,9 @@ def serve(args, password):
                 s = self._session()
                 if auth_enabled and not s:
                     self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION)
-                               .replace("__CONTACT__", _html_escape(args.contact_info)),
+                               .replace("__CONTACT__", _html_escape(args.contact_info))
+                               .replace("__LOGIN_HINT__",
+                                        _html_escape(args.login_hint)),
                                "text/html; charset=utf-8")
                     return
                 userinfo = ({"user": s["user"], "role": s["role"],
@@ -7260,6 +7263,9 @@ def main():
                          "ldaps://dc01.firma.local (ohne Angabe: kein Login nötig)")
     ap.add_argument("--ad-domain", default="",
                     help="AD-Domäne für Benutzernamen ohne @, z. B. firma.local")
+    ap.add_argument("--login-hint", default="Active-Directory-Benutzername",
+                    help="Platzhalter im Benutzername-Feld der Anmeldemaske "
+                         "(z. B. 'vorname.nachname' oder 'MUSTER\\\\benutzer')")
     ap.add_argument("--ad-insecure", action="store_true",
                     help="LDAPS-Zertifikat nicht prüfen (Self-Signed)")
     ap.add_argument("--ad-bind-dn", default="",

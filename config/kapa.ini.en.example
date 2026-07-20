@@ -87,6 +87,8 @@ data-dir = /var/lib/kapa
 # --- Active Directory sign-in (empty = no login) ------------------------------
 ad-url = ldaps://dc01.example.com
 ad-domain = example.com
+# Placeholder shown in the username field of the sign-in form (free text):
+#login-hint = first.last
 admin-user = first.last@example.com
 #ad-insecure = true
 #cookie-insecure = true           ; cookie without Secure – local HTTP tests only

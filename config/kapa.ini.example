@@ -87,6 +87,8 @@ data-dir = /var/lib/kapa
 # --- Active-Directory-Anmeldung (leer = kein Login) ---------------------------
 ad-url = ldaps://dc01.firma.local
 ad-domain = firma.local
+# Platzhalter im Benutzername-Feld der Anmeldemaske (frei formulierbar):
+#login-hint = vorname.nachname
 admin-user = vorname.nachname@firma.local
 #ad-insecure = true
 #cookie-insecure = true           ; Cookie ohne Secure – nur für lokalen HTTP-Test

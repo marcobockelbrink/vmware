@@ -560,6 +560,7 @@ Results (including errors) land in the audit log.
 | `--rolenames-file data/kapa_rollennamen.json` | File with the freely renamable role labels (managed via the admin page) |
 | `--ad-url ldaps://dc01…` | Enable AD sign-in |
 | `--ad-domain example.com` | Domain for user names without `@` |
+| `--login-hint "…"` | Placeholder in the username field of the sign-in form (default: "Active-Directory-Benutzername") |
 | `--ad-insecure` | Skip LDAPS certificate verification |
 | `--cookie-insecure` | Session cookie without `Secure` (local HTTP test only) |
 | `--admin-user a@…,b@…` | Always-admins (bootstrap) |

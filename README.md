@@ -593,6 +593,7 @@ auslösen** – im Tab „Verwaltung" (Abschnitt „Backup") per Knopf oder dire
 | `--rolenames-file data/kapa_rollennamen.json` | Datei mit den frei wählbaren Rollen-Bezeichnungen (Pflege über die Verwaltungsseite) |
 | `--ad-url ldaps://dc01…` | AD-Anmeldung aktivieren |
 | `--ad-domain firma.local` | Domäne für Benutzernamen ohne `@` |
+| `--login-hint "…"` | Platzhalter im Benutzername-Feld der Anmeldemaske (Standard: „Active-Directory-Benutzername") |
 | `--ad-insecure` | LDAPS-Zertifikat nicht prüfen |
 | `--cookie-insecure` | Session-Cookie ohne `Secure` (nur lokaler HTTP-Test) |
 | `--admin-user a@…,b@…` | Immer-Admins (Bootstrap) |
