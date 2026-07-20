@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.8.3"
+VERSION = "2.8.4"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2082,6 +2082,8 @@ const L_EN = {
   "Anmeldung fehlgeschlagen.": "Sign-in failed.",
   "Server nicht erreichbar.": "Server unreachable.",
   "Benutzername oder Passwort falsch.": "Wrong username or password.",
+  "Die Eingabe im Benutzername-Feld sieht wie ein Passwort aus – bitte den Anmeldenamen eintragen.":
+    "The input in the username field looks like a password – please enter your sign-in name.",
   "Zu viele Fehlversuche – bitte einige Minuten warten und erneut versuchen.":
     "Too many failed attempts – please wait a few minutes and try again."
 };
@@ -2128,6 +2130,9 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--text);
          font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:24px; }
+  /* Links (z. B. API-Doku/OpenAPI-Spec) in Akzentfarbe statt Browser-Blau –
+     das Standardblau ist im dunklen Theme kaum lesbar. */
+  a { color:var(--accent); }
   h1 { font-size:22px; margin-bottom:4px; }
   .sub { color:var(--muted); margin-bottom:20px; }
   .tablewrap { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow-x:auto; }
@@ -5357,6 +5362,29 @@ def serve(args, password):
             name = name + "@" + args.ad_domain
         return name
 
+    def suspicious_login_name(raw):
+        """Heuristik: Sieht die Eingabe im Benutzername-Feld wie ein
+        versehentlich eingefügtes PASSWORT aus (Passwort-Manager-Klassiker)?
+        Dann weder ans AD schicken noch den Wert protokollieren — sonst stünde
+        das Passwort im Klartext im Audit-Log. Bewusst einfach gehalten:
+        AD-Namen bestehen aus Buchstaben/Ziffern/. @ \\ - _ und haben Struktur;
+        Passwörter haben Sonderzeichen oder sind lange Zufallsketten."""
+        u = str(raw or "").strip()
+        if not u:
+            return False
+        if len(u) > 64:
+            return True
+        # Sonderzeichen/Leerzeichen, die in AD-Anmeldenamen nicht vorkommen
+        if re.search(r"[^A-Za-z0-9.@\\\-_]", u):
+            return True
+        # lange Zufallskette ohne Namens-Trenner (kein . @ \), aber mit
+        # Groß-/Kleinschreibung UND Ziffern gemischt
+        if (len(u) >= 15 and not re.search(r"[.@\\]", u)
+                and re.search(r"[a-z]", u) and re.search(r"[A-Z]", u)
+                and re.search(r"\d", u)):
+            return True
+        return False
+
     ROLE_RANK = {"admin": 3, "reviewer": 2, "auditor": 1, "anforderer": 0}
 
     def role_entry(user):
@@ -6440,6 +6468,17 @@ def serve(args, password):
                     self.send_error(404)
                     return
                 body = self._body() or {}
+                # Passwort statt Benutzername eingefügt (Passwort-Manager)?
+                # Dann: NICHT ans AD schicken, NICHT protokollieren (das wäre
+                # ein Klartext-Passwort im Audit-Log), freundlicher Hinweis.
+                if suspicious_login_name(body.get("username")):
+                    audit(None, "Anmeldung fehlgeschlagen",
+                          "Eingabe im Benutzerfeld sah wie ein Passwort aus – "
+                          "Wert bewusst nicht protokolliert")
+                    self._json({"error": "Die Eingabe im Benutzername-Feld "
+                                         "sieht wie ein Passwort aus – bitte "
+                                         "den Anmeldenamen eintragen."}, 401)
+                    return
                 user = normalize_user(body.get("username"))
                 pw = str(body.get("password") or "")
                 # Einheitliche Antwort für „kein Konto", „keine Rolle" und

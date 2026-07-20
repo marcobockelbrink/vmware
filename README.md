@@ -52,6 +52,9 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 - Rollen **Admin / Reviewer / Anforderer / Auditor**, frei benennbar; team-basierte Sichtbarkeit
 - **AD-Anmeldung** (LDAP, nur Stdlib), **AD-Gruppen** als Berechtigungssubjekt, Empfänger-Mail aus wählbarem **AD-Attribut**
 - Härtung: CSP/Security-Header, `Secure`-Cookies, **Login-Bremse**, Stored-XSS-sicheres Rendering
+- **Passwort-Detektor** in der Anmeldemaske: sieht die Eingabe im Benutzerfeld wie ein
+  (aus dem Passwort-Manager eingefügtes) Passwort aus, geht sie **weder ans AD noch ins
+  Audit-Log** — stattdessen freundlicher Hinweis an den Benutzer
 
 **Mail-Benachrichtigungen**
 - Pro interner Rolle konfigurierbar: **Anlage / Ablehnung / Freigabe / „Team ist dran" / Erinnerung**

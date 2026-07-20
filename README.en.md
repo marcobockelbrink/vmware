@@ -52,6 +52,9 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 - Roles **Admin / Reviewer / Requester / Auditor**, freely renamable; team-based visibility
 - **AD sign-in** (LDAP, stdlib only), **AD groups** as permission subjects, recipient mail from a selectable **AD attribute**
 - Hardening: CSP/security headers, `Secure` cookies, **login throttle**, stored-XSS-safe rendering
+- **Password detector** in the sign-in form: if the username input looks like a
+  password (pasted from a password manager), it goes **neither to AD nor into the
+  audit log** — the user gets a friendly hint instead
 
 **Mail notifications**
 - Configurable per internal role: **created / rejected / approved / "team's turn" / reminder**

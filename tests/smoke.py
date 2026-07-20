@@ -206,6 +206,45 @@ try:
     st, p2, _ = req("PUT", "/api/prefs", {"cols": {}, "theme": "neon"})
     check("Ungültiges Theme wird verworfen", "theme" not in p2)
 
+    print("== Anmeldemaske: Passwort-Detektor ==")
+    DATA2 = tempfile.mkdtemp(prefix="kapa_smoke_ad_")
+    P2 = free_port()
+    proc2 = subprocess.Popen(
+        [sys.executable, APP, "--serve", "--sample", "--bind", "127.0.0.1",
+         "--port", str(P2), "--data-dir", DATA2,
+         "--ad-url", "ldaps://smoke.invalid"],
+        stdout=open(os.path.join(DATA2, "s.log"), "w"), stderr=subprocess.STDOUT)
+    try:
+        B2 = f"http://127.0.0.1:{P2}"
+        t0 = time.time()
+        while time.time() - t0 < 20:
+            try:
+                urllib.request.urlopen(B2 + "/healthz", timeout=2)
+                break
+            except Exception:
+                time.sleep(0.5)
+        SECRET = "kX9$mQ2pLr#8vN!"
+        r = urllib.request.Request(B2 + "/api/login",
+            data=json.dumps({"username": SECRET, "password": "x"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(r, timeout=10)
+            st2, msg = 200, {}
+        except urllib.error.HTTPError as e:
+            st2, msg = e.code, json.loads(e.read().decode())
+        check("Passwort im Benutzerfeld -> 401 + Hinweis, kein AD-Kontakt",
+              st2 == 401 and "sieht wie ein Passwort aus" in msg.get("error", ""))
+        logtxt = open(os.path.join(DATA2, "kapa_log.jsonl")).read()
+        check("Passwort NICHT im Audit-Log",
+              SECRET not in logtxt and "nicht protokolliert" in logtxt)
+    finally:
+        proc2.terminate()
+        try:
+            proc2.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc2.kill()
+        shutil.rmtree(DATA2, ignore_errors=True)
+
     print("== INI-Wächter ==")
     bad = os.path.join(DATA, "bad.ini")
     with open(bad, "w") as f:
