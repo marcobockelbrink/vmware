@@ -200,7 +200,22 @@ try:
     small = [l for c in d1["clusters"] for l in c.get("datastores", [])
              if (l.get("raw_cap_gb") or l["cap_gb"]) < 3000]
     check("Mindest-LUN filtert kleine Datastores raus", n1 < n0 and not small)
-    req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0})
+    # Namensfilter: alle vSAN-Datastores (Name enthält "vsan") ausschließen
+    req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0,
+                                   "exclude_names": "vsan"})
+    t0 = time.time()
+    while time.time() - t0 < 12:
+        d2 = req("GET", "/api/v1/data")[1]
+        if not req("GET", "/api/status")[1].get("refreshing"):
+            break
+        time.sleep(0.5)
+    left = [l for c in d2["clusters"] for l in c.get("datastores", [])]
+    check("Namensfilter schliesst passende LUNs aus",
+          left and not any("vsan" in l["name"].lower() for l in left))
+    st, cfg, _ = req("GET", "/api/storagecfg")
+    check("Namensfilter persistiert", cfg.get("exclude_names") == "vsan")
+    req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0,
+                                   "exclude_names": ""})
 
     print("== CSV / Sprache / OpenAPI ==")
     st, csv_de, _ = req("GET", "/api/v1/reservations?format=csv", raw=True)

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.13"
+VERSION = "2.13.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1042,7 +1042,7 @@ def strip_uplinks(clusters, hide=True):
 
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             tag_property="", vsan_factor=0.5, tanzu_mhz=2500, vlan_hint=None,
-            min_lun_gb=0):
+            min_lun_gb=0, exclude_names=None):
     # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
     # grob geschätzten Prozentwert über report().
     log = lambda m: print(m, file=sys.stderr)
@@ -1528,11 +1528,12 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         log(f"Tanzu-Namespaces nicht verfügbar: {e}")
 
     report(100)
-    return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz, min_lun_gb)
+    return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz,
+                         min_lun_gb, exclude_names)
 
 
 def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
-                  min_lun_gb=0):
+                  min_lun_gb=0, exclude_names=None):
     """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}
 
     Pro Cluster werden die größten `failover_hosts` Hosts als Ausfallreserve
@@ -1562,12 +1563,16 @@ def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
         vcpu_used = sum(v["vcpu"] for v in d["vms"])
         ram_used = round(sum(v["ram_gb"] for v in d["vms"]), 1)
         storage = d.get("storage") or {}
-        # Mindest-LUN-Größe: Datastores unter der Schwelle KOMPLETT ausschließen
-        # (Liste, Kapazität, Belegung). Kriterium ist die Brutto-LUN-Größe.
+        # Datastores KOMPLETT ausschließen (Liste, Kapazität, Belegung):
+        #  - unter der Mindest-LUN-Größe (Brutto), und/oder
+        #  - deren Name eines der Namensmuster enthält (z. B. "iso", "backup").
+        excl = exclude_names or []
         luns_all = storage.get("luns") or []
-        luns = [l for l in luns_all if min_lun_gb <= 0
-                or float(l.get("raw_cap_gb") or l.get("cap_gb") or 0) >= min_lun_gb]
-        if min_lun_gb > 0:
+        luns = [l for l in luns_all
+                if (min_lun_gb <= 0
+                    or float(l.get("raw_cap_gb") or l.get("cap_gb") or 0) >= min_lun_gb)
+                and not any(p in (l.get("name") or "").lower() for p in excl)]
+        if min_lun_gb > 0 or excl:
             stor_cap = round(sum(float(l.get("cap_gb") or 0) for l in luns), 1)
             stor_used = round(sum(float(l.get("used_gb") or 0) for l in luns), 1)
         else:
@@ -2737,12 +2742,22 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   Detail) und zählen auch <b>nicht</b> in die Storage-Kapazität/Auslastung.
   Praktisch, um kleine Boot-/ISO-/Scratch-Datastores auszublenden. 0 = alle
   anzeigen. Die Änderung löst gleich einen neuen Datenabruf aus.</div>
-<div style="margin-bottom:12px">
+<div style="margin-bottom:16px">
   Mindestgröße: <input id="storMinLun" type="number" min="0" step="10"
     style="width:110px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;text-align:center"> GB
-  <button class="btn approve" style="margin-left:8px" onclick="saveStorageCfg()">✓ Speichern &amp; anwenden</button>
-  <span id="storMinSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div>
+<div class="sechead">Namensfilter</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Datastores, deren <b>Name</b> einen dieser Begriffe enthält, werden ebenfalls
+  <b>komplett</b> ausgeschlossen (überall, inkl. Kapazität). Mehrere durch Komma
+  trennen, Groß-/Kleinschreibung egal — z. B. <code>iso, backup, scratch</code>.
+  Leer = kein Namensfilter.</div>
+<div style="margin-bottom:12px">
+  <input id="storExclNames" class="filterbox" style="width:100%;max-width:520px"
+    placeholder="z. B. iso, backup, template">
+</div>
+<button class="btn approve" onclick="saveStorageCfg()">✓ Speichern &amp; anwenden</button>
+<span id="storMinSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div><!-- admGrpStorCfg -->
 
 <div id="admGrpTok" style="display:none">
@@ -3267,7 +3282,17 @@ function askConfirm(opts) {
     // opts.html = eigenes Formular (nur aus vertrauenswürdigem App-Code, nie
     // aus Fremddaten befüllen); sonst reiner Text.
     const msg = document.getElementById("askMsg");
-    if (opts.html != null) msg.innerHTML = opts.html; else msg.textContent = opts.message || "";
+    if (opts.html != null) {
+      // Formular-Dialog: kein pre-line (sonst reißen Quelltext-Umbrüche das
+      // Layout auf) und normale Textfarbe statt Grau.
+      msg.innerHTML = opts.html;
+      msg.style.whiteSpace = "normal";
+      msg.style.color = "var(--text)";
+    } else {
+      msg.textContent = opts.message || "";
+      msg.style.whiteSpace = "pre-line";
+      msg.style.color = "var(--muted)";
+    }
     const ok = document.getElementById("askOk");
     ok.textContent = opts.okLabel || "OK";
     ok.className = "btn primary" + (opts.okClass ? " " + opts.okClass : "");
@@ -4138,8 +4163,9 @@ function saveVisibility() {
 function saveStorageCfg() {
   const on = !!(document.getElementById("storEnabled") || {}).checked;
   const mn = parseInt((document.getElementById("storMinLun") || {}).value, 10) || 0;
+  const ex = (document.getElementById("storExclNames") || {}).value || "";
   fetch("api/storagecfg", { method: "PUT", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ enabled: on, min_lun_gb: mn }) })
+      body: JSON.stringify({ enabled: on, min_lun_gb: mn, exclude_names: ex }) })
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(d => { STOR.enabled = !!d.enabled;
       ["storCfgSaved","storMinSaved"].forEach(id => { const st = document.getElementById(id);
@@ -4153,6 +4179,8 @@ function loadStorageCfg() {
     if (el) el.checked = !!d.enabled;
     const mn = document.getElementById("storMinLun");
     if (mn && document.activeElement !== mn) mn.value = d.min_lun_gb || 0;
+    const ex = document.getElementById("storExclNames");
+    if (ex && document.activeElement !== ex) ex.value = d.exclude_names || "";
   }).catch(() => {});
 }
 
@@ -4609,14 +4637,16 @@ function openStorReq(cluster, lun, naa, curGb, resId, resName) {
   const luns = allLuns().filter(l => l.cluster === cluster && !isVsanLun(l));
   const canExpand = luns.length > 0;
   const opts = luns.map(l => `<option value="${esc(l.name)}" data-naa="${esc(l.naa)}" data-cap="${Math.round(l.cap)}"${l.name===lun?" selected":""}>${esc(l.name)} (${fmt(Math.round(l.cap))} GB${l.naa?", "+esc(l.naa):""})</option>`).join("");
+  const selLun = luns.find(l => l.name === lun) || luns[0];
+  const initCap = selLun ? Math.round(selLun.cap) : 0;
   askConfirm({ title: "Storage-Erweiterung – " + cluster, okLabel: "✓ Anfragen",
     html: `
     <div style="font-size:13px;line-height:1.7">
       <label><input type="radio" name="storKind" value="expand" ${canExpand?"checked":"disabled"} onchange="storKindUI()"> Bestehende LUN vergrößern${canExpand?"":" <span style='color:var(--muted)'>(keine erweiterbare LUN)</span>"}</label><br>
       <label><input type="radio" name="storKind" value="new" ${canExpand?"":"checked"} onchange="storKindUI()"> Neue LUN anlegen</label>
       <div id="storExpand" style="margin-top:8px;${canExpand?"":"display:none"}">
-        <div>LUN: <select id="storLun" class="filterbox" style="max-width:340px">${opts}</select></div>
-        <div style="margin-top:6px">Wunschgröße (GB): <input id="storTarget" type="number" min="1" class="filterbox" style="width:120px" placeholder="z. B. 8000"></div>
+        <div>LUN: <select id="storLun" class="filterbox" style="max-width:340px" onchange="storLunPick()">${opts}</select></div>
+        <div style="margin-top:6px">Wunschgröße (GB): <input id="storTarget" type="number" min="1" class="filterbox" style="width:120px" placeholder="aktuell ${fmt(initCap)} GB"></div>
       </div>
       <div id="storNew" style="margin-top:8px;${canExpand?"display:none":""}">
         Neue LUN, Größe (TB): <input id="storTB" type="number" min="0.1" step="0.1" class="filterbox" style="width:120px" placeholder="z. B. 2">
@@ -4650,6 +4680,12 @@ function storKindUI() {
   const isNew = document.querySelector('input[name="storKind"]:checked').value === "new";
   document.getElementById("storExpand").style.display = isNew ? "none" : "";
   document.getElementById("storNew").style.display = isNew ? "" : "none";
+}
+function storLunPick() {   // aktuelle Größe der gewählten LUN als Platzhalter
+  const sel = document.getElementById("storLun");
+  const t = document.getElementById("storTarget");
+  if (!sel || !t || !sel.options.length) return;
+  t.placeholder = "aktuell " + fmt(sel.options[sel.selectedIndex].getAttribute("data-cap")) + " GB";
 }
 
 function renderVlan() {
@@ -5273,6 +5309,11 @@ const I18N = {
 "Datastores kleiner als dieser Wert werden komplett aus der Auswertung genommen — sie erscheinen nirgends (Storage-Übersicht, Cluster- Detail) und zählen auch nicht in die Storage-Kapazität/Auslastung. Praktisch, um kleine Boot-/ISO-/Scratch-Datastores auszublenden. 0 = alle anzeigen. Die Änderung löst gleich einen neuen Datenabruf aus.":
   "Datastores smaller than this value are removed entirely from the evaluation — they appear nowhere (storage overview, cluster detail) and do not count toward storage capacity/utilization either. Handy to hide small boot/ISO/scratch datastores. 0 = show all. The change triggers a fresh data fetch.",
 "Mindestgröße:": "Minimum size:",
+"Namensfilter": "Name filter",
+"Datastores, deren Name einen dieser Begriffe enthält, werden ebenfalls komplett ausgeschlossen (überall, inkl. Kapazität). Mehrere durch Komma trennen, Groß-/Kleinschreibung egal — z. B.":
+  "Datastores whose name contains one of these terms are also excluded entirely (everywhere, incl. capacity). Separate several with commas, case-insensitive — e.g.",
+". Leer = kein Namensfilter.": ". Empty = no name filter.",
+"z. B. iso, backup, template": "e.g. iso, backup, template",
 "✓ Speichern & anwenden": "✓ Save & apply",
 "Storage-Erweiterungen erlauben": "Allow storage expansions",
 "Storage-Erweiterungen erlauben ": "Allow storage expansions ",
@@ -6563,13 +6604,19 @@ def serve(args, password):
     # ab und setzt sie nach Umsetzung auf "erledigt". Dynamisch schaltbar.
     storage_lock = threading.Lock()
 
+    def _clean_excl(raw):
+        # kommagetrennte Namensmuster -> saubere, kleingeschriebene Liste
+        parts = re.split(r"[,\n;]+", str(raw or ""))
+        return [p.strip().lower() for p in parts if p.strip()][:30]
+
     def load_storagecfg():
         raw = store.load("storagecfg", None) or {}
         try:
             mn = max(0, int(float(raw.get("min_lun_gb") or 0)))
         except (TypeError, ValueError):
             mn = 0
-        return {"enabled": bool(raw.get("enabled")), "min_lun_gb": mn}
+        return {"enabled": bool(raw.get("enabled")), "min_lun_gb": mn,
+                "exclude_names": _clean_excl(raw.get("exclude_names"))}
 
     storage_cfg = load_storagecfg()
     storage_reqs = store.load("storagereq", None)
@@ -6789,7 +6836,8 @@ def serve(args, password):
                 clusters = build_summary(sample_data(), args.cpu_factor,
                                          args.failover_hosts,
                                          args.tanzu_mhz_per_vcpu,
-                                         storage_cfg.get("min_lun_gb", 0))
+                                         storage_cfg.get("min_lun_gb", 0),
+                                         storage_cfg.get("exclude_names") or [])
             else:
                 clusters, errors = [], []
                 for i, s in enumerate(sources):
@@ -6809,7 +6857,8 @@ def serve(args, password):
                                      vsan_factor=args.vsan_factor,
                                      tanzu_mhz=args.tanzu_mhz_per_vcpu,
                                      vlan_hint=vlan_hint,
-                                     min_lun_gb=storage_cfg.get("min_lun_gb", 0))
+                                     min_lun_gb=storage_cfg.get("min_lun_gb", 0),
+                                     exclude_names=storage_cfg.get("exclude_names") or [])
                         for c in cl:
                             if s["name"]:
                                 c["source"] = s["name"]
@@ -7296,7 +7345,9 @@ def serve(args, password):
                     return
                 with storage_lock:
                     self._json({"enabled": storage_cfg["enabled"],
-                                "min_lun_gb": storage_cfg.get("min_lun_gb", 0)})
+                                "min_lun_gb": storage_cfg.get("min_lun_gb", 0),
+                                "exclude_names": ", ".join(
+                                    storage_cfg.get("exclude_names") or [])})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -7957,18 +8008,23 @@ def serve(args, password):
                     mn = max(0, int(float(body.get("min_lun_gb") or 0)))
                 except (TypeError, ValueError):
                     mn = 0
+                excl = _clean_excl(body.get("exclude_names"))
                 with storage_lock:
-                    changed = mn != storage_cfg.get("min_lun_gb", 0)
+                    changed = (mn != storage_cfg.get("min_lun_gb", 0)
+                               or excl != (storage_cfg.get("exclude_names") or []))
                     storage_cfg["enabled"] = on
                     storage_cfg["min_lun_gb"] = mn
+                    storage_cfg["exclude_names"] = excl
                     store.save("storagecfg", storage_cfg)
                 audit(s["user"], "Storage-Einstellungen",
                       ("Erweiterungen " + ("aktiv" if on else "inaktiv"))
-                      + (f"; Mindest-LUN {mn} GB" if mn else "; keine Mindest-LUN"))
-                # Mindest-LUN wirkt in der Datensammlung -> gleich neu abrufen
+                      + (f"; Mindest-LUN {mn} GB" if mn else "; keine Mindest-LUN")
+                      + (f"; Namensfilter: {', '.join(excl)}" if excl else ""))
+                # Filter wirken in der Datensammlung -> gleich neu abrufen
                 if changed and not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
-                self._json({"enabled": on, "min_lun_gb": mn})
+                self._json({"enabled": on, "min_lun_gb": mn,
+                            "exclude_names": ", ".join(excl)})
             elif self.path.startswith("/api/storage-request/"):
                 # erledigt/offen umschalten (Admin im UI)
                 s = self._require("admin")

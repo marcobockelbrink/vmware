@@ -24,7 +24,7 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 **Kapazität & Auswertung**
 - **Mehrere benannte vROps-Quellen** (optional): 1–3 (oder mehr) Aria-Operations-Systeme, je mit/ohne Proxy, gemischt zu einer Übersicht; jeder Cluster trägt ein Quellen-Badge (Voraussetzung: eindeutige Cluster-Namen). Auch die **einzelne Quelle** aus `[kapa]` lässt sich per `source-name` benennen
 - Freie **vCPU / RAM / Storage** je Cluster mit Auslastungsbalken; frei = Kapazität − belegt − genehmigte Reservierungen
-- **N+1-Ausfallreserve** (`--failover-hosts`), **vSAN-Faktor** für nutzbare Netto-Kapazität, VM-**Ausschluss per Tag**, **Mindest-LUN-Größe** (kleine Boot-/ISO-Datastores komplett ausschließen; Verwaltung → Storage)
+- **N+1-Ausfallreserve** (`--failover-hosts`), **vSAN-Faktor** für nutzbare Netto-Kapazität, VM-**Ausschluss per Tag**, **Mindest-LUN-Größe** und **Namensfilter** (kleine bzw. per Name passende Datastores, z. B. ISO/Backup, komplett ausschließen; Verwaltung → Storage)
 - **Storage-Drilldown** je LUN/Datastore (sortierbar), **vSphere-Tags** je Cluster
 - **Workload %** je Cluster aus vROps (für Anforderer verborgen — auch serverseitig)
 - **Tanzu-/Kubernetes-Namespaces**: CPU-/RAM-**Reservierungen der vSphere-Namespaces**
