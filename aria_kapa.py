@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.12"
+VERSION = "2.12.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2575,7 +2575,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabSel" onclick="setAdmTab('sel')">Cluster-Selektor</span>
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
-  <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Auto-Freigabe</span>
+  <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Freigabe</span>
   <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
