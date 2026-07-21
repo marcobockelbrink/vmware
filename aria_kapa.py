@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.9"
+VERSION = "2.9.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -4496,9 +4496,17 @@ async function refreshData() {
   catch (e) { document.getElementById("refreshStatus").textContent = "Server nicht erreichbar."; }
 }
 
+let _reloaded401 = false;
 async function pollStatus() {
-  let s;
-  try { s = await (await fetch("api/status")).json(); } catch (e) { return; }
+  let s, resp;
+  try { resp = await fetch("api/status"); s = await resp.json(); } catch (e) { return; }
+  // Session abgelaufen/Server neu gestartet: einmalig neu laden -> Anmeldemaske
+  // statt dauerhaft "Nicht angemeldet" in der Statuszeile.
+  if (resp.status === 401 && ME && !_reloaded401) {
+    _reloaded401 = true;
+    location.reload();
+    return;
+  }
   const st = document.getElementById("refreshStatus");
   document.getElementById("refreshBtn").disabled = !!s.refreshing;
   nextRefresh = (s.next != null) ? Date.now() + s.next * 1000 : null;
@@ -5154,7 +5162,8 @@ def serve(args, password):
                    "rolenames": args.rolenames_file, "tokens": args.tokens_file,
                    "notify": args.notify_file, "prefs": args.prefs_file,
                    "announce": args.announce_file,
-                   "autoapprove": args.autoapprove_file}
+                   "autoapprove": args.autoapprove_file,
+                   "sessions": args.sessions_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
@@ -5190,8 +5199,34 @@ def serve(args, password):
     # ---- AD-Anmeldung, Sessions und Rollen ----
     auth_enabled = bool(args.ad_url)
     admin_seed = {u.strip().lower() for u in (args.admin_user or "").split(",") if u.strip()}
-    sessions = {}                    # token -> {"user", "role", "exp"}
+    # Sitzungen überleben einen Neustart (Release-Update!): persistiert wird
+    # unter dem SHA-256-HASH des Cookie-Tokens (nie das Token selbst), Ablauf
+    # wird beim Laden ausgesiebt. Gleitende Verlängerung landet gesammelt über
+    # den Wartungs-Thread auf Platte (kein Write je Request).
     session_ttl = 12 * 3600
+
+    def _sess_key(token):
+        return hashlib.sha256(str(token or "").encode()).hexdigest()
+
+    def _load_sessions():
+        raw = store.load("sessions", None)
+        out = {}
+        now = time.time()
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if isinstance(v, dict) and float(v.get("exp") or 0) > now:
+                    out[str(k)] = v
+        return out
+
+    sessions = _load_sessions()      # sha256(token) -> {"user", "role", "exp", ...}
+    sessions_dirty = [bool(sessions)]
+
+    def save_sessions():
+        store.save("sessions", dict(sessions))
+        sessions_dirty[0] = False
+    if sessions:
+        print(f"Sitzungen geladen: {len(sessions)} (überleben Neustart)",
+              file=sys.stderr)
     roles_lock = threading.Lock()
     VALID_ROLES = ("admin", "anforderer", "auditor", "reviewer")
 
@@ -6268,6 +6303,11 @@ def serve(args, password):
                 purge_stale()
             except Exception as e:
                 print(f"Aufräumen fehlgeschlagen: {e}", file=sys.stderr)
+            try:
+                if sessions_dirty[0]:
+                    save_sessions()
+            except Exception as e:
+                print(f"Sitzungs-Speicherung fehlgeschlagen: {e}", file=sys.stderr)
 
     def scheduler():
         # Erster Start ohne Cache: sofort Daten holen
@@ -6447,9 +6487,10 @@ def serve(args, password):
         def _session(self):
             if not auth_enabled:
                 return {"user": None, "role": "admin", "abteilung": ""}  # ohne AD wie bisher
-            s = sessions.get(self._cookie_token())
+            s = sessions.get(_sess_key(self._cookie_token()))
             if s and s["exp"] > time.time():
                 s["exp"] = time.time() + session_ttl
+                sessions_dirty[0] = True   # Wartungs-Thread persistiert gesammelt
                 return s
             return None
 
@@ -6761,18 +6802,20 @@ def serve(args, password):
                 for k in [k for k, v in sessions.items() if v["exp"] <= now]:
                     sessions.pop(k, None)
                 token = secrets.token_urlsafe(32)
-                sessions[token] = {"user": user, "role": entry["role"],
+                sessions[_sess_key(token)] = {"user": user, "role": entry["role"],
                                    "abteilung": entry.get("abteilung") or "",
                                    "mail": mail_addr,
                                    "exp": time.time() + session_ttl}
+                save_sessions()
                 secure = "" if args.cookie_insecure else " Secure;"
                 self._json({"user": user, "role": entry["role"],
                             "abteilung": entry.get("abteilung") or ""},
                            headers={"Set-Cookie": f"kapa_session={token}; "
                                     f"HttpOnly;{secure} SameSite=Lax; Path=/"})
             elif self.path == "/api/logout":
-                old = sessions.pop(self._cookie_token(), None)
+                old = sessions.pop(_sess_key(self._cookie_token()), None)
                 if old:
+                    save_sessions()
                     audit(old["user"], "Abmeldung")
                 secure = "" if args.cookie_insecure else " Secure;"
                 self._json({"ok": True},
@@ -7674,6 +7717,9 @@ def main():
                     help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
                          "(z. B. ein-/ausgeblendete Tabellenspalten; "
                          "Standard: data/kapa_prefs.json)")
+    ap.add_argument("--sessions-file", default="kapa_sessions.json",
+                    help="Datei mit den aktiven Anmelde-Sitzungen (nur Hashes; "
+                         "Sitzungen überleben so einen Dienst-Neustart)")
     ap.add_argument("--autoapprove-file", default="kapa_autofreigabe.json",
                     help="Datei mit der Auto-Freigabe-Konfiguration (Schwellen "
                          "je Cluster-Kapazität; Pflege über die Verwaltung)")
@@ -7709,6 +7755,7 @@ def main():
     args.prefs_file = data_path(args.prefs_file, base)
     args.announce_file = data_path(args.announce_file, base)
     args.autoapprove_file = data_path(args.autoapprove_file, base)
+    args.sessions_file = data_path(args.sessions_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

@@ -20,6 +20,10 @@ Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 | `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |
 | `kapa_cache.json` | Letzter Aria-Datenabruf | Nein (wird neu abgerufen) |
 
+Bewusst **nicht** im Backup: `kapa_sessions.json` (aktive Anmelde-Sitzungen,
+nur Hashes — Sitzungsmaterial gehört nicht auf den Backup-Server; nach einem
+Restore melden sich die Benutzer einfach neu an).
+
 Backups werden zweimal täglich erstellt (`--backup-interval 43200`) und auf
 dem Ziel 30 Tage aufbewahrt (`--backup-keep-days 30`). Namensschema:
 `kapa_backup_JJJJMMTT_HHMMSS.tar.gz`.

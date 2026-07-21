@@ -56,7 +56,7 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 
 **Roles, AD & security**
 - Roles **Admin / Reviewer / Requester / Auditor**, freely renamable; team-based visibility
-- **AD sign-in** (LDAP, stdlib only), **AD groups** as permission subjects, recipient mail from a selectable **AD attribute**
+- **AD sign-in** (LDAP, stdlib only), **AD groups** as permission subjects, recipient mail from a selectable **AD attribute**; **sessions survive service restarts** (release updates without re-login)
 - Hardening: CSP/security headers, `Secure` cookies, **login throttle**, stored-XSS-safe rendering
 - **Password detector** in the sign-in form: if the username input looks like a
   password (pasted from a password manager), it goes **neither to AD nor into the

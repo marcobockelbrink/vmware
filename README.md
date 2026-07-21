@@ -55,7 +55,7 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 
 **Rollen, AD & Sicherheit**
 - Rollen **Admin / Reviewer / Anforderer / Auditor**, frei benennbar; team-basierte Sichtbarkeit
-- **AD-Anmeldung** (LDAP, nur Stdlib), **AD-Gruppen** als Berechtigungssubjekt, Empfänger-Mail aus wählbarem **AD-Attribut**
+- **AD-Anmeldung** (LDAP, nur Stdlib), **AD-Gruppen** als Berechtigungssubjekt, Empfänger-Mail aus wählbarem **AD-Attribut**; **Sitzungen überleben Dienst-Neustarts** (Release-Update ohne Neu-Anmeldung)
 - Härtung: CSP/Security-Header, `Secure`-Cookies, **Login-Bremse**, Stored-XSS-sicheres Rendering
 - **Passwort-Detektor** in der Anmeldemaske: sieht die Eingabe im Benutzerfeld wie ein
   (aus dem Passwort-Manager eingefügtes) Passwort aus, geht sie **weder ans AD noch ins

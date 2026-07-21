@@ -252,8 +252,15 @@ try:
           not r5.get("approved") and not (r5.get("approvals") or []))
     req("PUT", "/api/autoapprove", {"enabled": False})
 
-    print("== Anmeldemaske: Passwort-Detektor ==")
+    print("== Anmeldemaske: Passwort-Detektor + Session-Persistenz ==")
     DATA2 = tempfile.mkdtemp(prefix="kapa_smoke_ad_")
+    # Vorab eine "überlebende" Sitzung hinterlegen (Hash-Key wie im Server):
+    import hashlib as _hl
+    SESS_TOK = "smoke-session-token-123"
+    with open(os.path.join(DATA2, "kapa_sessions.json"), "w") as f:
+        json.dump({_hl.sha256(SESS_TOK.encode()).hexdigest():
+                   {"user": "smoke@firma.local", "role": "admin",
+                    "abteilung": "", "mail": "", "exp": time.time() + 3600}}, f)
     P2 = free_port()
     proc2 = subprocess.Popen(
         [sys.executable, APP, "--serve", "--sample", "--bind", "127.0.0.1",
@@ -283,6 +290,20 @@ try:
         logtxt = open(os.path.join(DATA2, "kapa_log.jsonl")).read()
         check("Passwort NICHT im Audit-Log",
               SECRET not in logtxt and "nicht protokolliert" in logtxt)
+        # Session aus der Datei überlebt den "Neustart" (frischer Prozess)
+        r = urllib.request.Request(B2 + "/",
+            headers={"Cookie": "kapa_session=" + SESS_TOK})
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            page_ad = resp.read().decode()
+        check("Session überlebt Neustart (Cookie gilt weiter)",
+              "Kapazitätsübersicht pro Cluster" in page_ad
+              and "Anmeldung mit Active-Directory-Konto" not in page_ad)
+        r = urllib.request.Request(B2 + "/",
+            headers={"Cookie": "kapa_session=falsches-token"})
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            page_bad = resp.read().decode()
+        check("Ungültiges Cookie -> Anmeldemaske",
+              "Anmeldung mit Active-Directory-Konto" in page_bad)
     finally:
         proc2.terminate()
         try:
