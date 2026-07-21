@@ -56,7 +56,9 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   zwischen VLAN-Suche und Reservierungen) — eine **LUN-Vergrößerung** oder eine
   **neue LUN** an; das Storage-Team ruft die offenen Anfragen **per API** ab
   (`/api/v1/storage-requests`, auch CSV **inkl. NAA**) und meldet die Umsetzung
-  mit einem Token-Schreibrecht „Storage" zurück
+  mit einem Token-Schreibrecht „Storage" zurück. Konfigurierbar (Verwaltung →
+  Storage): **Maximal-Größe** je Anfrage (Anfrage-Limit), Mindest-LUN-Größe
+  und Namensfilter
 - Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt
 
 **Rollen, AD & Sicherheit**

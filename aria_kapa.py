@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.14.1"
+VERSION = "2.15"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2243,15 +2243,23 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 } catch (e) {}</script>
 <title>VMware Kapazitätsübersicht pro Cluster</title>
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0;
+  /* color-scheme koppelt native Controls (Datums-Picker, Kalender-Icon,
+     Scrollbars) ans Theme – sonst ist z. B. das Kalender-Icon im Dunkeln
+     unsichtbar. */
+  :root { color-scheme: dark;
+          --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0;
           --muted:#94a3b8; --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444;
           --accent:#38bdf8; --res:#818cf8; --field:#0b1220; --accent-text:#08131f; }
   /* Helles Theme: per Knopf in der Kopfleiste, gespeichert je Benutzer */
   html[data-theme="light"] {
+    color-scheme: light;
     --bg:#eef2f7; --card:#ffffff; --line:#d4dbe5; --text:#1e293b;
     --muted:#5b6b7f; --ok:#15803d; --warn:#b45309; --crit:#dc2626;
     --accent:#0369a1; --res:#4f46e5; --field:#f6f8fb; --accent-text:#ffffff; }
   html[data-theme="light"] .btn.primary { color:#ffffff; }
+  /* Datumsfelder: ganzes Feld anklickbar (Kalender öffnet), Icon betont */
+  input[type=date] { cursor:pointer; }
+  input[type=date]::-webkit-calendar-picker-indicator { cursor:pointer; opacity:.85; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--text);
          font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:24px; }
@@ -2768,9 +2776,18 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   Ein Begriff wirkt als Teiltreffer (<code>service</code> erwischt auch
   <code>server-service-01</code>); <code>*</code>/<code>?</code> gehen als
   Platzhalter (<code>*-iso</code>, <code>lun-??-tmp</code>). Leer = kein Filter.</div>
-<div style="margin-bottom:12px">
+<div style="margin-bottom:16px">
   <input id="storExclNames" class="filterbox" style="width:100%;max-width:520px"
     placeholder="z. B. iso, backup, template">
+</div>
+<div class="sechead">Maximale LUN-Größe (Anfrage-Limit)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Obergrenze für Storage-Anfragen (Vergrößerung und neue LUN). Größere
+  Wünsche werden abgelehnt. Als internes Limit gedacht — Randnotiz: VMFS-6
+  unterstützt ohnehin höchstens <b>64 TB</b> je Datastore. 0 = kein Limit.</div>
+<div style="margin-bottom:16px">
+  Maximum: <input id="storMaxLun" type="number" min="0" step="1"
+    style="width:110px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;text-align:center"> TB
 </div>
 <button class="btn approve" onclick="saveStorageCfg()">✓ Speichern &amp; anwenden</button>
 <span id="storMinSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
@@ -2873,10 +2890,10 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <div id="logView" style="display:none">
 <div class="toolbar" style="margin-bottom:8px;flex-wrap:wrap">
   <label style="font-size:12px;color:var(--muted)">Von
-    <input type="date" id="logFrom" onchange="logDatePage()"
+    <input type="date" id="logFrom" onchange="logDatePage()" onclick="openPicker(this)"
       style="background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;margin-left:4px"></label>
   <label style="font-size:12px;color:var(--muted)">Bis
-    <input type="date" id="logTo" onchange="logDatePage()"
+    <input type="date" id="logTo" onchange="logDatePage()" onclick="openPicker(this)"
       style="background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;margin-left:4px"></label>
   <button class="btn" onclick="logClearDates()">Datum zurücksetzen</button>
   <span id="logInfo" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
@@ -3880,6 +3897,10 @@ function loadLog() {
     .then(d => { if (Array.isArray(d)) { LOGS = d; if (VIEW === "log") render(); } })
     .catch(() => {});
 }
+// Klick aufs Datumsfeld öffnet direkt den nativen Kalender (Browser folgt der
+// Sprache: DE tt.mm.jjjj, EN mm/dd/yyyy). showPicker gibt es in modernen
+// Browsern; sonst bleibt das native Kalender-Icon.
+function openPicker(el) { try { if (el.showPicker) el.showPicker(); } catch (e) {} }
 const LOG_PER_PAGE = 100;
 let LOG_PAGE = 0;
 function logClearDates() {
@@ -4226,10 +4247,12 @@ function saveStorageCfg() {
   const on = !!(document.getElementById("storEnabled") || {}).checked;
   const mn = parseInt((document.getElementById("storMinLun") || {}).value, 10) || 0;
   const ex = (document.getElementById("storExclNames") || {}).value || "";
+  const mxTb = parseFloat((document.getElementById("storMaxLun") || {}).value) || 0;
+  const mx = Math.round(mxTb * 1024);   // Eingabe in TB, Speicherung in GB
   fetch("api/storagecfg", { method: "PUT", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ enabled: on, min_lun_gb: mn, exclude_names: ex }) })
+      body: JSON.stringify({ enabled: on, min_lun_gb: mn, max_lun_gb: mx, exclude_names: ex }) })
     .then(r => r.ok ? r.json() : Promise.reject())
-    .then(d => { STOR.enabled = !!d.enabled;
+    .then(d => { STOR.enabled = !!d.enabled; STOR.max_lun_gb = d.max_lun_gb || 0;
       ["storCfgSaved","storMinSaved"].forEach(id => { const st = document.getElementById(id);
         if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); } }); })
     .catch(() => notify("Speichern fehlgeschlagen."));
@@ -4243,6 +4266,8 @@ function loadStorageCfg() {
     if (mn && document.activeElement !== mn) mn.value = d.min_lun_gb || 0;
     const ex = document.getElementById("storExclNames");
     if (ex && document.activeElement !== ex) ex.value = d.exclude_names || "";
+    const mx = document.getElementById("storMaxLun");
+    if (mx && document.activeElement !== mx) mx.value = d.max_lun_gb ? (d.max_lun_gb / 1024) : "";
   }).catch(() => {});
 }
 
@@ -4721,17 +4746,22 @@ function openStorReq(cluster, lun, naa, curGb, resId, resName) {
       const body = { cluster: cluster, kind: kind,
         comment: (document.getElementById("storComment")||{}).value || "",
         res_id: resId || "", res_name: resName || "" };
+      let want = 0;
       if (kind === "expand") {
         const sel = document.getElementById("storLun");
         const o = sel.options[sel.selectedIndex];
         body.lun_name = sel.value; body.naa = o.getAttribute("data-naa") || "";
         body.current_gb = parseInt(o.getAttribute("data-cap")) || 0;
         body.target_gb = parseInt(document.getElementById("storTarget").value) || 0;
+        want = body.target_gb;
         if (body.target_gb <= body.current_gb) return notify("Wunschgröße muss größer als die aktuelle Größe sein.");
       } else {
         body.size_gb = Math.round((parseFloat(document.getElementById("storTB").value) || 0) * 1024);
+        want = body.size_gb;
         if (body.size_gb <= 0) return notify("Bitte eine Größe in TB angeben.");
       }
+      if (STOR.max_lun_gb && want > STOR.max_lun_gb)
+        return notify("Die Größe überschreitet das Maximum von " + fmt(Math.round(STOR.max_lun_gb / 1024 * 10) / 10) + " TB.");
       fetch("api/storage-request", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
         .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
         .then(d => { loadStorage(); notify("Storage-Erweiterung angefragt."); })
@@ -5373,6 +5403,11 @@ const I18N = {
 "Datastores kleiner als dieser Wert werden komplett aus der Auswertung genommen — sie erscheinen nirgends (Storage-Übersicht, Cluster- Detail) und zählen auch nicht in die Storage-Kapazität/Auslastung. Praktisch, um kleine Boot-/ISO-/Scratch-Datastores auszublenden. 0 = alle anzeigen. Die Änderung löst gleich einen neuen Datenabruf aus.":
   "Datastores smaller than this value are removed entirely from the evaluation — they appear nowhere (storage overview, cluster detail) and do not count toward storage capacity/utilization either. Handy to hide small boot/ISO/scratch datastores. 0 = show all. The change triggers a fresh data fetch.",
 "Mindestgröße:": "Minimum size:",
+"Maximale LUN-Größe (Anfrage-Limit)": "Maximum LUN size (request limit)",
+"Obergrenze für Storage-Anfragen (Vergrößerung und neue LUN). Größere Wünsche werden abgelehnt. Als internes Limit gedacht — Randnotiz: VMFS-6 unterstützt ohnehin höchstens":
+  "Upper bound for storage requests (expansion and new LUN). Larger requests are rejected. Meant as an internal limit — side note: VMFS-6 supports at most",
+"je Datastore. 0 = kein Limit.": "per datastore anyway. 0 = no limit.",
+"Maximum:": "Maximum:",
 "Namensfilter": "Name filter",
 "Datastores, deren Name einen dieser Begriffe enthält, werden ebenfalls komplett ausgeschlossen (überall, inkl. Kapazität). Mehrere durch Komma trennen, Groß-/Kleinschreibung egal — z. B.":
   "Datastores whose name contains one of these terms are also excluded entirely (everywhere, incl. capacity). Separate several with commas, case-insensitive — e.g.",
@@ -6679,11 +6714,13 @@ def serve(args, password):
 
     def load_storagecfg():
         raw = store.load("storagecfg", None) or {}
-        try:
-            mn = max(0, int(float(raw.get("min_lun_gb") or 0)))
-        except (TypeError, ValueError):
-            mn = 0
-        return {"enabled": bool(raw.get("enabled")), "min_lun_gb": mn,
+        def _pint(k):
+            try:
+                return max(0, int(float(raw.get(k) or 0)))
+            except (TypeError, ValueError):
+                return 0
+        return {"enabled": bool(raw.get("enabled")), "min_lun_gb": _pint("min_lun_gb"),
+                "max_lun_gb": _pint("max_lun_gb"),
                 "exclude_names": _clean_excl(raw.get("exclude_names"))}
 
     storage_cfg = load_storagecfg()
@@ -7407,6 +7444,7 @@ def serve(args, password):
                     return
                 with storage_lock:
                     self._json({"enabled": storage_cfg["enabled"],
+                                "max_lun_gb": storage_cfg.get("max_lun_gb", 0),
                                 "requests": json.loads(json.dumps(storage_reqs))})
             elif route == "/api/storagecfg":
                 if not self._require("admin"):
@@ -7414,6 +7452,7 @@ def serve(args, password):
                 with storage_lock:
                     self._json({"enabled": storage_cfg["enabled"],
                                 "min_lun_gb": storage_cfg.get("min_lun_gb", 0),
+                                "max_lun_gb": storage_cfg.get("max_lun_gb", 0),
                                 "exclude_names": ", ".join(
                                     storage_cfg.get("exclude_names") or [])})
             elif route == "/api/config":
@@ -7459,6 +7498,14 @@ def serve(args, password):
                 if req is None:
                     self._json({"error": "Ungültige Storage-Anfrage (Cluster, "
                                          "LUN/Größe prüfen)"}, 400)
+                    return
+                with storage_lock:
+                    maxg = storage_cfg.get("max_lun_gb", 0)
+                want = req.get("target_gb") or req.get("size_gb") or 0
+                if maxg and want > maxg:
+                    self._json({"error": f"Die angefragte Größe ({want} GB) "
+                                f"überschreitet das Maximum von {maxg} GB "
+                                f"({round(maxg / 1024, 1)} TB)."}, 400)
                     return
                 with storage_lock:
                     storage_reqs.append(req)
@@ -8076,22 +8123,28 @@ def serve(args, password):
                     mn = max(0, int(float(body.get("min_lun_gb") or 0)))
                 except (TypeError, ValueError):
                     mn = 0
+                try:
+                    mx = max(0, int(float(body.get("max_lun_gb") or 0)))
+                except (TypeError, ValueError):
+                    mx = 0
                 excl = _clean_excl(body.get("exclude_names"))
                 with storage_lock:
                     changed = (mn != storage_cfg.get("min_lun_gb", 0)
                                or excl != (storage_cfg.get("exclude_names") or []))
                     storage_cfg["enabled"] = on
                     storage_cfg["min_lun_gb"] = mn
+                    storage_cfg["max_lun_gb"] = mx
                     storage_cfg["exclude_names"] = excl
                     store.save("storagecfg", storage_cfg)
                 audit(s["user"], "Storage-Einstellungen",
                       ("Erweiterungen " + ("aktiv" if on else "inaktiv"))
                       + (f"; Mindest-LUN {mn} GB" if mn else "; keine Mindest-LUN")
+                      + (f"; Max-LUN {mx} GB" if mx else "")
                       + (f"; Namensfilter: {', '.join(excl)}" if excl else ""))
-                # Filter wirken in der Datensammlung -> gleich neu abrufen
+                # Anzeige-Filter wirken in der Datensammlung -> gleich neu abrufen
                 if changed and not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
-                self._json({"enabled": on, "min_lun_gb": mn,
+                self._json({"enabled": on, "min_lun_gb": mn, "max_lun_gb": mx,
                             "exclude_names": ", ".join(excl)})
             elif self.path.startswith("/api/storage-request/"):
                 # erledigt/offen umschalten (Admin im UI)

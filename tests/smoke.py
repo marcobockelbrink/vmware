@@ -186,6 +186,16 @@ try:
     st2, alll, _ = req("GET", "/api/v1/storage-requests?status=alle")
     check("Filter offen/alle",
           len(openl["requests"]) == 0 and len(alll["requests"]) == 1)
+    # Maximum: Anfrage über dem Limit wird abgelehnt (Feature noch aktiv)
+    req("PUT", "/api/storagecfg", {"enabled": True, "max_lun_gb": 10240})  # 10 TB
+    st, big, _ = req("POST", "/api/storage-request",
+                     {"cluster": "Cluster-01", "kind": "new", "size_gb": 20480})
+    check("Über Maximum -> 400 mit Hinweis",
+          st == 400 and "Maximum" in big.get("error", ""))
+    st, okm, _ = req("POST", "/api/storage-request",
+                     {"cluster": "Cluster-01", "kind": "new", "size_gb": 4096})
+    check("Unter Maximum -> 201", st == 201)
+    req("PUT", "/api/storagecfg", {"enabled": True, "max_lun_gb": 0})
     # Mindest-LUN-Größe: kleine Datastores komplett ausschließen (+ Refresh)
     d0 = req("GET", "/api/v1/data")[1]
     n0 = sum(len(c.get("datastores", [])) for c in d0["clusters"])
