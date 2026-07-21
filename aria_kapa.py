@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.14"
+VERSION = "2.14.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1532,6 +1532,20 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                          min_lun_gb, exclude_names)
 
 
+def _name_excluded(name, patterns):
+    """Namensfilter: Muster OHNE Wildcard = Teilstring (irgendwo im Namen),
+    Muster MIT * oder ? = Glob über den ganzen Namen. Groß-/Kleinschreibung egal."""
+    import fnmatch
+    n = str(name or "").lower()
+    for p in patterns:
+        if "*" in p or "?" in p:
+            if fnmatch.fnmatch(n, p):
+                return True
+        elif p in n:
+            return True
+    return False
+
+
 def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
                   min_lun_gb=0, exclude_names=None):
     """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}
@@ -1571,7 +1585,7 @@ def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
         luns = [l for l in luns_all
                 if (min_lun_gb <= 0
                     or float(l.get("raw_cap_gb") or l.get("cap_gb") or 0) >= min_lun_gb)
-                and not any(p in (l.get("name") or "").lower() for p in excl)]
+                and not _name_excluded(l.get("name") or "", excl)]
         if min_lun_gb > 0 or excl:
             stor_cap = round(sum(float(l.get("cap_gb") or 0) for l in luns), 1)
             stor_used = round(sum(float(l.get("used_gb") or 0) for l in luns), 1)
@@ -2751,7 +2765,9 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   Datastores, deren <b>Name</b> einen dieser Begriffe enthält, werden ebenfalls
   <b>komplett</b> ausgeschlossen (überall, inkl. Kapazität). Mehrere durch Komma
   trennen, Groß-/Kleinschreibung egal — z. B. <code>iso, backup, scratch</code>.
-  Leer = kein Namensfilter.</div>
+  Ein Begriff wirkt als Teiltreffer (<code>service</code> erwischt auch
+  <code>server-service-01</code>); <code>*</code>/<code>?</code> gehen als
+  Platzhalter (<code>*-iso</code>, <code>lun-??-tmp</code>). Leer = kein Filter.</div>
 <div style="margin-bottom:12px">
   <input id="storExclNames" class="filterbox" style="width:100%;max-width:520px"
     placeholder="z. B. iso, backup, template">
@@ -5360,6 +5376,10 @@ const I18N = {
 "Namensfilter": "Name filter",
 "Datastores, deren Name einen dieser Begriffe enthält, werden ebenfalls komplett ausgeschlossen (überall, inkl. Kapazität). Mehrere durch Komma trennen, Groß-/Kleinschreibung egal — z. B.":
   "Datastores whose name contains one of these terms are also excluded entirely (everywhere, incl. capacity). Separate several with commas, case-insensitive — e.g.",
+"Ein Begriff wirkt als Teiltreffer (": "A term matches as a substring (",
+"erwischt auch": "also catches",
+"gehen als Platzhalter (": "work as wildcards (",
+"Leer = kein Filter.": "Empty = no filter.",
 ". Leer = kein Namensfilter.": ". Empty = no name filter.",
 "z. B. iso, backup, template": "e.g. iso, backup, template",
 "✓ Speichern & anwenden": "✓ Save & apply",
