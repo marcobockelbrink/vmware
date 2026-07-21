@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.15.1"
+VERSION = "2.15.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -4729,8 +4729,8 @@ function openStorReq(cluster, lun, naa, curGb, resId, resName) {
   askConfirm({ title: "Storage-Erweiterung – " + cluster, okLabel: "✓ Anfragen",
     html: `
     <div style="font-size:13px;line-height:1.7">
-      <label><input type="radio" name="storKind" value="expand" ${canExpand?"checked":"disabled"} onchange="storKindUI()"> Bestehende LUN vergrößern${canExpand?"":" <span style='color:var(--muted)'>(keine erweiterbare LUN)</span>"}</label><br>
-      <label><input type="radio" name="storKind" value="new" ${canExpand?"":"checked"} onchange="storKindUI()"> Neue LUN anlegen</label>
+      <label style="display:flex;align-items:center;gap:7px;color:var(--text);font-size:13px;margin:0 0 8px;cursor:pointer"><input type="radio" name="storKind" value="expand" style="width:auto;margin:0;flex:none" ${canExpand?"checked":"disabled"} onchange="storKindUI()"><span>Bestehende LUN vergrößern${canExpand?"":" <span style='color:var(--muted)'>(keine erweiterbare LUN)</span>"}</span></label>
+      <label style="display:flex;align-items:center;gap:7px;color:var(--text);font-size:13px;margin:0 0 4px;cursor:pointer"><input type="radio" name="storKind" value="new" style="width:auto;margin:0;flex:none" ${canExpand?"":"checked"} onchange="storKindUI()"><span>Neue LUN anlegen</span></label>
       <div id="storExpand" style="margin-top:8px;${canExpand?"":"display:none"}">
         <div>LUN: <select id="storLun" class="filterbox" style="max-width:340px" onchange="storLunPick()">${opts}</select></div>
         <div style="margin-top:6px">Wunschgröße (GB): <input id="storTarget" type="number" min="1" class="filterbox" style="width:120px" placeholder="aktuell ${fmt(initCap)} GB"></div>
@@ -5105,6 +5105,12 @@ const I18N = {
   "Backup fehlgeschlagen": "Backup failed",
   "API-Zugriff abgewiesen": "API access denied",
   "API-Schreibzugriff abgewiesen": "API write access denied",
+  "Wunschgröße (GB):": "Desired size (GB):",
+  "Kommentar:": "Comment:",
+  "Neue LUN, Größe (TB):": "New LUN, size (TB):",
+  "✓ Anfragen": "✓ Request",
+  "optional, z. B. Change/Grund": "optional, e.g. change/reason",
+  "(keine erweiterbare LUN)": "(no expandable LUN)",
   "Storage-Erweiterung angefragt": "Storage expansion requested",
   "Storage-Erweiterung erledigt (API)": "Storage expansion completed (API)",
   "Storage-Erweiterung erledigt": "Storage expansion completed",
@@ -5499,6 +5505,8 @@ const I18N_RX = [
   [/^(\d+) Cluster, (\d+) VMs aus (\d+) Quellen in ([\d.,]+) s$/,
    "$1 clusters, $2 VMs from $3 sources in $4 s"],
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
+  [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
+  [/^aktuell ([\d.,]+) GB$/, "current $1 GB"],
   [/^(\d+) Einträge \(gefiltert von (\d+)\)$/, "$1 entries (filtered from $2)"],
   [/^(\d+) Eintrag \(gefiltert von (\d+)\)$/, "$1 entry (filtered from $2)"],
   [/^Einträge (\d+)–(\d+) · Seite (\d+) von (\d+)$/, "Entries $1–$2 · Page $3 of $4"],
