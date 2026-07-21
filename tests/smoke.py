@@ -186,7 +186,21 @@ try:
     st2, alll, _ = req("GET", "/api/v1/storage-requests?status=alle")
     check("Filter offen/alle",
           len(openl["requests"]) == 0 and len(alll["requests"]) == 1)
-    req("PUT", "/api/storagecfg", {"enabled": False})
+    # Mindest-LUN-Größe: kleine Datastores komplett ausschließen (+ Refresh)
+    d0 = req("GET", "/api/v1/data")[1]
+    n0 = sum(len(c.get("datastores", [])) for c in d0["clusters"])
+    req("PUT", "/api/storagecfg", {"enabled": True, "min_lun_gb": 3000})
+    t0 = time.time()
+    while time.time() - t0 < 12:      # Refresh abwarten
+        d1 = req("GET", "/api/v1/data")[1]
+        if not req("GET", "/api/status")[1].get("refreshing"):
+            break
+        time.sleep(0.5)
+    n1 = sum(len(c.get("datastores", [])) for c in d1["clusters"])
+    small = [l for c in d1["clusters"] for l in c.get("datastores", [])
+             if (l.get("raw_cap_gb") or l["cap_gb"]) < 3000]
+    check("Mindest-LUN filtert kleine Datastores raus", n1 < n0 and not small)
+    req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0})
 
     print("== CSV / Sprache / OpenAPI ==")
     st, csv_de, _ = req("GET", "/api/v1/reservations?format=csv", raw=True)

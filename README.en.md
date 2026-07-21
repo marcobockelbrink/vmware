@@ -24,7 +24,7 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 **Capacity & reporting**
 - **Multiple named vROps sources** (optional): 1–3 (or more) Aria Operations systems, each with or without a proxy, merged into one overview; every cluster carries a source badge (requires unique cluster names). The **single source** from `[kapa]` can be named too via `source-name`
 - Free **vCPU / RAM / storage** per cluster with usage bars; free = capacity − used − approved reservations
-- **N+1 failover reserve** (`--failover-hosts`), **vSAN factor** for usable net capacity, VM **exclusion by tag**
+- **N+1 failover reserve** (`--failover-hosts`), **vSAN factor** for usable net capacity, VM **exclusion by tag**, **minimum LUN size** (exclude small boot/ISO datastores entirely; Administration → Storage)
 - **Storage drill-down** per LUN/datastore (sortable), **vSphere tags** per cluster
 - **Workload %** per cluster from vROps (hidden from requesters — also server-side)
 - **Tanzu/Kubernetes namespaces**: CPU/RAM **reservations of vSphere namespaces**
@@ -80,7 +80,7 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
 **Administration (admin UI)**
-- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Auto-approval / Visibility / API tokens / Backup & configuration**
+- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Approval / Visibility / Storage / API tokens / Backup & configuration**
 - **Visibility matrix**: per role (except admin), checkboxes control which
   features it sees — workload, host/VM lists, network & VLAN search, storage
   drill-down, vSphere tags, "decided by". Applies in the UI **and**

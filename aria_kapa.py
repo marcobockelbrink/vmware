@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.12.2"
+VERSION = "2.13"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1041,7 +1041,8 @@ def strip_uplinks(clusters, hide=True):
 
 
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
-            tag_property="", vsan_factor=0.5, tanzu_mhz=2500, vlan_hint=None):
+            tag_property="", vsan_factor=0.5, tanzu_mhz=2500, vlan_hint=None,
+            min_lun_gb=0):
     # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
     # grob geschätzten Prozentwert über report().
     log = lambda m: print(m, file=sys.stderr)
@@ -1527,10 +1528,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         log(f"Tanzu-Namespaces nicht verfügbar: {e}")
 
     report(100)
-    return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz)
+    return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz, min_lun_gb)
 
 
-def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500):
+def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
+                  min_lun_gb=0):
     """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}
 
     Pro Cluster werden die größten `failover_hosts` Hosts als Ausfallreserve
@@ -1560,8 +1562,18 @@ def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500):
         vcpu_used = sum(v["vcpu"] for v in d["vms"])
         ram_used = round(sum(v["ram_gb"] for v in d["vms"]), 1)
         storage = d.get("storage") or {}
-        stor_cap = round(float(storage.get("cap_gb") or 0), 1)
-        stor_used = round(float(storage.get("used_gb") or 0), 1)
+        # Mindest-LUN-Größe: Datastores unter der Schwelle KOMPLETT ausschließen
+        # (Liste, Kapazität, Belegung). Kriterium ist die Brutto-LUN-Größe.
+        luns_all = storage.get("luns") or []
+        luns = [l for l in luns_all if min_lun_gb <= 0
+                or float(l.get("raw_cap_gb") or l.get("cap_gb") or 0) >= min_lun_gb]
+        if min_lun_gb > 0:
+            stor_cap = round(sum(float(l.get("cap_gb") or 0) for l in luns), 1)
+            stor_used = round(sum(float(l.get("used_gb") or 0) for l in luns), 1)
+        else:
+            stor_cap = round(float(storage.get("cap_gb") or 0), 1)
+            stor_used = round(float(storage.get("used_gb") or 0), 1)
+        storage = dict(storage, luns=luns)
         clusters.append({
             "name": cl,
             "hostCount": len(d["hosts"]),
@@ -2577,6 +2589,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
   <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Freigabe</span>
   <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
+  <span class="tab" id="atabStorCfg" onclick="setAdmTab('storcfg')">Storage</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
@@ -2657,17 +2670,6 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div><!-- admGrpSel -->
 
 <div id="admGrpAuto" style="display:none">
-<div class="sechead">Storage-Erweiterungen</div>
-<div class="hint" style="color:var(--muted);margin-bottom:8px">
-  Ist dies aktiv, können Freigebende beim Genehmigen und alle Berechtigten in
-  der Storage-Übersicht eine LUN-Vergrößerung oder eine neue LUN anfragen. Das
-  Storage-Team ruft die offenen Anfragen per API ab
-  (<code>/api/v1/storage-requests</code>, auch CSV inkl. NAA) und meldet mit
-  einem Token-Schreibrecht „Storage" die Umsetzung zurück.</div>
-<div style="margin-bottom:18px">
-  <label style="font-size:13px"><input type="checkbox" id="storEnabled" onchange="saveStorageCfg()"> Storage-Erweiterungen erlauben</label>
-  <span id="storCfgSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
-</div>
 <div class="sechead">Auto-Freigabe (Schwellenwerte)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:10px">
   Erfüllt der Ziel-Cluster <b>nach</b> Abzug des Antrags alle Schwellen, gibt
@@ -2715,6 +2717,33 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <button class="btn approve" style="margin-top:10px" onclick="saveVisibility()">✓ Sichtbarkeit speichern</button>
 <span id="visSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div><!-- admGrpVis -->
+
+<div id="admGrpStorCfg" style="display:none">
+<div class="sechead">Storage-Erweiterungen</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Ist dies aktiv, können Freigebende beim Genehmigen und alle Berechtigten in
+  der Storage-Übersicht eine LUN-Vergrößerung oder eine neue LUN anfragen. Das
+  Storage-Team ruft die offenen Anfragen per API ab
+  (<code>/api/v1/storage-requests</code>, auch CSV inkl. NAA) und meldet mit
+  einem Token-Schreibrecht „Storage" die Umsetzung zurück.</div>
+<div style="margin-bottom:18px">
+  <label style="font-size:13px"><input type="checkbox" id="storEnabled" onchange="saveStorageCfg()"> Storage-Erweiterungen erlauben</label>
+  <span id="storCfgSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div>
+<div class="sechead">Mindest-LUN-Größe</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Datastores <b>kleiner</b> als dieser Wert werden <b>komplett</b> aus der
+  Auswertung genommen — sie erscheinen nirgends (Storage-Übersicht, Cluster-
+  Detail) und zählen auch <b>nicht</b> in die Storage-Kapazität/Auslastung.
+  Praktisch, um kleine Boot-/ISO-/Scratch-Datastores auszublenden. 0 = alle
+  anzeigen. Die Änderung löst gleich einen neuen Datenabruf aus.</div>
+<div style="margin-bottom:12px">
+  Mindestgröße: <input id="storMinLun" type="number" min="0" step="10"
+    style="width:110px;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;text-align:center"> GB
+  <button class="btn approve" style="margin-left:8px" onclick="saveStorageCfg()">✓ Speichern &amp; anwenden</button>
+  <span id="storMinSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div>
+</div><!-- admGrpStorCfg -->
 
 <div id="admGrpTok" style="display:none">
 <div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
@@ -4108,18 +4137,22 @@ function saveVisibility() {
 // ---- Storage-Erweiterungen: Schalter (im Auto-Freigabe-Tab) ----
 function saveStorageCfg() {
   const on = !!(document.getElementById("storEnabled") || {}).checked;
+  const mn = parseInt((document.getElementById("storMinLun") || {}).value, 10) || 0;
   fetch("api/storagecfg", { method: "PUT", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ enabled: on }) })
+      body: JSON.stringify({ enabled: on, min_lun_gb: mn }) })
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(d => { STOR.enabled = !!d.enabled;
-      const st = document.getElementById("storCfgSaved");
-      if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); } })
+      ["storCfgSaved","storMinSaved"].forEach(id => { const st = document.getElementById(id);
+        if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); } }); })
     .catch(() => notify("Speichern fehlgeschlagen."));
 }
 function loadStorageCfg() {
   fetch("api/storagecfg").then(r => r.ok ? r.json() : null).then(d => {
+    if (!d) return;
     const el = document.getElementById("storEnabled");
-    if (d && el) el.checked = !!d.enabled;
+    if (el) el.checked = !!d.enabled;
+    const mn = document.getElementById("storMinLun");
+    if (mn && document.activeElement !== mn) mn.value = d.min_lun_gb || 0;
   }).catch(() => {});
 }
 
@@ -4197,10 +4230,10 @@ function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
                  ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
-                 tok: "atabTok", conf: "atabConf" };
+                 storcfg: "atabStorCfg", tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
                  ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
-                 tok: "admGrpTok", conf: "admGrpConf" };
+                 storcfg: "admGrpStorCfg", tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -5236,6 +5269,11 @@ const I18N = {
 "Wunschgröße muss größer als die aktuelle Größe sein.": "Target size must exceed the current size.",
 "Bitte eine Größe in TB angeben.": "Please enter a size in TB.",
 "Storage-Erweiterungen": "Storage expansions",
+"Mindest-LUN-Größe": "Minimum LUN size",
+"Datastores kleiner als dieser Wert werden komplett aus der Auswertung genommen — sie erscheinen nirgends (Storage-Übersicht, Cluster- Detail) und zählen auch nicht in die Storage-Kapazität/Auslastung. Praktisch, um kleine Boot-/ISO-/Scratch-Datastores auszublenden. 0 = alle anzeigen. Die Änderung löst gleich einen neuen Datenabruf aus.":
+  "Datastores smaller than this value are removed entirely from the evaluation — they appear nowhere (storage overview, cluster detail) and do not count toward storage capacity/utilization either. Handy to hide small boot/ISO/scratch datastores. 0 = show all. The change triggers a fresh data fetch.",
+"Mindestgröße:": "Minimum size:",
+"✓ Speichern & anwenden": "✓ Save & apply",
 "Storage-Erweiterungen erlauben": "Allow storage expansions",
 "Storage-Erweiterungen erlauben ": "Allow storage expansions ",
 "Ist dies aktiv, können Freigebende beim Genehmigen und alle Berechtigten in der Storage-Übersicht eine LUN-Vergrößerung oder eine neue LUN anfragen. Das Storage-Team ruft die offenen Anfragen per API ab":
@@ -6526,9 +6564,12 @@ def serve(args, password):
     storage_lock = threading.Lock()
 
     def load_storagecfg():
-        raw = store.load("storagecfg", None)
-        return {"enabled": bool((raw or {}).get("enabled"))} \
-            if isinstance(raw, dict) else {"enabled": False}
+        raw = store.load("storagecfg", None) or {}
+        try:
+            mn = max(0, int(float(raw.get("min_lun_gb") or 0)))
+        except (TypeError, ValueError):
+            mn = 0
+        return {"enabled": bool(raw.get("enabled")), "min_lun_gb": mn}
 
     storage_cfg = load_storagecfg()
     storage_reqs = store.load("storagereq", None)
@@ -6747,7 +6788,8 @@ def serve(args, password):
                 time.sleep(2)  # Demo: Ladezeit simulieren
                 clusters = build_summary(sample_data(), args.cpu_factor,
                                          args.failover_hosts,
-                                         args.tanzu_mhz_per_vcpu)
+                                         args.tanzu_mhz_per_vcpu,
+                                         storage_cfg.get("min_lun_gb", 0))
             else:
                 clusters, errors = [], []
                 for i, s in enumerate(sources):
@@ -6766,7 +6808,8 @@ def serve(args, password):
                                      tag_property=args.tag_property,
                                      vsan_factor=args.vsan_factor,
                                      tanzu_mhz=args.tanzu_mhz_per_vcpu,
-                                     vlan_hint=vlan_hint)
+                                     vlan_hint=vlan_hint,
+                                     min_lun_gb=storage_cfg.get("min_lun_gb", 0))
                         for c in cl:
                             if s["name"]:
                                 c["source"] = s["name"]
@@ -7252,7 +7295,8 @@ def serve(args, password):
                 if not self._require("admin"):
                     return
                 with storage_lock:
-                    self._json({"enabled": storage_cfg["enabled"]})
+                    self._json({"enabled": storage_cfg["enabled"],
+                                "min_lun_gb": storage_cfg.get("min_lun_gb", 0)})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -7907,13 +7951,24 @@ def serve(args, password):
                 s = self._require("admin")
                 if not s:
                     return
-                on = bool((self._body() or {}).get("enabled"))
+                body = self._body() or {}
+                on = bool(body.get("enabled"))
+                try:
+                    mn = max(0, int(float(body.get("min_lun_gb") or 0)))
+                except (TypeError, ValueError):
+                    mn = 0
                 with storage_lock:
+                    changed = mn != storage_cfg.get("min_lun_gb", 0)
                     storage_cfg["enabled"] = on
+                    storage_cfg["min_lun_gb"] = mn
                     store.save("storagecfg", storage_cfg)
-                audit(s["user"], "Storage-Erweiterungen",
-                      "aktiviert" if on else "deaktiviert")
-                self._json({"enabled": on})
+                audit(s["user"], "Storage-Einstellungen",
+                      ("Erweiterungen " + ("aktiv" if on else "inaktiv"))
+                      + (f"; Mindest-LUN {mn} GB" if mn else "; keine Mindest-LUN"))
+                # Mindest-LUN wirkt in der Datensammlung -> gleich neu abrufen
+                if changed and not state["refreshing"]:
+                    threading.Thread(target=do_refresh, daemon=True).start()
+                self._json({"enabled": on, "min_lun_gb": mn})
             elif self.path.startswith("/api/storage-request/"):
                 # erledigt/offen umschalten (Admin im UI)
                 s = self._require("admin")
