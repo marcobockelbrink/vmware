@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.12.1"
+VERSION = "2.12.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -4515,6 +4515,9 @@ function allLuns() {   // alle Datastores mit Cluster-Bezug, flach
                naa: d.naa || "", cap: d.cap_gb || 0, used: d.used_gb || 0 })));
   return out;
 }
+// vSAN lässt sich nicht per LUN-Vergrößerung erweitern (Kapazität über Hosts);
+// erweiterbar sind FC-/iSCSI-/NFS-LUNs.
+function isVsanLun(l) { return /vsan/i.test((l.type || "") + " " + (l.name || "")); }
 function renderStorage() {
   const q = (document.getElementById("storFilter").value || "").trim().toLowerCase();
   // Offene/erledigte Anfragen zuerst als eigener Block
@@ -4547,12 +4550,12 @@ function renderStorage() {
     const tgt = pend[l.cluster + "|" + l.name];
     const free = Math.round((l.cap - l.used) * 10) / 10;
     return `<tr${tgt?' style="background:rgba(245,158,11,.10)"':''}>
-      <td>${clusterTd(l.cluster)}</td><td>${esc(l.name)}</td><td>${esc(l.type)}</td>
+      ${clusterTd(l.cluster)}<td>${esc(l.name)}</td><td>${esc(l.type)}</td>
       <td style="font-family:monospace;font-size:12px">${esc(l.naa||"–")}</td>
       <td class="num">${fmt(Math.round(l.cap))}${tgt?` <span style="color:var(--warn)">→ ${fmt(tgt)}</span>`:""}</td>
       <td class="num">${fmt(Math.round(l.used))}</td>
       <td class="num">${fmt(free)}</td>
-      <td>${STOR.enabled && CAN_STORAGE ? `<button class="btn" onclick="openStorReq('${esc(l.cluster)}','${esc(l.name)}','${esc(l.naa)}',${Math.round(l.cap)})">Erweitern</button>` : (tgt?"angefragt":"")}</td>
+      <td>${tgt ? "angefragt" : (STOR.enabled && CAN_STORAGE && !isVsanLun(l) ? `<button class="btn" onclick="openStorReq('${esc(l.cluster)}','${esc(l.name)}','${esc(l.naa)}',${Math.round(l.cap)})">Erweitern</button>` : (isVsanLun(l) ? `<span style="color:var(--muted);font-size:12px">vSAN</span>` : ""))}</td>
     </tr>`; }).join("") ||
     `<tr><td colspan="8" style="color:var(--muted)">Keine Storage-Daten.</td></tr>`;
   const cnt = document.getElementById("storCount");
@@ -4569,18 +4572,20 @@ function toggleStorDone(id, done) {
 }
 // Erweiterungs-Dialog — genutzt aus der Storage-Seite UND aus dem Freigabe-Popup
 function openStorReq(cluster, lun, naa, curGb, resId, resName) {
-  const luns = allLuns().filter(l => l.cluster === cluster);
+  // vSAN nicht zum Vergrößern anbieten – nur FC-/iSCSI-/NFS-LUNs
+  const luns = allLuns().filter(l => l.cluster === cluster && !isVsanLun(l));
+  const canExpand = luns.length > 0;
   const opts = luns.map(l => `<option value="${esc(l.name)}" data-naa="${esc(l.naa)}" data-cap="${Math.round(l.cap)}"${l.name===lun?" selected":""}>${esc(l.name)} (${fmt(Math.round(l.cap))} GB${l.naa?", "+esc(l.naa):""})</option>`).join("");
   askConfirm({ title: "Storage-Erweiterung – " + cluster, okLabel: "✓ Anfragen",
     html: `
     <div style="font-size:13px;line-height:1.7">
-      <label><input type="radio" name="storKind" value="expand" checked onchange="storKindUI()"> Bestehende LUN vergrößern</label><br>
-      <label><input type="radio" name="storKind" value="new" onchange="storKindUI()"> Neue LUN anlegen</label>
-      <div id="storExpand" style="margin-top:8px">
+      <label><input type="radio" name="storKind" value="expand" ${canExpand?"checked":"disabled"} onchange="storKindUI()"> Bestehende LUN vergrößern${canExpand?"":" <span style='color:var(--muted)'>(keine erweiterbare LUN)</span>"}</label><br>
+      <label><input type="radio" name="storKind" value="new" ${canExpand?"":"checked"} onchange="storKindUI()"> Neue LUN anlegen</label>
+      <div id="storExpand" style="margin-top:8px;${canExpand?"":"display:none"}">
         <div>LUN: <select id="storLun" class="filterbox" style="max-width:340px">${opts}</select></div>
         <div style="margin-top:6px">Wunschgröße (GB): <input id="storTarget" type="number" min="1" class="filterbox" style="width:120px" placeholder="z. B. 8000"></div>
       </div>
-      <div id="storNew" style="display:none;margin-top:8px">
+      <div id="storNew" style="margin-top:8px;${canExpand?"display:none":""}">
         Neue LUN, Größe (TB): <input id="storTB" type="number" min="0.1" step="0.1" class="filterbox" style="width:120px" placeholder="z. B. 2">
       </div>
       <div style="margin-top:8px">Kommentar: <input id="storComment" class="filterbox" style="width:100%" placeholder="optional, z. B. Change/Grund"></div>
