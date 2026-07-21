@@ -2408,7 +2408,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   </div>
 </div>
 <div class="toolbar">
-  <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="render()">
+  <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="if(VIEW==='log')LOG_PAGE=0;render()">
   <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
   <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
   <span id="refreshStatus" style="font-size:12px;color:var(--muted)"></span>
@@ -2855,12 +2855,27 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div><!-- admGrpConf -->
 </div>
 <div id="logView" style="display:none">
-<div style="text-align:right;margin-bottom:6px"><span id="colctl_ltable"></span></div>
+<div class="toolbar" style="margin-bottom:8px;flex-wrap:wrap">
+  <label style="font-size:12px;color:var(--muted)">Von
+    <input type="date" id="logFrom" onchange="logDatePage()"
+      style="background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;margin-left:4px"></label>
+  <label style="font-size:12px;color:var(--muted)">Bis
+    <input type="date" id="logTo" onchange="logDatePage()"
+      style="background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;margin-left:4px"></label>
+  <button class="btn" onclick="logClearDates()">Datum zurücksetzen</button>
+  <span id="logInfo" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+  <span id="colctl_ltable"></span>
+</div>
 <div class="tablewrap">
 <table class="kt" id="ltable">
   <thead><tr><th>Zeit</th><th>Benutzer</th><th>Aktion</th><th>Details</th></tr></thead>
   <tbody id="ltbody"></tbody>
 </table>
+</div>
+<div id="logPager" style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:13px">
+  <button class="btn" id="logPrev" onclick="logPage(-1)">← Neuer</button>
+  <span id="logPageInfo" style="color:var(--muted)"></span>
+  <button class="btn" id="logNext" onclick="logPage(1)">Älter →</button>
 </div>
 </div>
 <div class="hovercard" id="hovercard"></div>
@@ -3849,17 +3864,48 @@ function loadLog() {
     .then(d => { if (Array.isArray(d)) { LOGS = d; if (VIEW === "log") render(); } })
     .catch(() => {});
 }
+const LOG_PER_PAGE = 100;
+let LOG_PAGE = 0;
+function logClearDates() {
+  document.getElementById("logFrom").value = "";
+  document.getElementById("logTo").value = "";
+  LOG_PAGE = 0; renderLogTable();
+}
+function logDatePage() { LOG_PAGE = 0; renderLogTable(); }   // Filter ändern -> Seite 1
+function logPage(dir) { LOG_PAGE += dir; renderLogTable(); }
 function renderLogTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
-  const list = LOGS.filter(e => !q ||
-    (e.user || "").toLowerCase().includes(q) ||
-    (e.action || "").toLowerCase().includes(q) ||
-    (e.detail || "").toLowerCase().includes(q));
-  document.getElementById("ltbody").innerHTML = list.map(e =>
+  const from = (document.getElementById("logFrom") || {}).value || "";
+  const to = (document.getElementById("logTo") || {}).value || "";
+  const list = LOGS.filter(e => {
+    if (q && !((e.user || "").toLowerCase().includes(q) ||
+        (e.action || "").toLowerCase().includes(q) ||
+        (e.detail || "").toLowerCase().includes(q))) return false;
+    const day = (e.ts || "").slice(0, 10);       // ISO YYYY-MM-DD
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+  });
+  // Paginierung: 100 je Seite, LOGS ist neueste-zuerst
+  const pages = Math.max(1, Math.ceil(list.length / LOG_PER_PAGE));
+  if (LOG_PAGE < 0) LOG_PAGE = 0;
+  if (LOG_PAGE > pages - 1) LOG_PAGE = pages - 1;
+  const start = LOG_PAGE * LOG_PER_PAGE;
+  const slice = list.slice(start, start + LOG_PER_PAGE);
+  document.getElementById("ltbody").innerHTML = slice.map(e =>
     `<tr><td style="white-space:nowrap">${esc((e.ts || "").replace("T", " "))}</td>
      <td>${esc(e.user || "–")}</td><td>${esc(e.action || "")}</td>
      <td>${esc(e.detail || "")}</td></tr>`).join("") ||
-    `<tr><td colspan="4" style="color:var(--muted)">Keine Log-Einträge${q ? " für diesen Filter" : ""}.</td></tr>`;
+    `<tr><td colspan="4" style="color:var(--muted)">Keine Log-Einträge${(q || from || to) ? " für diese Auswahl" : ""}.</td></tr>`;
+  const info = document.getElementById("logInfo");
+  if (info) info.textContent = list.length + (list.length === 1 ? " Eintrag" : " Einträge")
+    + (list.length !== LOGS.length ? " (gefiltert von " + LOGS.length + ")" : "");
+  const pi = document.getElementById("logPageInfo");
+  if (pi) pi.textContent = list.length ? ("Einträge " + (start + 1) + "–" + (start + slice.length)
+    + " · Seite " + (LOG_PAGE + 1) + " von " + pages) : "";
+  document.getElementById("logPrev").disabled = LOG_PAGE <= 0;
+  document.getElementById("logNext").disabled = LOG_PAGE >= pages - 1;
+  document.getElementById("logPager").style.display = list.length > LOG_PER_PAGE ? "flex" : "none";
   reSort("ltable"); renderColMenu("ltable"); applyCols("ltable");
 }
 
@@ -5214,6 +5260,8 @@ const I18N = {
 "Datenspeicher": "Data store",
 // --- Log ---
 "Zeit": "Time",
+"Von": "From", "Bis": "To", "Datum zurücksetzen": "Reset dates",
+"← Neuer": "← Newer", "Älter →": "Older →",
 "Keine Log-Einträge": "No log entries",
 // --- Statuszeile / Meldungen / Dialoge ---
 "Server nicht erreichbar.": "Server unreachable.",
@@ -7360,7 +7408,7 @@ def serve(args, password):
             elif route == "/api/log":
                 if not self._require("admin"):
                     return
-                self._json(read_log())
+                self._json(read_log(1500))
             else:
                 self.send_error(404)
 
