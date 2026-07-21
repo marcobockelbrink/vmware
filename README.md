@@ -222,7 +222,12 @@ Ablehnungen, Stornos und Backups:
   einstellbar (Standard `0.5`; `1` = brutto). Er wirkt auf **Kapazität und
   Belegung**, damit die Auslastung stimmt — vROps meldet beide Werte brutto.
   Die LUN-Liste zeigt den **Storage-Typ** (vSAN/VMFS/NFS) und bei vSAN die
-  Bruttokapazität im Tooltip. Der Typ kommt aus den Datastore-Eigenschaften;
+  Bruttokapazität im Tooltip. Bei FC-/iSCSI-LUNs wird zusätzlich die
+  **NAA-Kennung** des Backing-Devices (`naa.6000…`) best effort aus den
+  Datastore-Eigenschaften gelesen — sie steht im LUN-Tooltip, im Datenpaket
+  (`/api/v1/data`, Feld `naa` je Datastore) und damit im Cache; das Log nennt
+  die erkannten Schlüssel (`Datastore-Properties (Beispiel …)`, `NAA erkannt:
+  X/Y`) zum Abgleich mit dem eigenen vROps. Der Typ kommt aus den Datastore-Eigenschaften;
   wird keiner geliefert, greift die Erkennung über den Datastore-Namen.
   - **LUN-Detail**: Ein Klick auf den Storage-Wert (oder auf den Clusternamen)
     öffnet die Detailkarte mit **jedem einzelnen Datastore/LUN** – wahlweise

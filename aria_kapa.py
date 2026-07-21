@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.11"
+VERSION = "2.11.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1118,6 +1118,12 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # sich je nach vROps-Version, deshalb mehrere Kandidaten in einem Bulk-Aufruf.
     DS_TYPE_KEYS = ["summary|type", "summary|datastore_type",
                     "config|fileSystemType", "summary|fileSystemType"]
+    # NAA-Kennung des Backing-Devices (FC/iSCSI-LUNs, z. B. naa.6000…) — die
+    # Schlüssel variieren je vROps-Version, deshalb Kandidaten im selben
+    # Bulk-Aufruf. Rein informativ (Brücke zum Storage-Team/Array).
+    DS_NAA_KEYS = ["summary|datastore|diskName", "config|extent|diskName",
+                   "summary|diskName", "info|extent|diskName",
+                   "config|vmfs|extent|diskName", "summary|canonicalName"]
     datastores, ds_stats, ds_props = [], {}, {}
     try:
         report(68)
@@ -1127,10 +1133,37 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         ds_stats = api.latest_stats(ds_ids,
             ["capacity|total_capacity", "capacity|used_space"],
             progress=lambda m: log(f"Datastore-Metriken: {m}"))
-        ds_props = api.properties(ds_ids, DS_TYPE_KEYS,
+        ds_props = api.properties(ds_ids, DS_TYPE_KEYS + DS_NAA_KEYS,
             progress=lambda m: log(f"Datastore-Typ: {m}"))
+        # Diagnose: Schlüssel der 1. Nicht-vSAN-Platte, die nach Device/NAA
+        # aussehen — zum Ablesen des exakten Schlüssels am echten vROps.
+        if datastores:
+            try:
+                d0 = next((d for d in datastores
+                           if "vsan" not in name_of(d).lower()), datastores[0])
+                p0 = api.all_properties(d0["identifier"])
+                hits = {k: v for k, v in p0.items()
+                        if re.search(r"naa\.[0-9a-fA-F]{8,}", str(v))
+                        or re.search(r"disk|device|canonical|extent", k, re.I)}
+                log(f"Datastore-Properties (Beispiel '{name_of(d0)}') – "
+                    "Device/NAA-Kandidaten: "
+                    + (", ".join(f"{k}={str(v)[:60]}" for k, v in
+                                 sorted(hits.items())[:8]) or "keine gefunden"))
+            except Exception:
+                pass
     except Exception as e:
         log(f"Storage-Kapazität nicht verfügbar: {e}")
+
+    def ds_naa(did):
+        """NAA/Device-Kennung eines Datastores (erster gefüllter Kandidat;
+        notfalls ein naa.…-Muster in irgendeinem Kandidatenwert)."""
+        p = ds_props.get(did) or {}
+        for k in DS_NAA_KEYS:
+            v = str(p.get(k) or "").strip()
+            if v:
+                m = re.search(r"naa\.[0-9a-fA-F]{8,}", v)
+                return m.group(0) if m else v[:80]
+        return ""
 
     def ds_type(did, name):
         """Storage-Typ eines Datastores (erste gefüllte Kandidaten-Eigenschaft)."""
@@ -1267,6 +1300,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             data[cl]["storage"]["luns"].append({
                 "name": nm,
                 "type": typ or "unbekannt",
+                "naa": ds_naa(did),
                 "cap_gb": eff_cap,
                 "used_gb": eff_used,
                 "raw_cap_gb": raw_cap,
@@ -1281,7 +1315,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             + (f" · Typen: {', '.join(typen)}" if typen else "")
             + (f" · vSAN mit Faktor {vsan_factor} gerechnet"
                if any(l["factor"] != 1.0 for d in data.values()
-                      for l in d["storage"]["luns"]) else ""))
+                      for l in d["storage"]["luns"]) else "")
+            + " · NAA erkannt: "
+            + str(sum(1 for d in data.values()
+                      for l in d["storage"]["luns"] if l.get("naa")))
+            + "/" + str(sum(len(d["storage"]["luns"]) for d in data.values())))
 
     # dvSwitches + Portgruppen je Cluster (Netzwerk-Reiter im Popup + VLAN-Suche).
     # Zuordnung wie beim Storage über die Hosts: dvSwitch -> HostSystem ->
@@ -1540,6 +1578,7 @@ def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500):
             "datastores": sorted(
                 [{"name": l.get("name"),
                   "type": l.get("type") or "",
+                  "naa": l.get("naa") or "",
                   "cap_gb": round(float(l.get("cap_gb") or 0), 1),
                   "used_gb": round(float(l.get("used_gb") or 0), 1),
                   "raw_cap_gb": round(float(l.get("raw_cap_gb") or 0), 1),
@@ -1585,6 +1624,7 @@ def sample_data():
         for li in range(1, random.randint(3, 7)):
             cap = random.choice([2000, 4000, 8000])
             luns.append({"name": f"FC-LUN-{ci}{li:02d}", "type": "VMFS",
+                         "naa": f"naa.60060160a{ci}b{li:02d}00{random.randint(10**11, 10**12 - 1):x}",
                          "factor": 1.0, "raw_cap_gb": cap,
                          "cap_gb": cap, "used_gb": 0})
         for l in luns:
@@ -3314,8 +3354,11 @@ function card(c, idx, isTotal) {
   const dsRows = ds.map(d => {
     const p = d.cap_gb ? Math.round(d.used_gb / d.cap_gb * 100) : 0;
     // Bei vSAN zeigen wir die NUTZBARE Kapazität (Faktor) – Brutto im Tooltip
-    const net = (d.factor && d.factor !== 1)
-      ? ` title="brutto ${fmt(Math.round(d.raw_cap_gb))} GB · mit Faktor ${d.factor} als nutzbar gerechnet"` : "";
+    const tipParts = [];
+    if (d.factor && d.factor !== 1)
+      tipParts.push(`brutto ${fmt(Math.round(d.raw_cap_gb))} GB · mit Faktor ${d.factor} als nutzbar gerechnet`);
+    if (d.naa) tipParts.push(d.naa);
+    const net = tipParts.length ? ` title="${tipParts.join(" · ")}"` : "";
     const typ = (d.factor && d.factor !== 1)
       ? `${esc(d.type)} <span style="color:var(--muted)">(${Math.round(d.factor * 100)} %)</span>`
       : esc(d.type || "–");

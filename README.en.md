@@ -215,7 +215,11 @@ rejections, cancellations and backups:
   `--vsan-factor` (default `0.5`; `1` = gross). It applies to **capacity and
   usage** so utilization stays correct — vROps reports both values gross. The
   LUN list shows the **storage type** (vSAN/VMFS/NFS) and, for vSAN, the gross
-  capacity in a tooltip. The type comes from the datastore properties; if none
+  capacity in a tooltip. For FC/iSCSI LUNs the **NAA identifier** of the
+  backing device (`naa.6000…`) is additionally read best effort from the
+  datastore properties — shown in the LUN tooltip, included in the payload
+  (`/api/v1/data`, field `naa` per datastore) and thus in the cache; the log
+  lists the detected keys for verification against your vROps. The type comes from the datastore properties; if none
   is delivered, name-based detection kicks in.
   - **LUN detail**: clicking the storage value (or the cluster name) opens the
     detail card with **every single datastore/LUN** — sortable by **size** or

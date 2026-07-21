@@ -159,6 +159,14 @@ try:
     check("Reservierungs-CSV DE/EN",
           csv_de.decode().startswith("id;name;change") and "gueltig_bis" in csv_de.decode()
           and "valid_until" in csv_en.decode() and "approved" in csv_en.decode())
+    st, dj, _ = req("GET", "/api/v1/data")
+    fc = [l for c in dj["clusters"] for l in c.get("datastores", [])
+          if l["name"].startswith("FC-LUN")]
+    vs = [l for c in dj["clusters"] for l in c.get("datastores", [])
+          if "vsan" in l["name"].lower()]
+    check("NAA an FC-LUNs im Payload (vSAN ohne)",
+          fc and all(l.get("naa", "").startswith("naa.") for l in fc)
+          and all(not l.get("naa") for l in vs))
     st, cap, _ = req("GET", "/api/v1/data?format=csv&lang=en", raw=True)
     lines = cap.decode().splitlines()
     h = lines[0].split(";")
