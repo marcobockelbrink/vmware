@@ -108,8 +108,9 @@ mit Schaubildern** (Systemkontext, Datenflüsse, Workflow, Deployment) steht in
   Antrags-Formular und darunter die **vSphere-Tags** des Clusters), **Storage**
   (Auslastung und jede LUN, sortierbar nach Größe/Belegung), **Netzwerk** (die
   Portgruppen des Clusters mit ihren VLAN-Nummern, **direkt im Reiter nach
-  IP/VLAN/Name durchsuchbar**), **Hosts** und
-  **VMs**. Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
+  IP/VLAN/Name durchsuchbar**) sowie — nur für Admin und Technische Prüfung —
+  **Hosts** und **VMs** (Reviewer und Anforderer sehen diese Reiter nicht;
+  die Listen fehlen auch serverseitig im Datenpaket). Ein Klick auf den Storage-Wert springt direkt in den Storage-Reiter.
   Die Karte ist breit angelegt und lässt sich unten rechts frei in der Größe
   ziehen.
 - **VLAN-Suche** (Tab „VLAN-Suche" bzw. `/vlan-suche`, zwischen Kapazität und
@@ -473,8 +474,8 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 | Rolle | Rechte |
 |---|---|
-| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung**, nicht wer entschieden hat |
-| **Reviewer** | Mitglied eines Genehmigungsteams; gibt Anträge frei bzw. lehnt sie ab, **wenn das eigene Team an der Reihe ist** (Tab „Genehmigungen"); sieht alle Anträge, aber keine Verwaltung/Log |
+| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung**, nicht wer entschieden hat; keine Host-/VM-Listen, kein Workload |
+| **Reviewer** | Mitglied eines Genehmigungsteams; gibt Anträge frei bzw. lehnt sie ab, **wenn das eigene Team an der Reihe ist** (Tab „Genehmigungen"); sieht alle Anträge, aber keine Verwaltung/Log und keine Host-/VM-Listen |
 | **Administrator** | Anträge in jeder Stufe genehmigen/ablehnen (mit Kommentar), Daten aus Aria aktualisieren, alle Reservierungen verwalten, Import, Rollen/Teams pflegen (Tab „Verwaltung"); sieht alles |
 | **Technische Prüfung** | Alle Daten und Seiten einsehen — keinerlei Änderungen möglich |
 

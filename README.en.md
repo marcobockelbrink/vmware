@@ -107,8 +107,9 @@ diagrams** (system context, data flows, workflow, deployment) lives in
   into **CPU & RAM** (usage, key figures, reservations incl. request form and
   the cluster's **vSphere tags** below), **Storage** (usage and every LUN,
   sortable by size/usage), **Network** (the cluster's port groups with their
-  VLAN numbers, **searchable in place by IP/VLAN/name**), **Hosts** and
-  **VMs**. Clicking the storage value jumps straight to the storage tab. The
+  VLAN numbers, **searchable in place by IP/VLAN/name**) and — admins and
+  auditors only — **Hosts** and **VMs** (reviewers and requesters do not see
+  these tabs; the lists are also stripped from the server payload). Clicking the storage value jumps straight to the storage tab. The
   card is wide and can be freely resized from its bottom-right corner.
 - **VLAN search** (tab "VLAN search", between capacity and reservations):
   searches the port groups of **all** clusters. Because port group names
@@ -449,8 +450,8 @@ python3 aria_kapa.py --url https://aria-ops.example.com --user svc-aria --serve 
 
 | Role | Permissions |
 |---|---|
-| **Requester** | Submit capacity requests; withdraw own still-open requests; sees only requests of the **own team**, not who decided |
-| **Reviewer** | Member of an approval team; approves or rejects requests **when their team is up** ("Approvals" tab); sees all requests but no administration/log |
+| **Requester** | Submit capacity requests; withdraw own still-open requests; sees only requests of the **own team**, not who decided; no host/VM lists, no workload |
+| **Reviewer** | Member of an approval team; approves or rejects requests **when their team is up** ("Approvals" tab); sees all requests but no administration/log and no host/VM lists |
 | **Administrator** | Approve/reject at any stage (with comment), refresh Aria data, manage all reservations, import, manage roles/teams ("Administration" tab); sees everything |
 | **Auditor** | View all data and pages — no changes possible |
 

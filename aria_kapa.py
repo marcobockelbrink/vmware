@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.10"
+VERSION = "2.10.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3384,11 +3384,15 @@ function card(c, idx, isTotal) {
     : `<div style="color:var(--muted);font-size:12px">Keine Portgruppen-Daten aus Aria.</div>`;
 
   // Gesamt-Karte hat keine Host-/VM-Listen
+  // Hosts-/VMs-Reiter nur für Admin und Technische Prüfung — Reviewer und
+  // Anforderer sehen die Infrastruktur-Listen nicht (Server strippt sie
+  // zusätzlich aus dem Payload, clusters_for).
+  const canInfra = ROLE !== "anforderer" && ROLE !== "reviewer";
   const avail = isTotal ? [["cpu", "CPU & RAM"], ["storage", "Storage"]]
     : [["cpu", "CPU & RAM"], ["storage", "Storage"],
-       ["net", "Netzwerk" + (nPg ? " (" + nPg + ")" : "")],
-       ["hosts", "Hosts (" + (c.hosts || []).length + ")"],
-       ["vms", "VMs (" + c.vmCount + ")"]];
+       ["net", "Netzwerk" + (nPg ? " (" + nPg + ")" : "")]].concat(canInfra
+      ? [["hosts", "Hosts (" + (c.hosts || []).length + ")"],
+         ["vms", "VMs (" + c.vmCount + ")"]] : []);
   const tab = avail.some(t => t[0] === CARD_TAB) ? CARD_TAB : "cpu";
   const tabBar = `<div class="tabs ctabs">${avail.map(([k, l]) =>
     `<span class="tab ${tab === k ? "active" : ""}" onclick="setCardTab('${k}')">${l}</span>`).join("")}</div>`;
@@ -6169,11 +6173,17 @@ def serve(args, password):
         return {k: v for k, v in r.items() if k != "von_mail"}
 
     def clusters_for(role):
-        """Cluster-Daten je Rolle: Anforderer sehen den Workload-Wert nicht
-        (weder im UI noch im Payload)."""
+        """Cluster-Daten je Rolle — Sperren gelten im Payload, nicht nur im UI:
+        Anforderer ohne Workload; Anforderer UND Reviewer ohne Host-/VM-Listen
+        (die Zählwerte hostCount/vmCount bleiben für die Übersicht drin)."""
         cl = state["clusters"]
+        strip = set()
         if role == "anforderer":
-            return [{k: v for k, v in c.items() if k != "workload"} for c in cl]
+            strip = {"workload", "hosts", "vms"}
+        elif role == "reviewer":
+            strip = {"hosts", "vms"}
+        if strip:
+            return [{k: v for k, v in c.items() if k not in strip} for c in cl]
         return cl
 
     def visible_res(s):

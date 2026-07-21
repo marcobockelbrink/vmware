@@ -257,10 +257,21 @@ try:
     # Vorab eine "überlebende" Sitzung hinterlegen (Hash-Key wie im Server):
     import hashlib as _hl
     SESS_TOK = "smoke-session-token-123"
+    REV_TOK = "smoke-reviewer-token-456"
+    ANF_TOK = "smoke-anforderer-token-789"
     with open(os.path.join(DATA2, "kapa_sessions.json"), "w") as f:
-        json.dump({_hl.sha256(SESS_TOK.encode()).hexdigest():
-                   {"user": "smoke@firma.local", "role": "admin",
-                    "abteilung": "", "mail": "", "exp": time.time() + 3600}}, f)
+        json.dump({
+            _hl.sha256(SESS_TOK.encode()).hexdigest():
+                {"user": "smoke@firma.local", "role": "admin",
+                 "abteilung": "", "mail": "", "exp": time.time() + 3600},
+            _hl.sha256(REV_TOK.encode()).hexdigest():
+                {"user": "rev@firma.local", "role": "reviewer",
+                 "abteilung": "Team Netzwerk", "mail": "",
+                 "exp": time.time() + 3600},
+            _hl.sha256(ANF_TOK.encode()).hexdigest():
+                {"user": "anf@firma.local", "role": "anforderer",
+                 "abteilung": "Team Netzwerk", "mail": "",
+                 "exp": time.time() + 3600}}, f)
     P2 = free_port()
     proc2 = subprocess.Popen(
         [sys.executable, APP, "--serve", "--sample", "--bind", "127.0.0.1",
@@ -304,6 +315,28 @@ try:
             page_bad = resp.read().decode()
         check("Ungültiges Cookie -> Anmeldemaske",
               "Anmeldung mit Active-Directory-Konto" in page_bad)
+        # Rollen-Sicht: Host-/VM-Listen nur für Admin/Auditor im Payload
+        t0 = time.time()
+        while time.time() - t0 < 25:      # Demo-Abruf des AD-Servers abwarten
+            with urllib.request.urlopen(B2 + "/healthz", timeout=5) as resp:
+                h2 = json.loads(resp.read().decode())
+            if h2.get("clusters", 0) > 0 and not h2.get("refreshing"):
+                break
+            time.sleep(0.5)
+        def data_for(tok):
+            r = urllib.request.Request(B2 + "/api/data",
+                headers={"Cookie": "kapa_session=" + tok})
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return json.loads(resp.read().decode())["clusters"]
+        adm, rev, anf = data_for(SESS_TOK), data_for(REV_TOK), data_for(ANF_TOK)
+        check("Admin sieht Hosts/VMs/Workload",
+              "vms" in adm[0] and "hosts" in adm[0] and "workload" in adm[0])
+        check("Reviewer ohne Hosts/VMs (Workload bleibt)",
+              "vms" not in rev[0] and "hosts" not in rev[0]
+              and "workload" in rev[0] and rev[0].get("vmCount", 0) > 0)
+        check("Anforderer ohne Hosts/VMs/Workload",
+              "vms" not in anf[0] and "hosts" not in anf[0]
+              and "workload" not in anf[0])
     finally:
         proc2.terminate()
         try:
