@@ -1,0 +1,73 @@
+# VMware Kapazitätsplanung — Kubernetes-Deployment.
+# VMware Capacity Planning — Kubernetes deployment.
+#
+# WICHTIG / IMPORTANT: replicas MUSS 1 bleiben — die Anwendung hält ihren
+# Zustand in Dateien (PVC, ReadWriteOnce). / replicas MUST stay 1 — the app
+# keeps its state in files (PVC, ReadWriteOnce).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kapa-dashboard
+  labels:
+    app: kapa-dashboard
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate        # PVC ist RWO — erst stoppen, dann neu starten
+  selector:
+    matchLabels:
+      app: kapa-dashboard
+  template:
+    metadata:
+      labels:
+        app: kapa-dashboard
+    spec:
+      securityContext:
+        fsGroup: 0        # Datenverzeichnis gehört Gruppe 0 (g=u, OpenShift-kompatibel)
+      containers:
+        - name: kapa
+          image: ghcr.io/marcobockelbrink/kapa-dashboard:2.9.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # Aria-Passwort aus dem Secret (siehe secret.example.yaml)
+            - name: ARIA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kapa-dashboard-secrets
+                  key: ARIA_PASSWORD
+            # optional: SMTP_PASSWORD / BACKUP_PASSWORD analog ergänzen
+          volumeMounts:
+            - name: data
+              mountPath: /opt/kapa/data
+            - name: config
+              mountPath: /etc/kapa/kapa.ini
+              subPath: kapa.ini
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kapa-dashboard-data
+        - name: config
+          configMap:
+            name: kapa-dashboard-config

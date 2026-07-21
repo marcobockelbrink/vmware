@@ -194,14 +194,12 @@ Schreiben immer atomar. Details und Restore: [`../config/RESTORE.md`](../config/
 flowchart LR
     GH["GitHub-Repo<br/>+ Release-Tag v*"]
     GH -->|GitHub Actions| IMG["GHCR-Image<br/>kapa-dashboard:latest + :x.y<br/>amd64 + arm64"]
-    GH --> RPM["RPM (el9)<br/>deploy/rpm/build.sh"]
-    RPM --> ANS["Ansible/AAP-Role<br/>Flotte + Vault"]
     IMG --> DOCK["Docker/Podman<br/>compose, UBI9, non-root"]
-    RPM --> HOSTS["RHEL-9-Hosts<br/>systemd + nginx"]
-    ANS --> HOSTS
+    IMG --> K8S["Kubernetes<br/>Manifeste oder Helm-Chart<br/>1 Replikat + PVC, /healthz-Probes"]
+    GH --> HOSTS["Klassisch: systemd + nginx<br/>(Vorlagen unter config/)"]
 ```
 
-Dasselbe Artefakt, drei Verpackungen — Auswahlhilfe in
+Dasselbe Artefakt, Container-first — Auswahlhilfe in
 [`../deploy/README.md`](../deploy/README.md).
 
 ## Bewusste Entscheidungen (Kurz-ADRs)

@@ -1,0 +1,12 @@
+# Persistente Laufzeitdaten (Reservierungen, Rollen, Log, Tokens, …)
+# Persistent runtime data (reservations, roles, log, tokens, …)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kapa-dashboard-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: <eure-Storage-Klasse> / <your storage class>

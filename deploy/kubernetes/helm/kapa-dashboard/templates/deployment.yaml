@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kapa.fullname" . }}
+  labels:
+    {{- include "kapa.labels" . | nindent 4 }}
+spec:
+  # MUSS 1 bleiben: Dateizustand im PVC / MUST stay 1: file state in the PVC
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kapa-dashboard
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "kapa.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Values.kapaIni | sha256sum }}
+    spec:
+      securityContext:
+        fsGroup: 0
+      containers:
+        - name: kapa
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: ARIA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kapa.secretName" . }}
+                  key: ARIA_PASSWORD
+                  optional: true
+          envFrom:
+            - secretRef:
+                name: {{ include "kapa.secretName" . }}
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /opt/kapa/data
+            - name: config
+              mountPath: /etc/kapa/kapa.ini
+              subPath: kapa.ini
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "kapa.fullname" .)) }}
+        - name: config
+          configMap:
+            name: {{ include "kapa.fullname" . }}-config

@@ -1,0 +1,28 @@
+# Die EINE Konfigurationsdatei als ConfigMap — Vorlage aus
+# config/kapa.ini.example übernehmen und Werte eintragen.
+# The single configuration file as a ConfigMap — copy the template from
+# config/kapa.ini.en.example and fill in your values.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kapa-dashboard-config
+data:
+  kapa.ini: |
+    [kapa]
+    url = https://aria-ops.firma.de
+    user = svc-kapa-readonly
+    # Passwort kommt als ARIA_PASSWORD aus dem Secret (kein password-file)
+    source-name = RZ-Nord
+    cpu-factor = 6
+    failover-hosts = 1
+    vsan-factor = 0.5
+    res-ttl-days = 31
+    contact-info = IT-Betrieb Musterfirma
+    # Im Container: Daten liegen im PVC unter /opt/kapa/data
+    data-dir = /opt/kapa/data
+    # AD-Anmeldung (dringend empfohlen, sonst offene Vollzugriffs-UI):
+    #ad-url = ldaps://dc01.firma.local
+    #ad-domain = firma.local
+    #admin-user = vorname.nachname@firma.local
+    # TLS terminiert am Ingress:
+    #cookie-insecure = true    ; NUR wenn der Ingress kein TLS spricht

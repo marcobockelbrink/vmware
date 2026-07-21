@@ -1,4 +1,0 @@
----
-collections:
-  # seboolean-Modul (SELinux httpd_can_network_connect)
-  - name: ansible.posix

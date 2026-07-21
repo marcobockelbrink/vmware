@@ -92,7 +92,7 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 - **SFTP backup** with rotation, **audit log** (JSONL, rotating), **`/healthz`**
   for monitoring (no sign-in: status, data age, cluster count)
 - **One INI** for all non-secret settings, secrets as `.pass` files; optional **Aria proxy**
-- Ships as **systemd + nginx**, **RPM**, **Ansible** or **container** (ready-made image on **GHCR**, built automatically on every release)
+- Ships as **Docker/Podman** or **Kubernetes** (manifests + Helm chart; ready-made image on **GHCR**, built automatically on every release) — classic **systemd + nginx** still possible
 
 Details for each area in the sections below. The **overall architecture with
 diagrams** (system context, data flows, workflow, deployment) lives in
@@ -653,23 +653,21 @@ Covered: gzip, free-text hardening, token write permissions incl. two-stage
 approval, CSV/language, OpenAPI, mail rules/template, announcement, prefs
 and the INI section guard.
 
-### Delivery: RPM, Ansible/AAP, container
+### Delivery: Docker & Kubernetes
 
-Besides the manual installation from `config/`, ready-made deployment
-variants live under [`deploy/`](deploy/) — same script, three packagings:
+Besides the manual installation from `config/` (systemd + nginx), ready-made
+container variants live under [`deploy/`](deploy/):
 
-- **[`deploy/rpm/`](deploy/rpm/)** — native RPM for RHEL/Alma/Rocky 9
-  (`dnf install`/`upgrade`, service user, systemd unit, configuration under
-  `/etc/kapa` with `noreplace`). `deploy/rpm/build.sh` builds the package;
-  the version comes automatically from `aria_kapa.py`.
-- **[`deploy/ansible/`](deploy/ansible/)** — role + playbook for rolling out
-  across a fleet or via the Ansible Automation Platform; installs the RPM,
-  manages the configuration from the vault and sets the SELinux switch
-  `httpd_can_network_connect`.
 - **[`deploy/docker/`](deploy/docker/)** — container image based on Red Hat
   UBI 9 (runs as non-root, works with Podman too) incl. `docker-compose.yml`.
   On every release the image is built automatically and published as a
   **GitHub package**: `docker pull ghcr.io/marcobockelbrink/kapa-dashboard:latest`
-  (amd64 + arm64, fixed version tags like `:1.30` for rollbacks).
+  (amd64 + arm64, fixed version tags for rollbacks).
+- **[`deploy/kubernetes/`](deploy/kubernetes/)** — cluster operation via
+  **plain manifests** (`kubectl apply`: deployment, service, PVC, ConfigMap
+  INI, secret, ingress example) or the **Helm chart**
+  (`deploy/kubernetes/helm/kapa-dashboard`). Single replica with a PVC,
+  liveness/readiness on `/healthz`, OpenShift-compatible.
 
-Details and the decision guide are in [`deploy/README.en.md`](deploy/README.en.md).
+The former RPM/Ansible variants were retired with v2.10 (last in v2.9.1).
+Details and the decision guide: [`deploy/README.en.md`](deploy/README.en.md).

@@ -194,14 +194,12 @@ Writes are always atomic. Details and restore:
 flowchart LR
     GH["GitHub repo<br/>+ release tag v*"]
     GH -->|GitHub Actions| IMG["GHCR image<br/>kapa-dashboard:latest + :x.y<br/>amd64 + arm64"]
-    GH --> RPM["RPM (el9)<br/>deploy/rpm/build.sh"]
-    RPM --> ANS["Ansible/AAP role<br/>fleet + vault"]
     IMG --> DOCK["Docker/Podman<br/>compose, UBI9, non-root"]
-    RPM --> HOSTS["RHEL 9 hosts<br/>systemd + nginx"]
-    ANS --> HOSTS
+    IMG --> K8S["Kubernetes<br/>manifests or Helm chart<br/>1 replica + PVC, /healthz probes"]
+    GH --> HOSTS["Classic: systemd + nginx<br/>(templates under config/)"]
 ```
 
-Same artifact, three packagings — decision guide in
+Same artifact, container-first — decision guide in
 [`../deploy/README.en.md`](../deploy/README.en.md).
 
 ## Deliberate decisions (mini ADRs)

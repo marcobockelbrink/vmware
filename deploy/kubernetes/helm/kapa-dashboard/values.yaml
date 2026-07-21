@@ -1,0 +1,60 @@
+# Werte für das kapa-dashboard-Chart / values for the kapa-dashboard chart
+
+image:
+  repository: ghcr.io/marcobockelbrink/kapa-dashboard
+  tag: ""            # leer = appVersion des Charts / empty = chart appVersion
+  pullPolicy: IfNotPresent
+
+# MUSS 1 bleiben — Dateizustand im PVC (RWO). / MUST stay 1 — file state in PVC.
+replicaCount: 1
+
+service:
+  port: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  host: kapa.firma.local
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+  tls: []            # - hosts: [kapa.firma.local]
+                     #   secretName: kapa-dashboard-tls
+
+persistence:
+  size: 1Gi
+  storageClassName: ""   # leer = Cluster-Default / empty = cluster default
+  existingClaim: ""      # vorhandenes PVC statt neuem / reuse an existing PVC
+
+# Die EINE Konfigurationsdatei — Vorlage: config/kapa.ini.example im Repo.
+# The single configuration file — template: config/kapa.ini.en.example.
+kapaIni: |
+  [kapa]
+  url = https://aria-ops.firma.de
+  user = svc-kapa-readonly
+  source-name = RZ-Nord
+  cpu-factor = 6
+  failover-hosts = 1
+  vsan-factor = 0.5
+  res-ttl-days = 31
+  data-dir = /opt/kapa/data
+  #ad-url = ldaps://dc01.firma.local
+  #ad-domain = firma.local
+  #admin-user = vorname.nachname@firma.local
+
+secrets:
+  # Name eines vorhandenen Secrets mit ARIA_PASSWORD (+ optional SMTP_/BACKUP_).
+  # Name of an existing secret carrying ARIA_PASSWORD (+ optional SMTP_/BACKUP_).
+  existingSecret: ""
+  # NUR für Tests: Passwort direkt hier (landet im Release-Manifest!).
+  # For tests ONLY: password inline (ends up in the release manifest!).
+  ariaPassword: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []

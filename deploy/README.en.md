@@ -3,38 +3,32 @@
 > 🇩🇪 [Deutsche Fassung: README.md](README.md)
 
 The application is a single Python script (`aria_kapa.py`, standard library
-only, Python 3.8+). The same artifact can be delivered in several ways —
-choose by environment:
+only, Python 3.8+). It ships as a container — choose by environment:
 
 | Variant | When | Directory |
 |---|---|---|
-| **RPM** | RHEL/Alma/Rocky 9, one or more hosts, native package management with `dnf` upgrades | [`rpm/`](rpm/) |
-| **Ansible / AAP** | roll out and configure across a whole fleet, secrets from the vault | [`ansible/`](ansible/) |
-| **Docker / Podman** | test/dev environments or hosts with a container runtime (UBI9 image) | [`docker/`](docker/) |
+| **Docker / Podman** | single host with a container runtime (compose, UBI9 image) | [`docker/`](docker/) |
+| **Kubernetes** | cluster operation — plain manifests **or** Helm chart | [`kubernetes/`](kubernetes/) |
 
-The three paths complement each other: the **RPM** does the host-local
-installation (files, user, systemd unit), **Ansible/AAP** orchestrates the
-RPM across many hosts and manages the configuration, and the **container
-image** is meant for environments with Docker/Podman.
+Both use the same **GHCR image**
+(`ghcr.io/marcobockelbrink/kapa-dashboard`), built automatically on every
+release (amd64 + arm64).
+
+The **classic host installation** (systemd + nginx, no container) remains
+available via the templates under [`../config/`](../config/) — step by step
+in the comments of `config/kapa-dashboard.service`. SELinux note for nginx
+as proxy: `setsebool -P httpd_can_network_connect 1`.
+
+> History: the former **RPM** and **Ansible** variants were retired with
+> v2.10 (last included in
+> [v2.9.1](https://github.com/marcobockelbrink/vmware/releases/tag/v2.9.1)).
 
 ## Common foundations
 
-- **Configuration**: one INI file, `config/kapa.ini.example` (all non-secret
-  options; English twin: `config/kapa.ini.en.example`). Secrets (Aria/SMTP/
-  backup passwords) come via file (`--password-file`), environment variable
-  (`ARIA_PASSWORD` …) or — in the container — as a mounted secret.
-- **Data** lives under `data/` (or `/opt/kapa/data`) and must survive
-  updates. Restore guide: `config/RESTORE.en.md`.
-- **Reverse proxy**: the dashboard listens locally on `127.0.0.1:8080` and is
-  published via nginx at `/capa` (`config/nginx-kapa.conf`).
-
-## RHEL 9 note (SELinux)
-
-If nginx runs as a reverse proxy in front of the service, SELinux must allow
-outgoing connections from nginx — otherwise you get `502`:
-
-```bash
-sudo setsebool -P httpd_can_network_connect 1
-```
-
-The Ansible role sets this automatically.
+- **Configuration**: one INI file (`config/kapa.ini.en.example`) — all
+  non-secret options. Secrets (Aria/SMTP/backup passwords) as environment
+  variables or a Kubernetes secret; on classic hosts as `.pass` files.
+- **Data** lives under `/opt/kapa/data` (volume/PVC or `/var/lib/kapa`) and
+  must survive updates. Restore: `config/RESTORE.en.md`.
+- **TLS** terminates at the reverse proxy / ingress; the dashboard itself
+  speaks HTTP only. Monitoring via **`/healthz`** (no sign-in).

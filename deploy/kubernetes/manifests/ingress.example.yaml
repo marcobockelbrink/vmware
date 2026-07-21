@@ -1,0 +1,25 @@
+# Ingress-Beispiel (nginx-Ingress-Controller, eigener Hostname).
+# Ingress example (nginx ingress controller, dedicated hostname).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kapa-dashboard
+  annotations:
+    # Aria-Abrufe können dauern / Aria refreshes can take a while:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [kapa.firma.local]
+      secretName: kapa-dashboard-tls
+  rules:
+    - host: kapa.firma.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kapa-dashboard
+                port:
+                  name: http

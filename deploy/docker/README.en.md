@@ -6,9 +6,9 @@ For environments with a container runtime. The image is based on Red Hat
 `ubi9/ubi-minimal` and contains only `python3` plus the script — a few MB, no
 external dependencies. It runs as **non-root** (UID 1001).
 
-> Note: our RHEL 9 servers currently have no container runtime — there the
-> [RPM](../rpm/) is the right path. This image is meant for test/dev
-> environments or other hosts.
+> For cluster operation see [`../kubernetes/`](../kubernetes/) (manifests +
+> Helm chart); without a container runtime the classic installation via
+> `config/` (systemd + nginx) remains available.
 
 ## Ready-made image from GitHub Packages (GHCR)
 
