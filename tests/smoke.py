@@ -337,6 +337,25 @@ try:
         check("Anforderer ohne Hosts/VMs/Workload",
               "vms" not in anf[0] and "hosts" not in anf[0]
               and "workload" not in anf[0])
+        # Sichtbarkeits-Matrix: Reviewer Netzwerk aus + Hosts an -> Payload folgt
+        def put_vis(body):
+            r = urllib.request.Request(B2 + "/api/visibility",
+                data=json.dumps(body).encode(), method="PUT",
+                headers={"Content-Type": "application/json",
+                         "Cookie": "kapa_session=" + SESS_TOK})
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return json.loads(resp.read().decode())
+        v = put_vis({"reviewer": {"workload": True, "hosts": True, "vms": False,
+                                  "network": False, "storage": True,
+                                  "tags": True, "decided_by": True}})
+        rev2 = data_for(REV_TOK)
+        check("Matrix: Reviewer ohne Netzwerk, mit Hosts",
+              "portgroups" not in rev2[0] and "hosts" in rev2[0]
+              and "vms" not in rev2[0])
+        put_vis({})   # zurück auf Standard
+        rev3 = data_for(REV_TOK)
+        check("Matrix-Reset: Standard greift wieder",
+              "portgroups" in rev3[0] and "hosts" not in rev3[0])
     finally:
         proc2.terminate()
         try:

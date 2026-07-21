@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.10.1"
+VERSION = "2.11"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -41,6 +41,20 @@ NOTIFY_ROLE_EVENTS = {
     "auditor":    ("created", "rejected", "approved", "team_turn"),
     "reviewer":   ("team_turn", "reminder"),
 }
+# Sichtbarkeits-Matrix: WAS eine Rolle sieht (Admin sieht immer alles).
+# Bewusst nur Sichtbarkeit, keine Rechte — der Workflow bleibt hart verdrahtet.
+VIS_FEATURES = ("workload", "hosts", "vms", "network", "storage", "tags",
+                "decided_by")
+DEFAULT_VISIBILITY = {
+    "anforderer": {"workload": False, "hosts": False, "vms": False,
+                   "network": True, "storage": True, "tags": True,
+                   "decided_by": False},
+    "reviewer":   {"workload": True, "hosts": False, "vms": False,
+                   "network": True, "storage": True, "tags": True,
+                   "decided_by": True},
+    "auditor":    {f: True for f in VIS_FEATURES},
+}
+
 DEFAULT_NOTIFY = {
     "role": {
         "anforderer": {"created": False, "rejected": True,  "approved": True},
@@ -762,6 +776,7 @@ def sftp_backup(args):
                          getattr(args, "prefs_file", ""),
                          getattr(args, "announce_file", ""),
                          getattr(args, "autoapprove_file", ""),
+                         getattr(args, "visibility_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -2462,6 +2477,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
   <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Auto-Freigabe</span>
+  <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
@@ -2572,6 +2588,23 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <button class="btn approve" onclick="saveAutoApprove()">✓ Auto-Freigabe speichern</button>
 <span id="aaSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div><!-- admGrpAuto -->
+
+<div id="admGrpVis" style="display:none">
+<div class="sechead">Sichtbarkeit (was sieht welche Rolle)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:10px">
+  Haken = die Rolle sieht das Merkmal. Wirkt im UI <b>und</b> im Datenpaket
+  (serverseitig entfernt). Administratoren sehen immer alles. Hier geht es nur
+  um <b>Sichtbarkeit</b> — Rechte (Genehmigen, Verwaltung, Team-Sicht der
+  Anforderer) bleiben fest an den Rollen.</div>
+<div class="tablewrap" style="max-width:720px">
+<table class="kt" id="vistable">
+  <thead id="vishead"></thead>
+  <tbody id="visbody"></tbody>
+</table>
+</div>
+<button class="btn approve" style="margin-top:10px" onclick="saveVisibility()">✓ Sichtbarkeit speichern</button>
+<span id="visSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div><!-- admGrpVis -->
 
 <div id="admGrpTok" style="display:none">
 <div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
@@ -2781,6 +2814,7 @@ function renderClusterSelector() {
 
 // ---- Rollen ----
 const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
+const VIS = __VIS__;   // Sichtbarkeits-Flags der eigenen Rolle (Matrix in der Verwaltung)
 const IS_ADMIN = ROLE === "admin";
 const IS_REVIEWER = ROLE === "reviewer";
 const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
@@ -3296,7 +3330,7 @@ function card(c, idx, isTotal) {
       <div style="margin:6px 0 8px;font-size:12px;color:var(--muted)">${ds.length} Datastores / LUNs · Sortierung: ${dsLink("size")} · ${dsLink("util")}${ds.some(d => d.factor && d.factor !== 1) ? " · vSAN wird als nutzbare Kapazität gerechnet (Spiegelung)" : ""}</div>
       <table><tr><th>Datastore / LUN</th><th>Typ</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Storage-Daten aus Aria.</div>`;
-  const tagBlock = (c.tags || []).length ? `
+  const tagBlock = (VIS.tags && (c.tags || []).length) ? `
     <div class="tagbox">
       <h3>vSphere-Tags</h3>
       <div>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
@@ -3326,7 +3360,7 @@ function card(c, idx, isTotal) {
       <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
       ${(tz.cpu || tz.ram) ? `<div class="kpi">davon Tanzu-Namespaces<b>${fmt(tz.cpu)} vCPU / ${fmt(tz.ram)} GB</b></div>` : ""}
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
-      ${(c.workload != null && ROLE !== "anforderer") ? `<div class="kpi">Workload (vROps)<b style="color:${color(c.workload)}">${c.workload} %</b></div>` : ""}
+      ${(c.workload != null && VIS.workload) ? `<div class="kpi">Workload (vROps)<b style="color:${color(c.workload)}">${c.workload} %</b></div>` : ""}
     </div>
     ${(c.namespaces || []).length ? `
     <div class="resbox">
@@ -3384,15 +3418,13 @@ function card(c, idx, isTotal) {
     : `<div style="color:var(--muted);font-size:12px">Keine Portgruppen-Daten aus Aria.</div>`;
 
   // Gesamt-Karte hat keine Host-/VM-Listen
-  // Hosts-/VMs-Reiter nur für Admin und Technische Prüfung — Reviewer und
-  // Anforderer sehen die Infrastruktur-Listen nicht (Server strippt sie
-  // zusätzlich aus dem Payload, clusters_for).
-  const canInfra = ROLE !== "anforderer" && ROLE !== "reviewer";
-  const avail = isTotal ? [["cpu", "CPU & RAM"], ["storage", "Storage"]]
-    : [["cpu", "CPU & RAM"], ["storage", "Storage"],
-       ["net", "Netzwerk" + (nPg ? " (" + nPg + ")" : "")]].concat(canInfra
-      ? [["hosts", "Hosts (" + (c.hosts || []).length + ")"],
-         ["vms", "VMs (" + c.vmCount + ")"]] : []);
+  // Reiter nach Sichtbarkeits-Matrix (Verwaltung -> Sichtbarkeit); der
+  // Server strippt die Daten zusätzlich aus dem Payload (clusters_for).
+  const avail = [["cpu", "CPU & RAM"]]
+    .concat(VIS.storage ? [["storage", "Storage"]] : [])
+    .concat(!isTotal && VIS.network ? [["net", "Netzwerk" + (nPg ? " (" + nPg + ")" : "")]] : [])
+    .concat(!isTotal && VIS.hosts ? [["hosts", "Hosts (" + (c.hosts || []).length + ")"]] : [])
+    .concat(!isTotal && VIS.vms ? [["vms", "VMs (" + c.vmCount + ")"]] : []);
   const tab = avail.some(t => t[0] === CARD_TAB) ? CARD_TAB : "cpu";
   const tabBar = `<div class="tabs ctabs">${avail.map(([k, l]) =>
     `<span class="tab ${tab === k ? "active" : ""}" onclick="setCardTab('${k}')">${l}</span>`).join("")}</div>`;
@@ -3531,7 +3563,7 @@ function setView(v) {
       : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); }
   if (v === "log") loadLog();
   render();
 }
@@ -3901,6 +3933,46 @@ function saveAnnounce() {
       if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     }).catch(() => notify("Speichern der Ankündigung fehlgeschlagen."));
 }
+// ---- Sichtbarkeits-Matrix pflegen (Verwaltung -> Sichtbarkeit) ----
+let VIS_CFG = null;
+const VIS_LABELS = { workload: "Workload %", hosts: "Host-Liste",
+  vms: "VM-Liste", network: "Netzwerk & VLAN-Suche",
+  storage: "Storage-Drilldown (LUNs)", tags: "vSphere-Tags",
+  decided_by: "Entschieden von" };
+function loadVisibility() {
+  fetch("api/visibility").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.visibility) { VIS_CFG = d; if (VIEW === "adm") renderVisibility(); }
+  }).catch(() => {});
+}
+function renderVisibility() {
+  if (!VIS_CFG) return;
+  const roles = VIS_CFG.roles || [];
+  const feats = VIS_CFG.features || [];
+  document.getElementById("vishead").innerHTML =
+    `<tr><th>Merkmal</th>${roles.map(r =>
+      `<th class="num">${esc(ROLE_NAMES[r] || r)}</th>`).join("")}</tr>`;
+  document.getElementById("visbody").innerHTML = feats.map(f =>
+    `<tr><td>${esc(VIS_LABELS[f] || f)}</td>${roles.map(r =>
+      `<td class="num"><input type="checkbox" data-visrole="${esc(r)}" data-visfeat="${esc(f)}"
+         ${(VIS_CFG.visibility[r] || {})[f] ? "checked" : ""}></td>`).join("")}</tr>`).join("");
+}
+function saveVisibility() {
+  const body = {};
+  document.querySelectorAll("input[data-visrole]").forEach(cb => {
+    const r = cb.getAttribute("data-visrole"), f = cb.getAttribute("data-visfeat");
+    (body[r] = body[r] || {})[f] = cb.checked;
+  });
+  fetch("api/visibility", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      if (d && d.visibility) { VIS_CFG.visibility = d.visibility; renderVisibility(); }
+      const st = document.getElementById("visSaved");
+      if (st) { st.textContent = "✓ gespeichert – gilt beim nächsten Laden der Seite"; setTimeout(() => { if (st) st.textContent = ""; }, 4000); }
+    }).catch(() => notify("Speichern der Sichtbarkeit fehlgeschlagen."));
+}
+
 // ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
 let AA_CFG = null;
 function loadAutoApprove() {
@@ -3974,9 +4046,11 @@ let ADM_TAB = "users";
 function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
-                 ann: "atabAnn", auto: "atabAuto", tok: "atabTok", conf: "atabConf" };
+                 ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
+                 tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
-                 ann: "admGrpAnn", auto: "admGrpAuto", tok: "admGrpTok", conf: "admGrpConf" };
+                 ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
+                 tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -4187,7 +4261,7 @@ function renderResTable() {
   const appr = list.filter(r => r.approved && !r.cancelled);
   const cnt = document.getElementById("resCount");
   if (cnt) cnt.textContent = q.trim() ? list.length + " von " + own.length + " Anfragen" : own.length + " Anfragen";
-  const showDec = ROLE !== "anforderer";
+  const showDec = VIS.decided_by;
   const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
@@ -4299,7 +4373,7 @@ function render() {
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "arch") { renderArchiveTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderAutoApprove(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderAutoApprove(); renderVisibility(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -4416,10 +4490,11 @@ if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabLog").style.display = "none";
 if (HAS_BACKUP && SERVE) document.getElementById("backupSection").style.display = "";
-if (ROLE === "anforderer") {
+if (!VIS.decided_by) {
   const th = document.getElementById("thDec");
-  if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
+  if (th) th.remove();   // Rolle sieht nicht, wer entschieden hat (Matrix)
 }
+if (!VIS.network) document.getElementById("tabVlan").style.display = "none";
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
 const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0}, artable:{pin:0},
@@ -4855,6 +4930,22 @@ const I18N = {
 "✓ Auto-Freigabe speichern": "✓ Save auto-approval",
 "Speichern der Auto-Freigabe fehlgeschlagen.": "Saving the auto-approval failed.",
 "genehmigt (auto)": "approved (auto)",
+// --- Sichtbarkeits-Matrix ---
+"Sichtbarkeit": "Visibility",
+"Sichtbarkeit (was sieht welche Rolle)": "Visibility (what each role sees)",
+"Haken = die Rolle sieht das Merkmal. Wirkt im UI": "Check = the role sees the feature. Applies in the UI",
+"im Datenpaket (serverseitig entfernt). Administratoren sehen immer alles. Hier geht es nur um":
+  "in the data payload (stripped server-side). Administrators always see everything. This is only about",
+"— Rechte (Genehmigen, Verwaltung, Team-Sicht der Anforderer) bleiben fest an den Rollen.":
+  "— permissions (approving, administration, requesters' team view) stay fixed to the roles.",
+"Merkmal": "Feature",
+"Workload %": "Workload %", "Host-Liste": "Host list", "VM-Liste": "VM list",
+"Netzwerk & VLAN-Suche": "Network & VLAN search",
+"Storage-Drilldown (LUNs)": "Storage drill-down (LUNs)",
+"Entschieden von": "Decided by",
+"✓ Sichtbarkeit speichern": "✓ Save visibility",
+"✓ gespeichert – gilt beim nächsten Laden der Seite": "✓ saved – takes effect on next page load",
+"Speichern der Sichtbarkeit fehlgeschlagen.": "Saving the visibility failed.",
 "Schreibrechte": "Write permissions",
 "Ändern der Token-Rechte fehlgeschlagen.": "Changing the token permissions failed."
 };
@@ -5091,7 +5182,7 @@ def _html_escape(s):
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
                 contact="", selector=None, backup=False, notify=None, prefs=None,
-                announce=None, tanzu_mhz=2500):
+                announce=None, tanzu_mhz=2500, vis=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -5123,6 +5214,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__NOTIFY__", json_for_html(notify or DEFAULT_NOTIFY))
             .replace("__PREFS__", json_for_html(prefs or {}))
             .replace("__ANNOUNCE__", json_for_html(announce))
+            .replace("__VIS__", json_for_html(vis or {f: True for f in VIS_FEATURES}))
             .replace("__RESNOTE__", resnote)
             .replace("__FAILNOTE__", failnote)
             .replace("__VERSION__", VERSION)
@@ -5167,13 +5259,14 @@ def serve(args, password):
                    "notify": args.notify_file, "prefs": args.prefs_file,
                    "announce": args.announce_file,
                    "autoapprove": args.autoapprove_file,
-                   "sessions": args.sessions_file}
+                   "sessions": args.sessions_file,
+                   "visibility": args.visibility_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
         for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify",
-                   "prefs", "announce", "autoapprove"):
+                   "prefs", "announce", "autoapprove", "visibility"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
                 try:
@@ -5233,6 +5326,36 @@ def serve(args, password):
               file=sys.stderr)
     roles_lock = threading.Lock()
     VALID_ROLES = ("admin", "anforderer", "auditor", "reviewer")
+
+    # ---- Sichtbarkeits-Matrix (Verwaltung -> Sichtbarkeit) ----
+    VIS_ROLES = tuple(r for r in VALID_ROLES if r != "admin")
+    visibility_lock = threading.Lock()
+
+    def clean_visibility(raw):
+        raw = raw if isinstance(raw, dict) else {}
+        out = {}
+        for role in VIS_ROLES:
+            base = dict(DEFAULT_VISIBILITY.get(role)
+                        or {f: True for f in VIS_FEATURES})
+            got = raw.get(role) if isinstance(raw.get(role), dict) else {}
+            for f in VIS_FEATURES:
+                base[f] = bool(got.get(f, base.get(f, True)))
+            out[role] = base
+        return out
+
+    visibility_cfg = clean_visibility(store.load("visibility", None))
+
+    def save_visibility():
+        store.save("visibility", visibility_cfg)
+
+    def vis_for(role):
+        """Effektive Sichtbarkeits-Flags einer Rolle. Admin und der Betrieb
+        ohne Anmeldung sehen immer alles."""
+        if not role or role == "admin":
+            return {f: True for f in VIS_FEATURES}
+        with visibility_lock:
+            return dict(visibility_cfg.get(role)
+                        or {f: True for f in VIS_FEATURES})
 
     # Mehrstufiger Genehmigungsprozess: Team-Namen (in Prüfreihenfolge) werden
     # auf der Admin-Seite gepflegt und in data/kapa_teams.json abgelegt.
@@ -6172,40 +6295,52 @@ def serve(args, password):
         Empfänger-Mailadresse von_mail) – so wie sie an Clients gehen darf."""
         return {k: v for k, v in r.items() if k != "von_mail"}
 
+    # Sichtbarkeits-Merkmal -> Feld(er) im Cluster-Payload
+    _VIS_CLUSTER_KEYS = {"workload": "workload", "hosts": "hosts", "vms": "vms",
+                         "network": "portgroups", "storage": "datastores",
+                         "tags": "tags"}
+
     def clusters_for(role):
-        """Cluster-Daten je Rolle — Sperren gelten im Payload, nicht nur im UI:
-        Anforderer ohne Workload; Anforderer UND Reviewer ohne Host-/VM-Listen
-        (die Zählwerte hostCount/vmCount bleiben für die Übersicht drin)."""
+        """Cluster-Daten je Rolle nach der Sichtbarkeits-Matrix — Sperren
+        gelten im Payload, nicht nur im UI (Zählwerte hostCount/vmCount
+        bleiben immer für die Übersicht)."""
         cl = state["clusters"]
-        strip = set()
-        if role == "anforderer":
-            strip = {"workload", "hosts", "vms"}
-        elif role == "reviewer":
-            strip = {"hosts", "vms"}
+        vis = vis_for(role)
+        strip = {key for feat, key in _VIS_CLUSTER_KEYS.items()
+                 if not vis.get(feat, True)}
         if strip:
             return [{k: v for k, v in c.items() if k not in strip} for c in cl]
         return cl
 
+    def _strip_decided(d):
+        """„Entschieden von" entfernen: Namen der Entscheider und der
+        Freigebenden je Stufe (der Fortschritt selbst bleibt sichtbar)."""
+        d = {k: v for k, v in d.items()
+             if k not in ("approved_by", "rejected_by", "cancelled_by")}
+        if isinstance(d.get("approvals"), list):
+            d["approvals"] = [{"team": a.get("team"), "on": a.get("on")}
+                              for a in d["approvals"]]
+        return d
+
     def visible_res(s):
         """Sichtbare Reservierungen je Rolle: Admin, Auditor und Reviewer sehen
-        ALLE Anfragen. Nur Anforderer sind auf ihr eigenes Team beschränkt –
-        fremde genehmigte bleiben anonymisiert enthalten, damit die freie
-        Kapazität stimmt."""
+        ALLE Anfragen (Reviewer/Auditor je nach Sichtbarkeits-Matrix ohne die
+        Entscheider-Namen). Nur Anforderer sind auf ihr eigenes Team
+        beschränkt – fremde genehmigte bleiben anonymisiert enthalten, damit
+        die freie Kapazität stimmt."""
         if s["role"] in ("admin", "auditor", "reviewer"):
-            return [public_res(r) for r in reservations]
+            show_dec = vis_for(s["role"]).get("decided_by", True)
+            return [public_res(r) if show_dec else _strip_decided(public_res(r))
+                    for r in reservations]
+        show_dec = vis_for(s["role"]).get("decided_by", True)
         team = s.get("abteilung") or ""
         out = []
         for r in reservations:
             mine = (team and r.get("abteilung") == team) or r.get("von") == s["user"]
             if mine:
-                # Anforderer sehen nicht, WER entschieden hat – der Fortschritt
-                # (welches Team schon freigegeben hat) bleibt jedoch sichtbar,
-                # nur ohne Namen.
-                d = {k: v for k, v in r.items()
-                     if k not in ("approved_by", "rejected_by", "von_mail")}
-                if isinstance(d.get("approvals"), list):
-                    d["approvals"] = [{"team": a.get("team"), "on": a.get("on")}
-                                      for a in d["approvals"]]
+                d = {k: v for k, v in r.items() if k != "von_mail"}
+                if not show_dec:
+                    d = _strip_decided(d)
                 out.append(d)
             elif r.get("approved") and not r.get("cancelled"):
                 # bewusst ohne Name, von, Change, Kommentar; storniert zählt nicht
@@ -6587,7 +6722,8 @@ def serve(args, password):
                                        notify=notify_cfg,
                                        prefs=user_prefs(s["user"]) if s else {},
                                        announce=public_announce(),
-                                       tanzu_mhz=args.tanzu_mhz_per_vcpu),
+                                       tanzu_mhz=args.tanzu_mhz_per_vcpu,
+                                       vis=vis_for(userinfo["role"] if userinfo else None)),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 s = self._require()
@@ -6714,6 +6850,13 @@ def serve(args, password):
                     return
                 with autoapprove_lock:
                     self._json({"autoapprove": json.loads(json.dumps(autoapprove_cfg))})
+            elif route == "/api/visibility":
+                if not self._require("admin"):
+                    return
+                with visibility_lock:
+                    self._json({"visibility": json.loads(json.dumps(visibility_cfg)),
+                                "features": list(VIS_FEATURES),
+                                "roles": list(VIS_ROLES)})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -7288,6 +7431,25 @@ def serve(args, password):
                          if result["team_email"] else "")
                       + ("; Vorlage angepasst" if result.get("template_html") else ""))
                 self._json({"notify": result})
+            elif self.path == "/api/visibility":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, dict):
+                    self._json({"error": "Objekt mit Sichtbarkeits-Matrix erwartet"}, 400)
+                    return
+                clean = clean_visibility(body)
+                with visibility_lock:
+                    visibility_cfg.clear()
+                    visibility_cfg.update(clean)
+                    save_visibility()
+                    result = json.loads(json.dumps(visibility_cfg))
+                hidden = [f"{role}:{feat}" for role, flags in result.items()
+                          for feat, on in flags.items() if not on]
+                audit(s["user"], "Sichtbarkeit geändert",
+                      "ausgeblendet: " + (", ".join(sorted(hidden)) or "nichts"))
+                self._json({"visibility": result})
             elif self.path == "/api/autoapprove":
                 s = self._require("admin")
                 if not s:
@@ -7727,6 +7889,9 @@ def main():
                     help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
                          "(z. B. ein-/ausgeblendete Tabellenspalten; "
                          "Standard: data/kapa_prefs.json)")
+    ap.add_argument("--visibility-file", default="kapa_sichtbarkeit.json",
+                    help="Datei mit der Sichtbarkeits-Matrix je Rolle "
+                         "(Pflege über die Verwaltung)")
     ap.add_argument("--sessions-file", default="kapa_sessions.json",
                     help="Datei mit den aktiven Anmelde-Sitzungen (nur Hashes; "
                          "Sitzungen überleben so einen Dienst-Neustart)")
@@ -7766,6 +7931,7 @@ def main():
     args.announce_file = data_path(args.announce_file, base)
     args.autoapprove_file = data_path(args.autoapprove_file, base)
     args.sessions_file = data_path(args.sessions_file, base)
+    args.visibility_file = data_path(args.visibility_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

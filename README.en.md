@@ -75,7 +75,12 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
 **Administration (admin UI)**
-- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Auto-approval / API tokens / Backup & configuration**
+- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Auto-approval / Visibility / API tokens / Backup & configuration**
+- **Visibility matrix**: per role (except admin), checkboxes control which
+  features it sees — workload, host/VM lists, network & VLAN search, storage
+  drill-down, vSphere tags, "decided by". Applies in the UI **and**
+  server-side in the payload; permissions (approving, administration, team
+  view) stay fixed to the roles
 - **Announcement popup**: admins publish an announcement on demand (title +
   text, activatable) — every user sees it **once** after sign-in ("Got it"
   marker per user); changing the text shows it to everyone again. Ideal for
@@ -450,8 +455,8 @@ python3 aria_kapa.py --url https://aria-ops.example.com --user svc-aria --serve 
 
 | Role | Permissions |
 |---|---|
-| **Requester** | Submit capacity requests; withdraw own still-open requests; sees only requests of the **own team**, not who decided; no host/VM lists, no workload |
-| **Reviewer** | Member of an approval team; approves or rejects requests **when their team is up** ("Approvals" tab); sees all requests but no administration/log and no host/VM lists |
+| **Requester** | Submit capacity requests; withdraw own still-open requests; sees only requests of the **own team**, not who decided; no host/VM lists, no workload (default — adjustable via the visibility matrix) |
+| **Reviewer** | Member of an approval team; approves or rejects requests **when their team is up** ("Approvals" tab); sees all requests but no administration/log and no host/VM lists (default — adjustable via the visibility matrix) |
 | **Administrator** | Approve/reject at any stage (with comment), refresh Aria data, manage all reservations, import, manage roles/teams ("Administration" tab); sees everything |
 | **Auditor** | View all data and pages — no changes possible |
 

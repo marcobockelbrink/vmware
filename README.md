@@ -74,7 +74,12 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
 **Verwaltung (Admin-UI)**
-- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / Auto-Freigabe / API-Tokens / Backup & Konfiguration**
+- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / Auto-Freigabe / Sichtbarkeit / API-Tokens / Backup & Konfiguration**
+- **Sichtbarkeits-Matrix**: je Rolle (außer Admin) per Haken einstellbar, welche
+  Merkmale sie sieht — Workload, Host-/VM-Listen, Netzwerk & VLAN-Suche,
+  Storage-Drilldown, vSphere-Tags, „Entschieden von". Wirkt im UI **und**
+  serverseitig im Datenpaket; Rechte (Genehmigen, Verwaltung, Team-Sicht)
+  bleiben fest an den Rollen
 - **Ankündigungs-Popup**: Admins veröffentlichen bei Bedarf eine Ankündigung
   (Titel + Text, aktivierbar) — jeder Benutzer sieht sie **einmal** nach der
   Anmeldung („Verstanden"-Merker je Benutzer); Textänderung zeigt sie allen
@@ -474,8 +479,8 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
 
 | Rolle | Rechte |
 |---|---|
-| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung**, nicht wer entschieden hat; keine Host-/VM-Listen, kein Workload |
-| **Reviewer** | Mitglied eines Genehmigungsteams; gibt Anträge frei bzw. lehnt sie ab, **wenn das eigene Team an der Reihe ist** (Tab „Genehmigungen"); sieht alle Anträge, aber keine Verwaltung/Log und keine Host-/VM-Listen |
+| **Anforderer** | Kapazitätsanfragen stellen; eigene, noch offene Anträge zurückziehen; sieht nur Anfragen der **eigenen Abteilung**, nicht wer entschieden hat; keine Host-/VM-Listen, kein Workload (Standard — per Sichtbarkeits-Matrix anpassbar) |
+| **Reviewer** | Mitglied eines Genehmigungsteams; gibt Anträge frei bzw. lehnt sie ab, **wenn das eigene Team an der Reihe ist** (Tab „Genehmigungen"); sieht alle Anträge, aber keine Verwaltung/Log und keine Host-/VM-Listen (Standard — per Sichtbarkeits-Matrix anpassbar) |
 | **Administrator** | Anträge in jeder Stufe genehmigen/ablehnen (mit Kommentar), Daten aus Aria aktualisieren, alle Reservierungen verwalten, Import, Rollen/Teams pflegen (Tab „Verwaltung"); sieht alles |
 | **Technische Prüfung** | Alle Daten und Seiten einsehen — keinerlei Änderungen möglich |
 

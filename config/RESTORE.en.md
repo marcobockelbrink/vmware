@@ -16,6 +16,7 @@ The SFTP backups contain all runtime data of the dashboard as `tar.gz`:
 | `kapa_prefs.json` | personal UI settings per user (table columns, "announcement seen") | no (convenience) |
 | `kapa_ankuendigung.json` | announcement popup (title/text/active) | no (convenience) |
 | `kapa_autofreigabe.json` | auto-approval (thresholds + team hooks) | yes |
+| `kapa_sichtbarkeit.json` | visibility matrix per role | yes |
 | `kapa.db` (+ `-wal`/`-shm`) | with `storage = sqlite`: all collections above in one DB | **yes** (instead of the JSONs) |
 | `kapa_log.jsonl` | audit log | yes (traceability) |
 | `kapa_cache.json` | last Aria data fetch | no (fetched again) |

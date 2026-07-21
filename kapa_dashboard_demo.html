@@ -173,7 +173,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <div class="sub">
   <button class="btn" onclick="showInfo('infoCalc','Info Kapa-Berechnung')">ℹ Info Kapa-Berechnung</button>
   <button class="btn" onclick="showInfo('infoHelp','Hilfe')">? Hilfe</button>
-  <span style="color:var(--muted);font-size:12px;margin-left:8px">Stand: <span id="stand">21.07.2026 14:07</span></span>
+  <span style="color:var(--muted);font-size:12px;margin-left:8px">Stand: <span id="stand">21.07.2026 14:21</span></span>
 </div>
 <div id="infoCalc" style="display:none">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor 6 (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen · Ausfallreserve (N+1): größter Host je Cluster abgezogen</div>
 <div id="infoHelp" style="display:none">Klick auf den Clusternamen zeigt Details und Reservierungen. Neue Reservierungen gelten ab dem Anlagetag für 30 Tage, zählen erst nach Genehmigung gegen die Kapazität und werden nach 31 Tagen automatisch entfernt. Speicherung lokal im Browser.</div>
@@ -354,6 +354,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
   <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Auto-Freigabe</span>
+  <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
@@ -465,6 +466,23 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <span id="aaSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div><!-- admGrpAuto -->
 
+<div id="admGrpVis" style="display:none">
+<div class="sechead">Sichtbarkeit (was sieht welche Rolle)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:10px">
+  Haken = die Rolle sieht das Merkmal. Wirkt im UI <b>und</b> im Datenpaket
+  (serverseitig entfernt). Administratoren sehen immer alles. Hier geht es nur
+  um <b>Sichtbarkeit</b> — Rechte (Genehmigen, Verwaltung, Team-Sicht der
+  Anforderer) bleiben fest an den Rollen.</div>
+<div class="tablewrap" style="max-width:720px">
+<table class="kt" id="vistable">
+  <thead id="vishead"></thead>
+  <tbody id="visbody"></tbody>
+</table>
+</div>
+<button class="btn approve" style="margin-top:10px" onclick="saveVisibility()">✓ Sichtbarkeit speichern</button>
+<span id="visSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div><!-- admGrpVis -->
+
 <div id="admGrpTok" style="display:none">
 <div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
@@ -569,7 +587,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div>
 </div>
 <div class="hovercard" id="hovercard"></div>
-<div class="foot">VMware Kapazitätsplanung · Version 2.10.1</div>
+<div class="foot">VMware Kapazitätsplanung · Version 2.11</div>
 <script>
 let CLUSTERS = [{"name": "Cluster-01", "hostCount": 3, "cores": 64, "spareCores": 48, "spareRamGb": 1024, "vcpuCap": 384, "vcpuUsed": 370, "vcpuFree": 14, "ramCap": 1024, "ramUsed": 1504, "ramFree": -480, "storageCap": 42000.0, "storageUsed": 24056.0, "storageFree": 17944.0, "datastores": [{"name": "vsan-cl1", "type": "vSAN", "cap_gb": 20000.0, "used_gb": 12228.0, "raw_cap_gb": 40000.0, "factor": 0.5}, {"name": "FC-LUN-102", "type": "VMFS", "cap_gb": 8000.0, "used_gb": 3966.0, "raw_cap_gb": 8000.0, "factor": 1.0}, {"name": "FC-LUN-105", "type": "VMFS", "cap_gb": 8000.0, "used_gb": 3732.0, "raw_cap_gb": 8000.0, "factor": 1.0}, {"name": "FC-LUN-101", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1305.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-103", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1660.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-104", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1165.0, "raw_cap_gb": 2000.0, "factor": 1.0}], "vmCount": 52, "vmOff": 5, "tags": ["Standort: RZ-Nord", "Umgebung: Test", "Betreuung: Team Betrieb", "Kapa_Filter: Nein"], "portgroups": [{"name": "dvSwitch-Cluster-01-DVUplinks", "vlan": "0-4094"}, {"name": "PG-Backup-10.1.20.0_24-VLAN100", "vlan": "100"}, {"name": "PG-Backup-10.1.22.0_24-VLAN102", "vlan": "102"}, {"name": "PG-DMZ-10.1.21.0_24-VLAN101", "vlan": "101"}, {"name": "PG-Prod-10.1.23.0_24-VLAN103", "vlan": "103"}, {"name": "PG-Test-10.1.24.0_24-VLAN104", "vlan": "104"}], "workload": 52, "source": "RZ-Nord", "namespaces": [{"name": "ns-webshop-prod", "cpu_mhz": 20000, "vcpu": 8, "ram_gb": 96.0}, {"name": "ns-ci-runner", "cpu_mhz": 8000, "vcpu": 4, "ram_gb": 32.0}], "tanzuVcpu": 12, "tanzuRamGb": 128.0, "hosts": [{"name": "esx101.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx102.firma.local", "cores": 48, "ram_gb": 512}, {"name": "esx103.firma.local", "cores": 32, "ram_gb": 512}], "vms": [{"name": "vm-1001", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-1002", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-1003", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1004", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-1005", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1006", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1007", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1008", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1009", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-1010", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1011", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1012", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1013", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1014", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1015", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1016", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1017", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1018", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-1019", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1021", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-1022", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1023", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-1024", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-1025", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1026", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1027", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-1028", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1029", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-1030", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-1031", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1032", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1033", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1034", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1035", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1036", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1037", "vcpu": 8, "ram_gb": 64, "on": false}, {"name": "vm-1038", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1039", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1040", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-1041", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-1042", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-1043", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-1044", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1045", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-1046", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-1047", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-1048", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1049", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1050", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-1051", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-1052", "vcpu": 4, "ram_gb": 64, "on": true}]}, {"name": "Cluster-02", "hostCount": 3, "cores": 80, "spareCores": 64, "spareRamGb": 1024, "vcpuCap": 480, "vcpuUsed": 414, "vcpuFree": 66, "ramCap": 1536, "ramUsed": 1848, "ramFree": -312, "storageCap": 34000.0, "storageUsed": 20414.0, "storageFree": 13586.0, "datastores": [{"name": "vsan-cl2", "type": "vSAN", "cap_gb": 20000.0, "used_gb": 10846.0, "raw_cap_gb": 40000.0, "factor": 0.5}, {"name": "FC-LUN-202", "type": "VMFS", "cap_gb": 4000.0, "used_gb": 3317.0, "raw_cap_gb": 4000.0, "factor": 1.0}, {"name": "FC-LUN-205", "type": "VMFS", "cap_gb": 4000.0, "used_gb": 2277.0, "raw_cap_gb": 4000.0, "factor": 1.0}, {"name": "FC-LUN-201", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1603.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-203", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 945.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-204", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1426.0, "raw_cap_gb": 2000.0, "factor": 1.0}], "vmCount": 67, "vmOff": 11, "tags": ["Standort: RZ-Sued", "Umgebung: Produktion", "Betreuung: Team Betrieb", "Kapa_Filter: Nein"], "portgroups": [{"name": "dvSwitch-Cluster-02-DVUplinks", "vlan": "0-4094"}, {"name": "PG-Backup-10.2.31.0_24-VLAN201", "vlan": "201"}, {"name": "PG-DMZ-10.2.30.0_24-VLAN200", "vlan": "200"}, {"name": "PG-DMZ-10.2.32.0_24-VLAN202", "vlan": "202"}, {"name": "PG-Mgmt-10.2.33.0_24-VLAN203", "vlan": "203"}, {"name": "PG-Prod-10.2.34.0_24-VLAN204", "vlan": "204"}], "workload": 38, "source": "RZ-Nord", "namespaces": [], "tanzuVcpu": 0, "tanzuRamGb": 0, "hosts": [{"name": "esx201.firma.local", "cores": 48, "ram_gb": 512}, {"name": "esx202.firma.local", "cores": 64, "ram_gb": 1024}, {"name": "esx203.firma.local", "cores": 32, "ram_gb": 1024}], "vms": [{"name": "vm-2001", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2002", "vcpu": 2, "ram_gb": 16, "on": false}, {"name": "vm-2003", "vcpu": 2, "ram_gb": 16, "on": false}, {"name": "vm-2004", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2005", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2006", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2007", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2008", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2009", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2010", "vcpu": 2, "ram_gb": 8, "on": false}, {"name": "vm-2011", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2012", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2013", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-2014", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2015", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-2016", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2017", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2018", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2019", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2020", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2021", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2022", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2023", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2024", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2025", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2026", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2027", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2028", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2029", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2030", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2031", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2032", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2033", "vcpu": 2, "ram_gb": 64, "on": false}, {"name": "vm-2034", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-2035", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2036", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2037", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2038", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-2039", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2040", "vcpu": 8, "ram_gb": 8, "on": false}, {"name": "vm-2041", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2042", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2043", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2044", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2045", "vcpu": 16, "ram_gb": 64, "on": false}, {"name": "vm-2046", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-2047", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-2048", "vcpu": 2, "ram_gb": 64, "on": true}, {"name": "vm-2049", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2050", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2051", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2052", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-2053", "vcpu": 4, "ram_gb": 8, "on": false}, {"name": "vm-2054", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2055", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2056", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-2057", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2058", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2059", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-2060", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-2061", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2062", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-2063", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-2064", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-2065", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-2066", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-2067", "vcpu": 8, "ram_gb": 16, "on": true}]}, {"name": "Cluster-03", "hostCount": 5, "cores": 160, "spareCores": 64, "spareRamGb": 1024, "vcpuCap": 960, "vcpuUsed": 688, "vcpuFree": 272, "ramCap": 3072, "ramUsed": 2640, "ramFree": 432, "storageCap": 64000.0, "storageUsed": 34885.0, "storageFree": 29115.0, "datastores": [{"name": "vsan-cl3", "type": "vSAN", "cap_gb": 40000.0, "used_gb": 22941.0, "raw_cap_gb": 80000.0, "factor": 0.5}, {"name": "FC-LUN-302", "type": "VMFS", "cap_gb": 8000.0, "used_gb": 3857.0, "raw_cap_gb": 8000.0, "factor": 1.0}, {"name": "FC-LUN-306", "type": "VMFS", "cap_gb": 8000.0, "used_gb": 2876.0, "raw_cap_gb": 8000.0, "factor": 1.0}, {"name": "FC-LUN-301", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1311.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-303", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1224.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-304", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1483.0, "raw_cap_gb": 2000.0, "factor": 1.0}, {"name": "FC-LUN-305", "type": "VMFS", "cap_gb": 2000.0, "used_gb": 1193.0, "raw_cap_gb": 2000.0, "factor": 1.0}], "vmCount": 94, "vmOff": 9, "tags": ["Standort: RZ-Sued", "Umgebung: Produktion", "Betreuung: Team Betrieb", "Kapa_Filter: Nein"], "portgroups": [{"name": "dvSwitch-Cluster-03-DVUplinks", "vlan": "0-4094"}, {"name": "PG-Backup-10.3.43.0_24-VLAN303", "vlan": "303"}, {"name": "PG-DMZ-10.3.41.0_24-VLAN301", "vlan": "301"}, {"name": "PG-Mgmt-10.3.40.0_24-VLAN300", "vlan": "300"}, {"name": "PG-Mgmt-10.3.42.0_24-VLAN302", "vlan": "302"}], "workload": 83, "source": "RZ-Sued", "namespaces": [{"name": "ns-data-analytics", "cpu_mhz": 12000, "vcpu": 5, "ram_gb": 64.0}], "tanzuVcpu": 5, "tanzuRamGb": 64.0, "hosts": [{"name": "esx301.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx302.firma.local", "cores": 48, "ram_gb": 512}, {"name": "esx303.firma.local", "cores": 32, "ram_gb": 1024}, {"name": "esx304.firma.local", "cores": 48, "ram_gb": 768}, {"name": "esx305.firma.local", "cores": 64, "ram_gb": 768}], "vms": [{"name": "vm-3001", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3002", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3003", "vcpu": 16, "ram_gb": 32, "on": false}, {"name": "vm-3004", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3005", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3006", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-3007", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3008", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3009", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3010", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3011", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3012", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3013", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3014", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3015", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3016", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3017", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-3018", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3019", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3020", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3021", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3022", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3023", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3024", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3025", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3026", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3027", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3028", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3029", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3030", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3031", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3032", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3033", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3034", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3035", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3036", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3037", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3038", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3039", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3040", "vcpu": 4, "ram_gb": 32, "on": false}, {"name": "vm-3041", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3042", "vcpu": 4, "ram_gb": 64, "on": false}, {"name": "vm-3043", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3044", "vcpu": 4, "ram_gb": 16, "on": false}, {"name": "vm-3045", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3046", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3047", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3048", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3049", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3050", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3051", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3052", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3053", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3054", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3055", "vcpu": 16, "ram_gb": 32, "on": true}, {"name": "vm-3056", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3057", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3058", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3059", "vcpu": 2, "ram_gb": 32, "on": true}, {"name": "vm-3060", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3061", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3062", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3063", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3064", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3065", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3066", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3067", "vcpu": 2, "ram_gb": 8, "on": true}, {"name": "vm-3068", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3069", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3070", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3071", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3072", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3073", "vcpu": 16, "ram_gb": 8, "on": true}, {"name": "vm-3074", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3075", "vcpu": 2, "ram_gb": 16, "on": true}, {"name": "vm-3076", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3077", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-3078", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-3079", "vcpu": 4, "ram_gb": 64, "on": true}, {"name": "vm-3080", "vcpu": 8, "ram_gb": 8, "on": true}, {"name": "vm-3081", "vcpu": 8, "ram_gb": 16, "on": false}, {"name": "vm-3082", "vcpu": 16, "ram_gb": 16, "on": false}, {"name": "vm-3083", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3084", "vcpu": 4, "ram_gb": 32, "on": true}, {"name": "vm-3085", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3086", "vcpu": 16, "ram_gb": 16, "on": true}, {"name": "vm-3087", "vcpu": 8, "ram_gb": 32, "on": true}, {"name": "vm-3088", "vcpu": 16, "ram_gb": 64, "on": true}, {"name": "vm-3089", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-3090", "vcpu": 8, "ram_gb": 16, "on": true}, {"name": "vm-3091", "vcpu": 8, "ram_gb": 64, "on": true}, {"name": "vm-3092", "vcpu": 4, "ram_gb": 8, "on": true}, {"name": "vm-3093", "vcpu": 4, "ram_gb": 16, "on": true}, {"name": "vm-3094", "vcpu": 4, "ram_gb": 16, "on": true}]}];
 const FACTOR = 6;
@@ -673,6 +691,7 @@ function renderClusterSelector() {
 
 // ---- Rollen ----
 const ROLE = ME ? ME.role : "admin";          // ohne AD-Anmeldung: Vollzugriff
+const VIS = {"workload": true, "hosts": true, "vms": true, "network": true, "storage": true, "tags": true, "decided_by": true};   // Sichtbarkeits-Flags der eigenen Rolle (Matrix in der Verwaltung)
 const IS_ADMIN = ROLE === "admin";
 const IS_REVIEWER = ROLE === "reviewer";
 const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
@@ -1188,7 +1207,7 @@ function card(c, idx, isTotal) {
       <div style="margin:6px 0 8px;font-size:12px;color:var(--muted)">${ds.length} Datastores / LUNs · Sortierung: ${dsLink("size")} · ${dsLink("util")}${ds.some(d => d.factor && d.factor !== 1) ? " · vSAN wird als nutzbare Kapazität gerechnet (Spiegelung)" : ""}</div>
       <table><tr><th>Datastore / LUN</th><th>Typ</th><th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th><th class="num">Belegt %</th><th class="num">Frei (GB)</th></tr>${dsRows}</table>`
     : `<div style="color:var(--muted);font-size:12px">Keine Storage-Daten aus Aria.</div>`;
-  const tagBlock = (c.tags || []).length ? `
+  const tagBlock = (VIS.tags && (c.tags || []).length) ? `
     <div class="tagbox">
       <h3>vSphere-Tags</h3>
       <div>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
@@ -1218,7 +1237,7 @@ function card(c, idx, isTotal) {
       <div class="kpi">reserviert<b>${fmt(rvCpu)} vCPU / ${fmt(rvRam)} GB</b></div>
       ${(tz.cpu || tz.ram) ? `<div class="kpi">davon Tanzu-Namespaces<b>${fmt(tz.cpu)} vCPU / ${fmt(tz.ram)} GB</b></div>` : ""}
       <div class="kpi">Ø VM<b>${c.vmCount?Math.round(c.vcpuUsed/c.vmCount*10)/10:0} vCPU / ${c.vmCount?Math.round(c.ramUsed/c.vmCount):0} GB</b></div>
-      ${(c.workload != null && ROLE !== "anforderer") ? `<div class="kpi">Workload (vROps)<b style="color:${color(c.workload)}">${c.workload} %</b></div>` : ""}
+      ${(c.workload != null && VIS.workload) ? `<div class="kpi">Workload (vROps)<b style="color:${color(c.workload)}">${c.workload} %</b></div>` : ""}
     </div>
     ${(c.namespaces || []).length ? `
     <div class="resbox">
@@ -1276,15 +1295,13 @@ function card(c, idx, isTotal) {
     : `<div style="color:var(--muted);font-size:12px">Keine Portgruppen-Daten aus Aria.</div>`;
 
   // Gesamt-Karte hat keine Host-/VM-Listen
-  // Hosts-/VMs-Reiter nur für Admin und Technische Prüfung — Reviewer und
-  // Anforderer sehen die Infrastruktur-Listen nicht (Server strippt sie
-  // zusätzlich aus dem Payload, clusters_for).
-  const canInfra = ROLE !== "anforderer" && ROLE !== "reviewer";
-  const avail = isTotal ? [["cpu", "CPU & RAM"], ["storage", "Storage"]]
-    : [["cpu", "CPU & RAM"], ["storage", "Storage"],
-       ["net", "Netzwerk" + (nPg ? " (" + nPg + ")" : "")]].concat(canInfra
-      ? [["hosts", "Hosts (" + (c.hosts || []).length + ")"],
-         ["vms", "VMs (" + c.vmCount + ")"]] : []);
+  // Reiter nach Sichtbarkeits-Matrix (Verwaltung -> Sichtbarkeit); der
+  // Server strippt die Daten zusätzlich aus dem Payload (clusters_for).
+  const avail = [["cpu", "CPU & RAM"]]
+    .concat(VIS.storage ? [["storage", "Storage"]] : [])
+    .concat(!isTotal && VIS.network ? [["net", "Netzwerk" + (nPg ? " (" + nPg + ")" : "")]] : [])
+    .concat(!isTotal && VIS.hosts ? [["hosts", "Hosts (" + (c.hosts || []).length + ")"]] : [])
+    .concat(!isTotal && VIS.vms ? [["vms", "VMs (" + c.vmCount + ")"]] : []);
   const tab = avail.some(t => t[0] === CARD_TAB) ? CARD_TAB : "cpu";
   const tabBar = `<div class="tabs ctabs">${avail.map(([k, l]) =>
     `<span class="tab ${tab === k ? "active" : ""}" onclick="setCardTab('${k}')">${l}</span>`).join("")}</div>`;
@@ -1423,7 +1440,7 @@ function setView(v) {
       : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); }
   if (v === "log") loadLog();
   render();
 }
@@ -1793,6 +1810,46 @@ function saveAnnounce() {
       if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     }).catch(() => notify("Speichern der Ankündigung fehlgeschlagen."));
 }
+// ---- Sichtbarkeits-Matrix pflegen (Verwaltung -> Sichtbarkeit) ----
+let VIS_CFG = null;
+const VIS_LABELS = { workload: "Workload %", hosts: "Host-Liste",
+  vms: "VM-Liste", network: "Netzwerk & VLAN-Suche",
+  storage: "Storage-Drilldown (LUNs)", tags: "vSphere-Tags",
+  decided_by: "Entschieden von" };
+function loadVisibility() {
+  fetch("api/visibility").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.visibility) { VIS_CFG = d; if (VIEW === "adm") renderVisibility(); }
+  }).catch(() => {});
+}
+function renderVisibility() {
+  if (!VIS_CFG) return;
+  const roles = VIS_CFG.roles || [];
+  const feats = VIS_CFG.features || [];
+  document.getElementById("vishead").innerHTML =
+    `<tr><th>Merkmal</th>${roles.map(r =>
+      `<th class="num">${esc(ROLE_NAMES[r] || r)}</th>`).join("")}</tr>`;
+  document.getElementById("visbody").innerHTML = feats.map(f =>
+    `<tr><td>${esc(VIS_LABELS[f] || f)}</td>${roles.map(r =>
+      `<td class="num"><input type="checkbox" data-visrole="${esc(r)}" data-visfeat="${esc(f)}"
+         ${(VIS_CFG.visibility[r] || {})[f] ? "checked" : ""}></td>`).join("")}</tr>`).join("");
+}
+function saveVisibility() {
+  const body = {};
+  document.querySelectorAll("input[data-visrole]").forEach(cb => {
+    const r = cb.getAttribute("data-visrole"), f = cb.getAttribute("data-visfeat");
+    (body[r] = body[r] || {})[f] = cb.checked;
+  });
+  fetch("api/visibility", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      if (d && d.visibility) { VIS_CFG.visibility = d.visibility; renderVisibility(); }
+      const st = document.getElementById("visSaved");
+      if (st) { st.textContent = "✓ gespeichert – gilt beim nächsten Laden der Seite"; setTimeout(() => { if (st) st.textContent = ""; }, 4000); }
+    }).catch(() => notify("Speichern der Sichtbarkeit fehlgeschlagen."));
+}
+
 // ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
 let AA_CFG = null;
 function loadAutoApprove() {
@@ -1866,9 +1923,11 @@ let ADM_TAB = "users";
 function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
-                 ann: "atabAnn", auto: "atabAuto", tok: "atabTok", conf: "atabConf" };
+                 ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
+                 tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
-                 ann: "admGrpAnn", auto: "admGrpAuto", tok: "admGrpTok", conf: "admGrpConf" };
+                 ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
+                 tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -2079,7 +2138,7 @@ function renderResTable() {
   const appr = list.filter(r => r.approved && !r.cancelled);
   const cnt = document.getElementById("resCount");
   if (cnt) cnt.textContent = q.trim() ? list.length + " von " + own.length + " Anfragen" : own.length + " Anfragen";
-  const showDec = ROLE !== "anforderer";
+  const showDec = VIS.decided_by;
   const nCols = showDec ? 15 : 14;
   const rows = list.map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
@@ -2191,7 +2250,7 @@ function render() {
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "arch") { renderArchiveTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderAutoApprove(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderAutoApprove(); renderVisibility(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -2308,10 +2367,11 @@ if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabLog").style.display = "none";
 if (HAS_BACKUP && SERVE) document.getElementById("backupSection").style.display = "";
-if (ROLE === "anforderer") {
+if (!VIS.decided_by) {
   const th = document.getElementById("thDec");
-  if (th) th.remove();   // Anforderer sehen nicht, wer entschieden hat
+  if (th) th.remove();   // Rolle sieht nicht, wer entschieden hat (Matrix)
 }
+if (!VIS.network) document.getElementById("tabVlan").style.display = "none";
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
 const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0}, artable:{pin:0},
@@ -2747,6 +2807,22 @@ const I18N = {
 "✓ Auto-Freigabe speichern": "✓ Save auto-approval",
 "Speichern der Auto-Freigabe fehlgeschlagen.": "Saving the auto-approval failed.",
 "genehmigt (auto)": "approved (auto)",
+// --- Sichtbarkeits-Matrix ---
+"Sichtbarkeit": "Visibility",
+"Sichtbarkeit (was sieht welche Rolle)": "Visibility (what each role sees)",
+"Haken = die Rolle sieht das Merkmal. Wirkt im UI": "Check = the role sees the feature. Applies in the UI",
+"im Datenpaket (serverseitig entfernt). Administratoren sehen immer alles. Hier geht es nur um":
+  "in the data payload (stripped server-side). Administrators always see everything. This is only about",
+"— Rechte (Genehmigen, Verwaltung, Team-Sicht der Anforderer) bleiben fest an den Rollen.":
+  "— permissions (approving, administration, requesters' team view) stay fixed to the roles.",
+"Merkmal": "Feature",
+"Workload %": "Workload %", "Host-Liste": "Host list", "VM-Liste": "VM list",
+"Netzwerk & VLAN-Suche": "Network & VLAN search",
+"Storage-Drilldown (LUNs)": "Storage drill-down (LUNs)",
+"Entschieden von": "Decided by",
+"✓ Sichtbarkeit speichern": "✓ Save visibility",
+"✓ gespeichert – gilt beim nächsten Laden der Seite": "✓ saved – takes effect on next page load",
+"Speichern der Sichtbarkeit fehlgeschlagen.": "Saving the visibility failed.",
 "Schreibrechte": "Write permissions",
 "Ändern der Token-Rechte fehlgeschlagen.": "Changing the token permissions failed."
 };
