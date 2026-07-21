@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.15"
+VERSION = "2.15.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -5089,6 +5089,61 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Audit-Log: Standard-Aktionen (Aktion-Spalte)
+  "Aria-Abruf beendet": "Fetch from Aria finished",
+  "Aria-Abruf fehlgeschlagen": "Fetch from Aria failed",
+  "Antrag erstellt": "Request created",
+  "Antrag erstellt (API)": "Request created (API)",
+  "Antrag automatisch freigegeben": "Request auto-approved",
+  "Auto-Freigabe nicht angewendet": "Auto-approval not applied",
+  "Erinnerung gesendet": "Reminder sent",
+  "Automatisches Backup": "Automatic backup",
+  "Automatisches Backup fehlgeschlagen": "Automatic backup failed",
+  "Backup-Rotation": "Backup rotation",
+  "Backup-Rotation fehlgeschlagen": "Backup rotation failed",
+  "Backup ausgelöst": "Backup triggered",
+  "Backup fehlgeschlagen": "Backup failed",
+  "API-Zugriff abgewiesen": "API access denied",
+  "API-Schreibzugriff abgewiesen": "API write access denied",
+  "Storage-Erweiterung angefragt": "Storage expansion requested",
+  "Storage-Erweiterung erledigt (API)": "Storage expansion completed (API)",
+  "Storage-Erweiterung erledigt": "Storage expansion completed",
+  "Storage-Erweiterung wieder offen": "Storage expansion reopened",
+  "Anmeldung fehlgeschlagen": "Login failed",
+  "Anmeldung gesperrt": "Login blocked",
+  "Anmeldung": "Login",
+  "Abmeldung": "Logout",
+  "Datenabruf aus Aria gestartet": "Data fetch from Aria started",
+  "API-Token erstellt": "API token created",
+  "Team umbenannt": "Team renamed",
+  "Reservierungen importiert": "Reservations imported",
+  "Genehmigungs-Teams geändert": "Approval teams changed",
+  "Cluster-Selektor geändert": "Cluster selector changed",
+  "Rollen-Bezeichnungen geändert": "Role labels changed",
+  "Mail-Regeln geändert": "Mail rules changed",
+  "Sichtbarkeit geändert": "Visibility changed",
+  "Storage-Einstellungen": "Storage settings",
+  "Auto-Freigabe geändert": "Auto-approval changed",
+  "Ankündigung geändert": "Announcement changed",
+  "API-Token-Rechte geändert": "API token permissions changed",
+  "API-Token widerrufen": "API token revoked",
+  "Rolle entfernt": "Role removed",
+  "Rolle zugewiesen": "Role assigned",
+  "AD-Gruppe zugewiesen": "AD group assigned",
+  // Ganz-Satz-Hints (mit Inline-<b>/<code>, per i18nFlatten übersetzt)
+  "Wird nur lokal im Browser gespeichert und bei „Ausführen\" als Authorization: Bearer … mitgeschickt. Angemeldete Admins können auch ohne Token testen (Session-Cookie).": "Stored only locally in the browser and sent with “Run” as Authorization: Bearer …. Signed-in admins can also test without a token (session cookie).",
+  "Portgruppen aller Cluster durchsuchen – z. B. nach einer IP-Adresse oder einem Netz aus dem Portgruppen-Namen. Das Ergebnis zeigt, an welchem Cluster das Netz hängt. Teil-Eingaben genügen (z. B. 10.2.30 oder VLAN205).": "Search the port groups of all clusters – e.g. for an IP address or a network from the port-group name. The result shows which cluster the network is attached to. Partial input is enough (e.g. 10.2.30 or VLAN205).",
+  "Archiv der abgelehnten und stornierten Kapazitätsanfragen (Historie, zählt nicht gegen die Kapazität). Sichtbarkeit wie bei den Reservierungen: Anforderer sehen die des eigenen Teams, Reviewer/Admin/Auditor alle.": "Archive of rejected and cancelled capacity requests (history, does not count against capacity). Visibility as with reservations: requesters see their own team's, reviewer/admin/auditor see all.",
+  "Alle Datastores/LUNs über alle Cluster. Neu angefragte Erweiterungen sind hervorgehoben; das Storage-Team ruft sie per API ab (/api/v1/storage-requests, auch als CSV inkl. NAA).": "All datastores/LUNs across all clusters. Newly requested expansions are highlighted; the storage team fetches them via API (/api/v1/storage-requests, also as CSV incl. NAA).",
+  "Ist die Ankündigung aktiv, sieht jeder Benutzer sie einmal als Popup – nach dem Klick auf „Verstanden\" erscheint sie nicht erneut. Eine Änderung an Titel oder Text zeigt sie allen Benutzern noch einmal. Beispiele: Neues aus einem Release, neue Datacenter/Cluster, Wartungsfenster.": "When the announcement is active, every user sees it once as a popup – after clicking “Understood” it does not appear again. A change to the title or text shows it to all users once more. Examples: news from a release, new datacenter/cluster, maintenance window.",
+  "Anträge durchlaufen die Teams von oben nach unten. Erst wenn alle Teams freigegeben haben, ist ein Antrag genehmigt. Ohne Teams gilt einstufig (Admin genehmigt direkt). Reviewer werden oben ihrem Team zugewiesen. Die E-Mail/Verteiler je Team wird angeschrieben, sobald das Team im Workflow an der Reihe ist (siehe „Mail-Benachrichtigungen\"); mit „✓ Team-Adressen speichern\" sichern.": "Requests pass through the teams from top to bottom. Only once all teams have approved is a request granted. Without teams it is single-stage (admin approves directly). Reviewers are assigned to their team above. The per-team email/distribution list is notified as soon as the team is up in the workflow (see “Mail notifications”); save with “✓ Save team addresses”.",
+  "Erfüllt der Ziel-Cluster nach Abzug des Antrags alle Schwellen, gibt das System markierte Stufen automatisch frei (Freigebender: „Auto-Freigabe\", vollständig im Audit-Log). Geprüft wird bei der Antragstellung und immer, wenn eine Stufe neu an der Reihe ist. Greift eine Schwelle nicht oder fehlen Daten (z. B. kein Workload-Wert), geht der Antrag ganz normal an das Team — die Auto-Freigabe lehnt nie ab.": "If the target cluster meets all thresholds after deducting the request, the system automatically approves marked stages (approver: “Auto-approval”, fully in the audit log). It is checked at submission and whenever a stage is newly up. If a threshold is not met or data is missing (e.g. no workload value), the request goes to the team as normal — auto-approval never rejects.",
+  "Haken = die Rolle sieht das Merkmal. Wirkt im UI und im Datenpaket (serverseitig entfernt). Administratoren sehen immer alles. Hier geht es nur um Sichtbarkeit — Rechte (Genehmigen, Verwaltung, Team-Sicht der Anforderer) bleiben fest an den Rollen.": "Check = the role sees the feature. Applies in the UI and in the data package (removed server-side). Administrators always see everything. This is only about visibility — permissions (approve, administration, requesters' team view) stay fixed to the roles.",
+  "Ist dies aktiv, können Freigebende beim Genehmigen und alle Berechtigten in der Storage-Übersicht eine LUN-Vergrößerung oder eine neue LUN anfragen. Das Storage-Team ruft die offenen Anfragen per API ab (/api/v1/storage-requests, auch CSV inkl. NAA) und meldet mit einem Token-Schreibrecht „Storage\" die Umsetzung zurück.": "When this is active, approvers (when granting) and all authorized users in the storage overview can request a LUN expansion or a new LUN. The storage team fetches the open requests via API (/api/v1/storage-requests, also CSV incl. NAA) and reports completion back with a token “Storage” write permission.",
+  "Datastores, deren Name einen dieser Begriffe enthält, werden ebenfalls komplett ausgeschlossen (überall, inkl. Kapazität). Mehrere durch Komma trennen, Groß-/Kleinschreibung egal — z. B. iso, backup, scratch. Ein Begriff wirkt als Teiltreffer (service erwischt auch server-service-01); */? gehen als Platzhalter (*-iso, lun-??-tmp). Leer = kein Filter.": "Datastores whose name contains one of these terms are also fully excluded (everywhere, incl. capacity). Separate several by comma, case-insensitive — e.g. iso, backup, scratch. A term acts as a partial match (service also catches server-service-01); */? work as wildcards (*-iso, lun-??-tmp). Empty = no filter.",
+  "Obergrenze für Storage-Anfragen (Vergrößerung und neue LUN). Größere Wünsche werden abgelehnt. Als internes Limit gedacht — Randnotiz: VMFS-6 unterstützt ohnehin höchstens 64 TB je Datastore. 0 = kein Limit.": "Upper limit for storage requests (expansion and new LUN). Larger requests are rejected. Meant as an internal limit — side note: VMFS-6 supports at most 64 TB per datastore anyway. 0 = no limit.",
+  "Legt fest, bei welchem Ereignis eine Mail rausgeht. Anforderer = der jeweilige Antragsteller (automatisch). Admin/Auditor = die eingetragene Verteiler-Adresse. Reviewer / „Team ist dran\" = die Team-Adresse aus der Teams-Tabelle (Reiter „Benutzer & Rollen\"). Voraussetzung ist ein konfigurierter SMTP-Server. „Freigabe\" meint die endgültige Genehmigung. „Erinnerung\" mailt das gerade zuständige Team (bzw. den Admin-Verteiler), wenn ein Antrag zu lange auf seine Freigabe wartet.": "Defines on which event a mail goes out. Requester = the respective applicant (automatic). Admin/Auditor = the configured distribution address. Reviewer / “Team's turn” = the team address from the teams table (tab “Users & roles”). Requires a configured SMTP server. “Approval” means the final grant. “Reminder” mails the currently responsible team (or the admin distribution list) when a request has been waiting too long for its approval.",
+  "Die im System gesetzten Werte (aus INI, kapa.env bzw. Kommandozeile). Nur zur Ansicht – Änderungen erfolgen in der Konfiguration und erfordern einen Neustart. Passwörter werden nie angezeigt (nur, ob gesetzt).": "The values set in the system (from INI, kapa.env or command line). View only – changes are made in the configuration and require a restart. Passwords are never shown (only whether set).",
 // --- Navigation / Kopf ---
 "Kapazitätsübersicht pro Cluster": "Capacity overview per cluster",
 "VMware Kapazitätsübersicht pro Cluster": "VMware capacity overview per cluster",
@@ -5309,6 +5364,8 @@ const I18N = {
 "Von": "From", "Bis": "To", "Datum zurücksetzen": "Reset dates",
 "← Neuer": "← Newer", "Älter →": "Older →",
 "Keine Log-Einträge": "No log entries",
+"Keine Log-Einträge.": "No log entries.",
+"Keine Log-Einträge für diese Auswahl.": "No log entries for this selection.",
 // --- Statuszeile / Meldungen / Dialoge ---
 "Server nicht erreichbar.": "Server unreachable.",
 "Speichern fehlgeschlagen.": "Saving failed.",
@@ -5433,6 +5490,18 @@ const I18N_RX = [
   [/^Summe genehmigt \((\d+) von (\d+)\)$/, "Total approved ($1 of $2)"],
   [/^(\d+) Anfragen$/, "$1 requests"], [/^(\d+) Anfrage$/, "$1 request"],
   [/^(\d+) Einträge$/, "$1 entries"], [/^(\d+) Eintrag$/, "$1 entry"],
+  // Audit-Log: Aktionen mit dynamischem (API)-Anhang + reine Template-Details
+  [/^Antrag genehmigt( \(API\))?$/, "Request approved$1"],
+  [/^Antrag freigegeben( \(API\))?$/, "Request released$1"],
+  [/^Antrag abgelehnt( \(API\))?$/, "Request rejected$1"],
+  [/^Antrag storniert( \(API\))?$/, "Request cancelled$1"],
+  [/^(\d+) Cluster, (\d+) VMs in ([\d.,]+) s$/, "$1 clusters, $2 VMs in $3 s"],
+  [/^(\d+) Cluster, (\d+) VMs aus (\d+) Quellen in ([\d.,]+) s$/,
+   "$1 clusters, $2 VMs from $3 sources in $4 s"],
+  [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
+  [/^(\d+) Einträge \(gefiltert von (\d+)\)$/, "$1 entries (filtered from $2)"],
+  [/^(\d+) Eintrag \(gefiltert von (\d+)\)$/, "$1 entry (filtered from $2)"],
+  [/^Einträge (\d+)–(\d+) · Seite (\d+) von (\d+)$/, "Entries $1–$2 · Page $3 of $4"],
   [/^Genehmigungen \((\d+)\)$/, "Approvals ($1)"],
   [/^wartet auf: (.+)$/, "waiting for: $1"],
   [/^wartet auf (.+)$/, "waiting for $1"],
@@ -5500,6 +5569,24 @@ function i18nText(s) {
 }
 const I18N_ATTRS = ["placeholder", "title", "aria-label", "data-label"];
 const I18N_SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, CODE: 1 };
+// Inline-Auszeichnung, die einen Satz sonst in unübersetzbare Fragmente zerlegt.
+const I18N_INLINE = { B: 1, I: 1, EM: 1, STRONG: 1, U: 1, CODE: 1, SMALL: 1, MARK: 1 };
+// Enthält das Element NUR Text + Inline-Auszeichnung (kein id-Kind, kein Block)?
+// Dann darf sein gesamter Text als Einheit übersetzt werden (Hervorhebung wird
+// dabei abgeflacht) — nötig, weil <b>/<code> mitten im Satz sonst Fragmente
+// erzeugen, die einzeln nicht im Wörterbuch stehen.
+function i18nFlatten(el) {
+  let hasInline = false, txt = "";
+  for (let c = el.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 3) { txt += c.data; continue; }
+    if (c.nodeType !== 1) return null;
+    if (!I18N_INLINE[c.nodeName] || c.id || c.firstElementChild) return null;
+    hasInline = true; txt += c.textContent;
+  }
+  if (!hasInline || !txt.trim()) return null;
+  const t = i18nText(txt);
+  return t !== txt ? t : null;
+}
 function i18nTree(root) {
   if (root.nodeType === 3) {
     const p = root.parentNode;
@@ -5517,6 +5604,8 @@ function i18nTree(root) {
     const t = i18nText(root.value);
     if (t !== root.value) root.value = t;
   }
+  const flat = i18nFlatten(root);
+  if (flat !== null) { root.textContent = flat; return; }
   let n = root.firstChild;
   while (n) { const next = n.nextSibling; i18nTree(n); n = next; }
 }
