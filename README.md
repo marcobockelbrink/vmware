@@ -163,7 +163,8 @@ mit Schaubildern** (Systemkontext, Datenflüsse, Workflow, Deployment) steht in
   erhalten und tauchen nicht mehr in der aktiven Reservierungsliste auf.
   **Sichtbarkeit wie bei den Reservierungen**: Anforderer sehen die des eigenen
   Teams, Reviewer/Admin/Auditor alle.
-- **Audit-Log** (Tab „Log" bzw. `/log`, nur Admins): protokolliert
+- **Audit-Log** (Tab „Log" bzw. `/log`, nur Admins) mit **Von/Bis-Datumsfilter**
+  und **Seitenblätterung** (100 Einträge je Seite): protokolliert
   Anmeldungen (auch fehlgeschlagene), Anträge, Genehmigungen/Ablehnungen,
   Stornos, Importe, Rollenänderungen und Backups nach `data/kapa_log.jsonl`.
   Die Datei **rotiert automatisch** ab 10 MB (`.1` … `.3`), und die Ansicht

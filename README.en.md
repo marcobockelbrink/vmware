@@ -156,7 +156,8 @@ diagrams** (system context, data flows, workflow, deployment) lives in
   no longer appear in the active reservation list. **Visibility as with
   reservations**: requesters see their own team's, reviewers/admins/auditors
   see all.
-- **Audit log** (tab "Log", admins only): records sign-ins (including failed
+- **Audit log** (tab "Log", admins only) with a **from/to date filter** and
+  **pagination** (100 entries per page): records sign-ins (including failed
   ones), requests, approvals/rejections, cancellations, imports, role changes
   and backups to `data/kapa_log.jsonl`. The file **rotates automatically** at
   10 MB (`.1` … `.3`) and the view only reads the file tail — the log can
