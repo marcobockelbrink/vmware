@@ -88,7 +88,9 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 - **One INI** for all non-secret settings, secrets as `.pass` files; optional **Aria proxy**
 - Ships as **systemd + nginx**, **RPM**, **Ansible** or **container** (ready-made image on **GHCR**, built automatically on every release)
 
-Details for each area in the sections below.
+Details for each area in the sections below. The **overall architecture with
+diagrams** (system context, data flows, workflow, deployment) lives in
+[`docs/ARCHITECTURE.en.md`](docs/ARCHITECTURE.en.md).
 
 ## Dashboard
 

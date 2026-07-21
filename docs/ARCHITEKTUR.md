@@ -1,0 +1,219 @@
+# Architektur — VMware Kapazitätsplanung
+
+> 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
+>
+> Stand: v2.8.4. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> direkt im Browser.
+
+## Leitidee
+
+Ein **einzelnes Python-Skript** (`aria_kapa.py`, nur Standardbibliothek,
+Python 3.8+) ist zugleich Datensammler, Webserver, Rechenkern und UI-Auslieferer.
+Kein pip, kein Build, keine Datenbank-Server — bewusst so gewählt, damit das
+Dashboard auf jedem RHEL-Host ohne Paket-Zoo läuft und ein Update aus dem
+Austausch **einer Datei** besteht.
+
+```mermaid
+flowchart LR
+    subgraph Nutzer
+        B["Browser<br/>(Admin / Reviewer /<br/>Anforderer / Auditor)"]
+        EXT["Externe Apps<br/>(Grafana, CMDB, …)<br/>Bearer-Token"]
+        MON["Monitoring<br/>(Uptime-Check)"]
+    end
+
+    subgraph Host["Linux-Host"]
+        NG["nginx :443<br/>TLS, Pfad /capa/"]
+        APP["aria_kapa.py --serve<br/>127.0.0.1:8080<br/>systemd, User kapa"]
+        DATA[("Datenablage<br/>/var/lib/kapa<br/>JSON oder SQLite")]
+    end
+
+    subgraph Extern["Umsysteme"]
+        V1["vROps Quelle 1<br/>(RZ-Nord)"]
+        V2["vROps Quelle n<br/>(RZ-Sued)"]
+        AD["Active Directory<br/>ldaps://"]
+        SMTP["SMTP-Server"]
+        BK["SFTP-Backupziel"]
+    end
+
+    B -->|HTTPS| NG
+    EXT -->|HTTPS /api/v1| NG
+    MON -->|/healthz| NG
+    NG -->|HTTP lokal| APP
+    APP <-->|Suite-API, OpsToken| V1
+    APP <-->|Suite-API, OpsToken| V2
+    APP -->|Simple Bind + memberOf| AD
+    APP -->|Mails DE-Vorlage| SMTP
+    APP -->|tar.gz 2x täglich| BK
+    APP <--> DATA
+```
+
+**Vertrauensgrenzen:** TLS endet am nginx; das Dashboard spricht nur
+lokales HTTP. Zugriff auf vROps ausschließlich **lesend** (eigenes
+Read-only-Servicekonto), je Quelle optional über einen eigenen Proxy.
+Secrets liegen nie in der INI, sondern in `.pass`-Dateien (root:kapa, 0640).
+
+## Innenleben des Prozesses
+
+```mermaid
+flowchart TB
+    subgraph HTTP["ThreadingHTTPServer (ein Thread je Request)"]
+        R1["Seiten-Routen<br/>/ /reservierungen /genehmigungen<br/>/archiv /verwaltung /log"]
+        R2["Session-API<br/>/api/* (Cookie)"]
+        R3["v1-API<br/>/api/v1/* (Bearer/Session)<br/>lesend + Schreibrechte je Token"]
+        R4["/healthz (ohne Auth)"]
+    end
+
+    subgraph BG["Hintergrund-Threads (daemon)"]
+        T1["scheduler<br/>Aria-Abruf alle 30 min"]
+        T2["maintenance<br/>Ablauf/TTL, Log-Rotation"]
+        T3["backup_loop<br/>SFTP 2x täglich + Rotation"]
+        T4["reminder_loop<br/>stündlich: liegengebliebene<br/>Anträge anmahnen"]
+    end
+
+    subgraph CORE["Gemeinsamer Kern"]
+        ST["state (Cluster-Daten<br/>aus letztem Abruf)"]
+        RES["reservations + res_lock"]
+        DEC["res_apply_approve/reject/cancel<br/>EINE Entscheidungs-Logik<br/>für UI und API"]
+        MAIL["mail_event → Vorlage<br/>{{platzhalter}}, mehrsprachiger Betreff"]
+        STORE["JsonStore / SqliteStore<br/>atomare Writes (mkstemp+rename)"]
+    end
+
+    R1 & R2 & R3 --> CORE
+    T1 --> ST
+    T2 & T3 --> STORE
+    T4 --> DEC
+    DEC --> MAIL
+    RES <--> STORE
+    ST <--> STORE
+```
+
+Kernregel seit v2.8.1: **Zustandsübergänge existieren genau einmal.**
+Session-UI und Schreib-API rufen dieselben `res_apply_*`-Funktionen —
+Verhalten kann nicht auseinanderlaufen (der Refactor fand prompt einen
+Divergenz-Bug: stornierte Anträge waren über die UI noch genehmigbar).
+
+## Datenfluss: Aria-Abruf
+
+```mermaid
+sequenceDiagram
+    participant S as scheduler
+    participant C as collect() je Quelle
+    participant V as vROps Suite-API
+    participant B as build_summary
+    participant ST as state + Cache
+
+    S->>C: do_refresh (alle Quellen nacheinander)
+    C->>V: Cluster, Hosts, VMs (+ Metriken/Properties, Bulk)
+    C->>V: Datastores (Storage, vSAN-Faktor)
+    C->>V: Tags, Workload-Badge
+    C->>V: dvSwitches → Portgruppen (VLAN-Cache,<br/>Voll-Abruf 1x täglich)
+    C->>V: Tanzu-Namespaces (Reservierungen,<br/>Kandidaten-Keys, best effort)
+    C->>B: Rohdaten je Cluster
+    B->>B: N+1-Abzug, CPU-Faktor,<br/>Tanzu MHz→vCPU (aufgerundet)
+    B->>ST: Cluster-Liste (+ source-Badge)
+    Note over ST: Teilausfall-tolerant: fällt eine Quelle aus,<br/>liefern die übrigen weiter
+```
+
+Jeder Teilschritt ist **best effort**: Fehlt Storage/Netzwerk/Tanzu in einer
+Umgebung, bleibt der jeweilige Teil leer und der Rest läuft weiter. Das Log
+nennt je Schritt, was erkannt wurde (Schlüssel, Zuordnungen, Cache-Treffer) —
+so lassen sich versionsabhängige vROps-Stat-Keys ohne Code-Änderung prüfen.
+
+## Genehmigungs-Workflow
+
+```mermaid
+stateDiagram-v2
+    [*] --> beantragt: Antrag (UI oder API)
+    beantragt --> inPruefung: 1. Team gibt frei
+    inPruefung --> inPruefung: weitere Stufe frei<br/>(Reihenfolge = Teams-Tabelle)
+    inPruefung --> genehmigt: letzte Stufe frei
+    beantragt --> abgelehnt: Team/Admin lehnt ab
+    inPruefung --> abgelehnt: Team/Admin lehnt ab
+    beantragt --> storniert: Anforderer/Team/Admin
+    inPruefung --> storniert: Anforderer/Team/Admin
+    genehmigt --> storniert: Storno (zählt nicht mehr)
+    abgelehnt --> [*]: Archiv (dauerhaft)
+    storniert --> [*]: Archiv (dauerhaft)
+    genehmigt --> [*]: Ablauf nach res-ttl-days
+
+    note right of inPruefung
+        reminder_loop mailt das Team,
+        wenn eine Stufe länger als
+        reminder_days wartet
+    end note
+```
+
+Erst der Status **genehmigt** zählt gegen die freie Kapazität — zusammen mit
+den automatisch gelesenen **Tanzu-Namespace-Reservierungen**. Mails gehen je
+Ereignis nach der Matrix in der Verwaltung (Anlage/Ablehnung/Freigabe/„Team
+ist dran"/Erinnerung), gerendert über die **editierbare HTML-Vorlage**.
+
+## Sicherheit in Kürze
+
+| Ebene | Mechanik |
+|---|---|
+| Anmeldung | LDAP Simple Bind (BER-kodiert → keine Filter-Injection), leeres Passwort abgewiesen, Login-Bremse 5/5 min, Passwort-Detektor im Benutzerfeld |
+| Autorisierung | Rollen serverseitig erzwungen (Anforderer: Team-Sicht, kein Workload, kein „entschieden von"); Reviewer nur, wenn ihr Team dran ist |
+| Sessions | `secrets.token_urlsafe(32)`, Cookie `HttpOnly; Secure; SameSite=Lax` (CSRF-Schutz), Pruning beim Login |
+| API | Tokens nur als SHA-256-Hash, `hmac.compare_digest`, Schreibrechte je Token einzeln zuschaltbar, alles auditiert |
+| Ausgabe | Strikte CSP, `json_for_html` gegen `</script>`-Ausbruch, Escaping aller Fremddaten, Vorlagen-Vorschau im sandbox-iframe |
+| Betrieb | systemd-Sandbox (ProtectSystem=strict), Dateien 0600 via mkstemp, Request-Limit 2 MiB, gzip nur für Text-Typen |
+
+## Frontend
+
+Eine einzige HTML-Seite (im Skript als Template eingebettet, Daten per
+`__PLATZHALTER__` server-seitig injiziert), Views per `render()`-Dispatch
+(Pfad oder Hash). Querschnittsfunktionen liegen als kleine Engines am
+Skript-Ende:
+
+- **i18n**: Deutsch ist Quelle; Browser ≠ deutsch → Wörterbuch (~400 Einträge)
+  + Regex-Muster, ein MutationObserver übersetzt Textknoten **und** Attribute
+  laufend. API-Werte/Statuslogik bleiben deutsch (v1-Vertrag).
+- **Theme**: CSS-Variablen, `data-theme="light"` am `<html>`, Kopf-Snippet
+  gegen Flackern, Wahl in den Server-Prefs je Benutzer.
+- **Prefs**: Spalten, „Ankündigung gesehen", Theme — ein PUT ersetzt komplett,
+  darum baut `prefsBody()` immer den Vollzustand.
+- **Deep-Links**: `#cluster=Name` öffnet die Detailkarte, Hash wird beim
+  Öffnen gesetzt.
+
+## Datenhaltung
+
+Alle Sammlungen (Reservierungen, Rollen, Teams, Selektor, Rollennamen,
+Tokens, Mail-Regeln, Prefs, Ankündigung) laufen über eine Store-Abstraktion:
+**JSON-Dateien** (Standard, je Sammlung eine Datei) oder **SQLite** (eine
+`kapa.db`, inkrementelle Reservierungs-Writes, automatische Einmal-Migration).
+Schreiben immer atomar. Details und Restore: [`../config/RESTORE.md`](../config/RESTORE.md).
+
+## Deployment
+
+```mermaid
+flowchart LR
+    GH["GitHub-Repo<br/>+ Release-Tag v*"]
+    GH -->|GitHub Actions| IMG["GHCR-Image<br/>kapa-dashboard:latest + :x.y<br/>amd64 + arm64"]
+    GH --> RPM["RPM (el9)<br/>deploy/rpm/build.sh"]
+    RPM --> ANS["Ansible/AAP-Role<br/>Flotte + Vault"]
+    IMG --> DOCK["Docker/Podman<br/>compose, UBI9, non-root"]
+    RPM --> HOSTS["RHEL-9-Hosts<br/>systemd + nginx"]
+    ANS --> HOSTS
+```
+
+Dasselbe Artefakt, drei Verpackungen — Auswahlhilfe in
+[`../deploy/README.md`](../deploy/README.md).
+
+## Bewusste Entscheidungen (Kurz-ADRs)
+
+1. **Nur Standardbibliothek, eine Datei** — Betrieb ohne Paketmanagement,
+   Update = Dateitausch; bezahlt mit eingebetteten Templates.
+2. **Deutsch als Quellsprache + Übersetzungs-Engine** statt doppelter
+   Templates — eine Pflegequelle, EN folgt automatisch; API bleibt stabil
+   deutsch (v1-Vertrag).
+3. **Best-effort-Datensammlung mit Kandidaten-Keys** — vROps-Versionen
+   unterscheiden sich; lieber lückenhaft + gut geloggt als hart scheiternd.
+4. **Tanzu konservativ gezählt** — Namespace-Reservierung zusätzlich zur
+   VM-Belegung; mögliche Doppelzählung zugunsten sicherer Planung akzeptiert.
+5. **Cluster-Name als Schlüssel über Quellen hinweg** (Variante A) —
+   Voraussetzung eindeutige Namen; dafür bleiben Reservierungen beim
+   Quellen-Umbau stabil.
+6. **Fail-fast-Konfiguration** — unbekannte INI-Schlüssel und verrutschte
+   `[quelle:*]`-Einträge brechen den Start mit Hinweis ab, statt still zu
+   falschen Defaults zu führen.

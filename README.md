@@ -88,7 +88,9 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 - **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**
 - Auslieferung als **systemd + nginx**, **RPM**, **Ansible** oder **Container** (fertiges Image auf **GHCR**, bei jedem Release automatisch gebaut)
 
-Details zu jedem Bereich in den folgenden Abschnitten.
+Details zu jedem Bereich in den folgenden Abschnitten. Die **Gesamtarchitektur
+mit Schaubildern** (Systemkontext, Datenflüsse, Workflow, Deployment) steht in
+[`docs/ARCHITEKTUR.md`](docs/ARCHITEKTUR.md).
 
 ## Dashboard
 
