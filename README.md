@@ -192,8 +192,8 @@ mehrstufigen Freigabe und der Schaltfläche für das jeweils zuständige Team:
 
 **Verwaltung** (nur Admins) — Benutzer **und AD-Gruppen** mit Rolle und Team,
 frei wählbare Rollen-Bezeichnungen und die Genehmigungs-Teams in ihrer
-Prüfreihenfolge; Cluster-Selektor, Mail, Ankündigung, API-Tokens und
-Konfiguration liegen in eigenen Unterreitern:
+Prüfreihenfolge; Cluster-Selektor, Mail, Ankündigung, Auto-Freigabe,
+Sichtbarkeit, API-Tokens und Konfiguration liegen in eigenen Unterreitern:
 
 ![Verwaltung](docs/screenshot-verwaltung.png)
 

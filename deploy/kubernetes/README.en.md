@@ -43,7 +43,7 @@ helm install kapa deploy/kubernetes/helm/kapa-dashboard \
 
 # Upgrade to a new release:
 helm upgrade kapa deploy/kubernetes/helm/kapa-dashboard --reuse-values \
-  --set image.tag=2.10
+  --set image.tag=2.11
 ```
 
 Key values (`values.yaml`): `image.tag` (empty = chart app version),

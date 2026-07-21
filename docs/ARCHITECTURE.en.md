@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.9. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.11. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea

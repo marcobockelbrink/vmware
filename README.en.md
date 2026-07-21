@@ -185,8 +185,8 @@ approval and the button for the team currently up:
 
 **Administration** (admins only) — users **and AD groups** with role and team,
 freely renamable role labels and the approval teams in their review order;
-cluster selector, mail, announcement, API tokens and configuration live in
-their own sub-tabs:
+cluster selector, mail, announcement, auto-approval, visibility, API tokens
+and configuration live in their own sub-tabs:
 
 ![Administration](docs/screenshot-verwaltung.png)
 
