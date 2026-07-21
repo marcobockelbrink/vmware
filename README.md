@@ -51,6 +51,12 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Stufe 2+3 automatisch) — Freigebender „Auto-Freigabe", Badge „genehmigt (auto)",
   jede Prüfung samt Zahlen im Audit-Log; blockiert nie, lehnt nie ab
 - **Archiv** für abgelehnte/stornierte Anfragen (eigener Menüpunkt, dauerhaft, gleiche Team-Sichtbarkeit)
+- **Storage-Erweiterungen** (dynamisch aktivierbar): Freigebende fragen beim
+  Genehmigen — oder alle Berechtigten in der neuen **Storage-Übersicht** (Menü
+  zwischen VLAN-Suche und Reservierungen) — eine **LUN-Vergrößerung** oder eine
+  **neue LUN** an; das Storage-Team ruft die offenen Anfragen **per API** ab
+  (`/api/v1/storage-requests`, auch CSV **inkl. NAA**) und meldet die Umsetzung
+  mit einem Token-Schreibrecht „Storage" zurück
 - Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt
 
 **Rollen, AD & Sicherheit**

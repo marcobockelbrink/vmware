@@ -125,6 +125,14 @@ Liegt außerhalb von `/api/v1/` und ist für Uptime-Checks gedacht.
 - Browser-Sessions (angemeldete Admins) können die v1-Endpunkte ebenfalls
   aufrufen, z. B. zum Testen.
 
+### GET /api/v1/storage-requests
+
+Angefragte **Storage-Erweiterungen** fürs Storage-Team — LUN-Vergrößerungen
+und neue LUNs, inkl. **NAA-Kennung**. Standard: offene Anfragen; `status=alle`
+für alle, `status=erledigt` für abgeschlossene. Als **CSV** mit `format=csv`
+(Spalten u. a. `cluster;typ;lun;naa;aktuell_gb;ziel_gb;neue_lun_gb;status`) —
+direkt in die Storage-Automatisierung kippbar.
+
 ## Schreib-Endpunkte (Schreibrechte je Token)
 
 Tokens sind standardmäßig **lesend**. In der Verwaltung (Abschnitt
@@ -135,6 +143,7 @@ aktivieren; jede Änderung landet im Audit-Log:
 |---|---|
 | **Reservierungen** | `POST /api/v1/reservations` (anlegen), `POST /api/v1/reservations/{id}/cancel` (stornieren) |
 | **Genehmigungen** | `POST /api/v1/reservations/{id}/approve` (aktuelle Stufe freigeben), `POST /api/v1/reservations/{id}/reject` (ablehnen) |
+| **Storage** | `POST /api/v1/storage-requests/{id}/done` (Storage-Erweiterung als erledigt melden) |
 
 ```bash
 # Anlegen (Status „beantragt", durchläuft den normalen Workflow):

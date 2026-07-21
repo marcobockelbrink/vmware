@@ -17,6 +17,8 @@ Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 | `kapa_ankuendigung.json` | Ankündigungs-Popup (Titel/Text/aktiv) | Nein (Komfort) |
 | `kapa_autofreigabe.json` | Auto-Freigabe (Schwellen + Team-Haken) | Ja |
 | `kapa_sichtbarkeit.json` | Sichtbarkeits-Matrix je Rolle | Ja |
+| `kapa_storagecfg.json` | Schalter Storage-Erweiterungen | Nein (Komfort) |
+| `kapa_storage_anfragen.json` | Storage-Erweiterungs-Anfragen (fürs Storage-Team) | Ja |
 | `kapa.db` (+ `-wal`/`-shm`) | Bei `storage = sqlite`: alle obigen Sammlungen in einer DB | **Ja** (statt der JSONs) |
 | `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |
 | `kapa_cache.json` | Letzter Aria-Datenabruf | Nein (wird neu abgerufen) |

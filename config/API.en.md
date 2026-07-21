@@ -128,6 +128,13 @@ Lives outside `/api/v1/` and is meant for uptime checks.
 - Browser sessions (signed-in admins) can call the v1 endpoints too, e.g.
   for testing.
 
+### GET /api/v1/storage-requests
+
+Requested **storage expansions** for the storage team — LUN expansions and new
+LUNs, incl. the **NAA identifier**. Default: open requests; `status=alle` for
+all, `status=erledigt` for completed. As **CSV** with `format=csv` — ready to
+feed into storage automation.
+
 ## Write endpoints (write permissions per token)
 
 Tokens are **read-only** by default. In the administration ("API tokens"
@@ -138,6 +145,7 @@ every change lands in the audit log:
 |---|---|
 | **Reservations** | `POST /api/v1/reservations` (create), `POST /api/v1/reservations/{id}/cancel` (cancel) |
 | **Approvals** | `POST /api/v1/reservations/{id}/approve` (approve the current stage), `POST /api/v1/reservations/{id}/reject` (reject) |
+| **Storage** | `POST /api/v1/storage-requests/{id}/done` (mark a storage expansion as done) |
 
 ```bash
 # Create (status "beantragt", passes through the normal workflow):

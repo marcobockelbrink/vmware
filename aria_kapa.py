@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.11.1"
+VERSION = "2.12"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -777,6 +777,8 @@ def sftp_backup(args):
                          getattr(args, "announce_file", ""),
                          getattr(args, "autoapprove_file", ""),
                          getattr(args, "visibility_file", ""),
+                         getattr(args, "storagecfg_file", ""),
+                         getattr(args, "storagereq_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1755,6 +1757,40 @@ def openapi_spec(lang="de"):
         },
         "security": [{"bearerAuth": []}, {"cookieAuth": []}],
         "paths": {
+            "/api/v1/storage-requests": {"get": {
+                "summary": T("Storage-Erweiterungen (fürs Storage-Team)",
+                             "Storage expansions (for the storage team)"),
+                "description": T("Angefragte LUN-Vergrößerungen und neue LUNs, "
+                                 "inkl. NAA-Kennung. Standard: offene; status=alle "
+                                 "für alle. Als CSV mit format=csv.",
+                                 "Requested LUN expansions and new LUNs, incl. NAA. "
+                                 "Default: open ones; status=alle for all. As CSV "
+                                 "with format=csv."),
+                "parameters": [
+                    {"name": "status", "in": "query", "schema": {"type": "string",
+                     "enum": ["offen", "erledigt", "alle"], "default": "offen"}},
+                    {"name": "format", "in": "query", "schema": {"type": "string",
+                     "enum": ["json", "csv"], "default": "json"}},
+                ],
+                "responses": {"200": {"description": "OK", "content": {
+                    "application/json": {"schema": {"type": "object"}},
+                    "text/csv": {"schema": {"type": "string"}}}},
+                    "401": {"description": T("Token/Anmeldung fehlt oder ungültig", "Token/sign-in missing or invalid")}}}},
+            "/api/v1/storage-requests/{id}/done": {"post": {
+                "summary": T("Storage-Erweiterung als erledigt melden (Schreibrecht „Storage“)",
+                             "Mark a storage expansion as done (write permission „Storage“)"),
+                "description": T("Setzt die Anfrage auf erledigt — für die "
+                                 "Automatisierung des Storage-Teams. Token mit "
+                                 "Schreibrecht „Storage“ nötig.",
+                                 "Marks the request as done — for the storage "
+                                 "team's automation. Requires a token with the "
+                                 "„Storage“ write permission."),
+                "parameters": [{"name": "id", "in": "path", "required": True,
+                                "schema": {"type": "string"}}],
+                "responses": {"200": {"description": "OK"},
+                              "401": {"description": T("Token fehlt/ungültig", "token missing/invalid")},
+                              "403": {"description": T("Token ohne Schreibrecht", "token lacks write permission")},
+                              "404": {"description": T("nicht gefunden", "not found")}}}},
             "/api/v1/status": {"get": {
                 "summary": T("Status & Aktualität", "Status & freshness"),
                 "description": T("Version, Zeitpunkt des letzten Aria-Abrufs, ob gerade "
@@ -2400,6 +2436,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
               placeholder="kurze Begründung, max. 64 Zeichen"></textarea>
     <div class="hint" id="cmtCnt" style="color:var(--muted);text-align:right"></div>
     <div class="actions">
+      <button class="btn" id="cmtExtra" style="display:none;margin-right:auto" onclick="cmtExtra()"></button>
       <button class="btn" onclick="cmtCancel()">Abbrechen</button>
       <button class="btn primary" id="cmtOk" onclick="cmtConfirm()">OK</button>
     </div>
@@ -2418,6 +2455,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <div class="tabs">
   <span class="tab active" id="tabKapa" onclick="setView('kapa')">Kapazität</span>
   <span class="tab" id="tabVlan" onclick="setView('vlan')">VLAN-Suche</span>
+  <span class="tab" id="tabStor" onclick="setView('stor')">Storage</span>
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
   <span class="tab" id="tabArch" onclick="setView('arch')">Archiv</span>
@@ -2510,6 +2548,27 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </table>
 </div>
 </div>
+<div id="storView" style="display:none">
+<div class="hint" style="color:var(--muted);margin:4px 0 10px">
+  Alle Datastores/LUNs über alle Cluster. <b>Neu angefragte Erweiterungen</b>
+  sind hervorgehoben; das Storage-Team ruft sie per API ab
+  (<code>/api/v1/storage-requests</code>, auch als CSV inkl. NAA).</div>
+<div class="toolbar" style="margin-bottom:10px">
+  <input class="filterbox" id="storFilter" type="search" placeholder="Storage filtern – Cluster, LUN, NAA, Typ …" oninput="renderStorage()">
+  <a class="btn" id="storCsvBtn" href="api/v1/storage-requests?format=csv&status=alle" download="storage-anfragen.csv" title="Storage-Anfragen als CSV (inkl. NAA)">Anfragen als CSV</a>
+  <span id="storCount" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+</div>
+<div id="storReqBox"></div>
+<div class="tablewrap">
+<table class="kt" id="stortable">
+  <thead><tr><th>Cluster</th><th>Datastore / LUN</th><th>Typ</th><th>NAA</th>
+    <th class="num">Größe (GB)</th><th class="num">Belegt (GB)</th>
+    <th class="num">Frei (GB)</th><th class="nosort">Erweiterung</th></tr></thead>
+  <tbody id="storbody"></tbody>
+</table>
+</div>
+</div>
+
 <div id="admView" style="display:none">
 <div class="tabs subtabs">
   <span class="tab active" id="atabUsers" onclick="setAdmTab('users')">Benutzer &amp; Rollen</span>
@@ -2598,6 +2657,17 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div><!-- admGrpSel -->
 
 <div id="admGrpAuto" style="display:none">
+<div class="sechead">Storage-Erweiterungen</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Ist dies aktiv, können Freigebende beim Genehmigen und alle Berechtigten in
+  der Storage-Übersicht eine LUN-Vergrößerung oder eine neue LUN anfragen. Das
+  Storage-Team ruft die offenen Anfragen per API ab
+  (<code>/api/v1/storage-requests</code>, auch CSV inkl. NAA) und meldet mit
+  einem Token-Schreibrecht „Storage" die Umsetzung zurück.</div>
+<div style="margin-bottom:18px">
+  <label style="font-size:13px"><input type="checkbox" id="storEnabled" onchange="saveStorageCfg()"> Storage-Erweiterungen erlauben</label>
+  <span id="storCfgSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div>
 <div class="sechead">Auto-Freigabe (Schwellenwerte)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:10px">
   Erfüllt der Ziel-Cluster <b>nach</b> Abzug des Antrags alle Schwellen, gibt
@@ -3136,10 +3206,17 @@ function askComment(opts) {
     const inp = document.getElementById("cmtInput");
     inp.value = "";
     cmtCount();
+    const ex = document.getElementById("cmtExtra");
+    _cmtExtra = opts.onExtra || null;
+    ex.style.display = opts.extraLabel ? "" : "none";
+    ex.textContent = opts.extraLabel || "";
     document.getElementById("cmtBg").classList.add("open");
     setTimeout(() => inp.focus(), 30);
   });
 }
+let _cmtExtra = null;
+function cmtExtra() { const f = _cmtExtra; if (f) f(); }
+function closeComment() { document.getElementById("cmtBg").classList.remove("open"); _cmtResolve = null; }
 function cmtCount() {
   const inp = document.getElementById("cmtInput");
   document.getElementById("cmtCnt").textContent = inp.value.length + " / 64 Zeichen";
@@ -3158,7 +3235,10 @@ function askConfirm(opts) {
   return new Promise(resolve => {
     _askResolve = resolve;
     document.getElementById("askTitle").textContent = opts.title || "Bestätigen";
-    document.getElementById("askMsg").textContent = opts.message || "";
+    // opts.html = eigenes Formular (nur aus vertrauenswürdigem App-Code, nie
+    // aus Fremddaten befüllen); sonst reiner Text.
+    const msg = document.getElementById("askMsg");
+    if (opts.html != null) msg.innerHTML = opts.html; else msg.textContent = opts.message || "";
     const ok = document.getElementById("askOk");
     ok.textContent = opts.okLabel || "OK";
     ok.className = "btn primary" + (opts.okClass ? " " + opts.okClass : "");
@@ -3207,7 +3287,11 @@ function approveRes(id) {
   const r = RES.find(x => x.id === id);
   const team = r ? currentTeam(r) : null;
   askComment({ title: team ? "Freigeben (" + team + ")" : "Antrag genehmigen",
-    okLabel: "✓ Bestätigen", message: "„" + ((r && r.name) || "?") + "“" }).then(c => {
+    okLabel: "✓ Bestätigen", message: "„" + ((r && r.name) || "?") + "“",
+    // Bei aktiver Storage-Erweiterung ein Zusatz-Button im Kommentar-Dialog:
+    extraLabel: (STOR.enabled && CAN_STORAGE && r) ? "+ Storage-Erweiterung" : "",
+    onExtra: () => { closeComment(); openStorReq(r.cluster, "", "", 0, r.id, r.name); }
+  }).then(c => {
     if (c === null) return;
     if (SERVE) apiRes("POST", "/" + encodeURIComponent(id) + "/approve",
                       { comment: c }).then(setRes).catch(resFail);
@@ -3574,7 +3658,8 @@ function row(c, idx, isTotal) {
 // ---- Ansichten: Kapazität / Reservierungen / Genehmigungen / Verwaltung ----
 // endsWith statt ===, damit die Routen auch hinter einem Proxy-Unterpfad
 // (z. B. https://host/capa/reservierungen) funktionieren
-let VIEW = (location.pathname.endsWith("/vlan-suche") || location.hash === "#vlan-suche") ? "vlan"
+let VIEW = (location.pathname.endsWith("/storage") || location.hash === "#storage") ? "stor"
+         : (location.pathname.endsWith("/vlan-suche") || location.hash === "#vlan-suche") ? "vlan"
          : (location.pathname.endsWith("/reservierungen") || location.hash === "#reservierungen") ? "res"
          : (location.pathname.endsWith("/genehmigungen") || location.hash === "#genehmigungen") ? "app"
          : (location.pathname.endsWith("/archiv") || location.hash === "#archiv") ? "arch"
@@ -3585,13 +3670,13 @@ if ((VIEW === "adm" || VIEW === "log") && !IS_ADMIN) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  const tabs = { kapa: "tabKapa", vlan: "tabVlan", res: "tabRes", app: "tabApp", arch: "tabArch", adm: "tabAdm", log: "tabLog" };
-  const views = { kapa: "kapaView", vlan: "vlanView", res: "resView", app: "appView", arch: "archView", adm: "admView", log: "logView" };
+  const tabs = { kapa: "tabKapa", vlan: "tabVlan", stor: "tabStor", res: "tabRes", app: "tabApp", arch: "tabArch", adm: "tabAdm", log: "tabLog" };
+  const views = { kapa: "kapaView", vlan: "vlanView", stor: "storView", res: "resView", app: "appView", arch: "archView", adm: "admView", log: "logView" };
   for (const k in tabs) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
-  document.getElementById("filter").style.display = (v === "vlan" || v === "res" || v === "arch") ? "none" : "";
+  document.getElementById("filter").style.display = (v === "vlan" || v === "stor" || v === "res" || v === "arch") ? "none" : "";
   document.getElementById("filter").placeholder =
     v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
@@ -3604,9 +3689,10 @@ function setView(v) {
       keep ? location.pathname + keep
       : v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
       : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
-      : v === "vlan" ? "#vlan-suche" : location.pathname);
+      : v === "vlan" ? "#vlan-suche" : v === "stor" ? "#storage" : location.pathname);
   } catch (e) {}
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); }
+  if (v === "stor") loadStorage();
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); }
   if (v === "log") loadLog();
   render();
 }
@@ -3677,7 +3763,10 @@ function renderTokenTable() {
            data-scope="res" data-tid="${esc(id)}"> Reservierungen</label><br>
          <label title="POST /api/v1/reservations/{id}/approve + /reject"><input type="checkbox"
            ${t.write_approve ? "checked" : ""} onchange="setTokenScope('${esc(id)}')"
-           data-scope="approve" data-tid="${esc(id)}"> Genehmigungen</label></td>
+           data-scope="approve" data-tid="${esc(id)}"> Genehmigungen</label><br>
+         <label title="POST /api/v1/storage-requests/{id}/done"><input type="checkbox"
+           ${t.write_storage ? "checked" : ""} onchange="setTokenScope('${esc(id)}')"
+           data-scope="storage" data-tid="${esc(id)}"> Storage</label></td>
        <td><button class="del" onclick="delToken('${esc(id)}')">✕ Widerrufen</button></td></tr>`; })
     .join("");
   document.getElementById("ttbody").innerHTML =
@@ -3693,7 +3782,7 @@ function setTokenScope(id) {
                       return !!(el && el.checked); };
   fetch("api/tokens/" + encodeURIComponent(id), { method: "PUT",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ write_res: get("res"), write_approve: get("approve") }) })
+      body: JSON.stringify({ write_res: get("res"), write_approve: get("approve"), write_storage: get("storage") }) })
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(d => { if (d) { TOKENS = d; renderTokenTable(); } })
     .catch(() => notify("Ändern der Token-Rechte fehlgeschlagen."));
@@ -4014,6 +4103,24 @@ function saveVisibility() {
       const st = document.getElementById("visSaved");
       if (st) { st.textContent = "✓ gespeichert – gilt beim nächsten Laden der Seite"; setTimeout(() => { if (st) st.textContent = ""; }, 4000); }
     }).catch(() => notify("Speichern der Sichtbarkeit fehlgeschlagen."));
+}
+
+// ---- Storage-Erweiterungen: Schalter (im Auto-Freigabe-Tab) ----
+function saveStorageCfg() {
+  const on = !!(document.getElementById("storEnabled") || {}).checked;
+  fetch("api/storagecfg", { method: "PUT", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ enabled: on }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => { STOR.enabled = !!d.enabled;
+      const st = document.getElementById("storCfgSaved");
+      if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); } })
+    .catch(() => notify("Speichern fehlgeschlagen."));
+}
+function loadStorageCfg() {
+  fetch("api/storagecfg").then(r => r.ok ? r.json() : null).then(d => {
+    const el = document.getElementById("storEnabled");
+    if (d && el) el.checked = !!d.enabled;
+  }).catch(() => {});
 }
 
 // ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
@@ -4393,6 +4500,120 @@ function vlanIndex() {
   VLAN_INDEX = out;
   return out;
 }
+// ---- Storage-Übersicht + Erweiterungs-Anfragen ----
+let STOR = { enabled: false, requests: [] };
+const CAN_STORAGE = IS_ADMIN || ROLE === "reviewer";   // wer anfragen darf
+function loadStorage() {
+  fetch("api/storage-requests").then(r => r.ok ? r.json() : null).then(d => {
+    if (d) { STOR = d; if (VIEW === "stor") renderStorage(); }
+  }).catch(() => {});
+}
+function allLuns() {   // alle Datastores mit Cluster-Bezug, flach
+  const out = [];
+  (CLUSTERS || []).forEach(c => (c.datastores || []).forEach(d =>
+    out.push({ cluster: c.name, name: d.name, type: d.type || "–",
+               naa: d.naa || "", cap: d.cap_gb || 0, used: d.used_gb || 0 })));
+  return out;
+}
+function renderStorage() {
+  const q = (document.getElementById("storFilter").value || "").trim().toLowerCase();
+  // Offene/erledigte Anfragen zuerst als eigener Block
+  const reqs = (STOR.requests || []);
+  const openReqs = reqs.filter(r => r.status === "offen");
+  const box = document.getElementById("storReqBox");
+  box.innerHTML = reqs.length ? `
+    <div class="resbox" style="margin-bottom:14px">
+      <h3>Storage-Erweiterungen (${openReqs.length} offen / ${reqs.length} gesamt)</h3>
+      <table><tr><th>Cluster</th><th>Anfrage</th><th>NAA</th><th>angefragt</th><th>Status</th>${IS_ADMIN ? "<th></th>" : ""}</tr>
+      ${reqs.slice().sort((a,b)=> (a.status>b.status?1:-1)).map(r => {
+        const what = r.kind === "new" ? `neue LUN ${fmt(r.size_gb)} GB`
+          : `${esc(r.lun_name)}: ${fmt(r.current_gb)} → <b>${fmt(r.target_gb)} GB</b>`;
+        const done = r.status === "erledigt";
+        return `<tr style="${done?'opacity:.55':'background:rgba(245,158,11,.10)'}">
+          <td>${esc(r.cluster)}</td><td>${what}${r.comment?` <span style="color:var(--muted)">· ${esc(r.comment)}</span>`:""}</td>
+          <td style="font-family:monospace;font-size:12px">${esc(r.naa||"–")}</td>
+          <td>${esc(r.requested_by||"–")} · ${fmtDate(r.requested_on)}</td>
+          <td>${done?`erledigt${r.done_by?" ("+esc(r.done_by)+")":""}`:'<b style="color:var(--warn)">offen</b>'}</td>
+          ${IS_ADMIN?`<td><button class="btn" onclick="toggleStorDone('${esc(r.id)}',${done?'false':'true'})">${done?"wieder offen":"✓ erledigt"}</button></td>`:""}
+        </tr>`; }).join("")}
+      </table>
+    </div>` : "";
+  // LUN-Tabelle
+  const pend = {};   // cluster|lun -> offene Ziel-GB
+  openReqs.forEach(r => { if (r.kind === "expand") pend[r.cluster + "|" + r.lun_name] = r.target_gb; });
+  const luns = allLuns().filter(l => !q ||
+    (l.cluster + " " + l.name + " " + l.naa + " " + l.type).toLowerCase().includes(q));
+  document.getElementById("storbody").innerHTML = luns.map(l => {
+    const tgt = pend[l.cluster + "|" + l.name];
+    const free = Math.round((l.cap - l.used) * 10) / 10;
+    return `<tr${tgt?' style="background:rgba(245,158,11,.10)"':''}>
+      <td>${clusterTd(l.cluster)}</td><td>${esc(l.name)}</td><td>${esc(l.type)}</td>
+      <td style="font-family:monospace;font-size:12px">${esc(l.naa||"–")}</td>
+      <td class="num">${fmt(Math.round(l.cap))}${tgt?` <span style="color:var(--warn)">→ ${fmt(tgt)}</span>`:""}</td>
+      <td class="num">${fmt(Math.round(l.used))}</td>
+      <td class="num">${fmt(free)}</td>
+      <td>${STOR.enabled && CAN_STORAGE ? `<button class="btn" onclick="openStorReq('${esc(l.cluster)}','${esc(l.name)}','${esc(l.naa)}',${Math.round(l.cap)})">Erweitern</button>` : (tgt?"angefragt":"")}</td>
+    </tr>`; }).join("") ||
+    `<tr><td colspan="8" style="color:var(--muted)">Keine Storage-Daten.</td></tr>`;
+  const cnt = document.getElementById("storCount");
+  if (cnt) cnt.textContent = luns.length + " LUNs";
+  document.getElementById("storCsvBtn").style.display = IS_ADMIN ? "" : "none";
+  reSort("stortable"); renderColMenu("stortable"); applyCols("stortable");
+}
+function toggleStorDone(id, done) {
+  fetch("api/storage-request/" + encodeURIComponent(id), { method: "PUT",
+      headers: {"Content-Type":"application/json"}, body: JSON.stringify({ done: done }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => { if (d.requests) { STOR.requests = d.requests; renderStorage(); } })
+    .catch(() => notify("Ändern fehlgeschlagen."));
+}
+// Erweiterungs-Dialog — genutzt aus der Storage-Seite UND aus dem Freigabe-Popup
+function openStorReq(cluster, lun, naa, curGb, resId, resName) {
+  const luns = allLuns().filter(l => l.cluster === cluster);
+  const opts = luns.map(l => `<option value="${esc(l.name)}" data-naa="${esc(l.naa)}" data-cap="${Math.round(l.cap)}"${l.name===lun?" selected":""}>${esc(l.name)} (${fmt(Math.round(l.cap))} GB${l.naa?", "+esc(l.naa):""})</option>`).join("");
+  askConfirm({ title: "Storage-Erweiterung – " + cluster, okLabel: "✓ Anfragen",
+    html: `
+    <div style="font-size:13px;line-height:1.7">
+      <label><input type="radio" name="storKind" value="expand" checked onchange="storKindUI()"> Bestehende LUN vergrößern</label><br>
+      <label><input type="radio" name="storKind" value="new" onchange="storKindUI()"> Neue LUN anlegen</label>
+      <div id="storExpand" style="margin-top:8px">
+        <div>LUN: <select id="storLun" class="filterbox" style="max-width:340px">${opts}</select></div>
+        <div style="margin-top:6px">Wunschgröße (GB): <input id="storTarget" type="number" min="1" class="filterbox" style="width:120px" placeholder="z. B. 8000"></div>
+      </div>
+      <div id="storNew" style="display:none;margin-top:8px">
+        Neue LUN, Größe (TB): <input id="storTB" type="number" min="0.1" step="0.1" class="filterbox" style="width:120px" placeholder="z. B. 2">
+      </div>
+      <div style="margin-top:8px">Kommentar: <input id="storComment" class="filterbox" style="width:100%" placeholder="optional, z. B. Change/Grund"></div>
+    </div>` })
+    .then(ok => {
+      if (!ok) return;
+      const kind = document.querySelector('input[name="storKind"]:checked').value;
+      const body = { cluster: cluster, kind: kind,
+        comment: (document.getElementById("storComment")||{}).value || "",
+        res_id: resId || "", res_name: resName || "" };
+      if (kind === "expand") {
+        const sel = document.getElementById("storLun");
+        const o = sel.options[sel.selectedIndex];
+        body.lun_name = sel.value; body.naa = o.getAttribute("data-naa") || "";
+        body.current_gb = parseInt(o.getAttribute("data-cap")) || 0;
+        body.target_gb = parseInt(document.getElementById("storTarget").value) || 0;
+        if (body.target_gb <= body.current_gb) return notify("Wunschgröße muss größer als die aktuelle Größe sein.");
+      } else {
+        body.size_gb = Math.round((parseFloat(document.getElementById("storTB").value) || 0) * 1024);
+        if (body.size_gb <= 0) return notify("Bitte eine Größe in TB angeben.");
+      }
+      fetch("api/storage-request", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
+        .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+        .then(d => { loadStorage(); notify("Storage-Erweiterung angefragt."); })
+        .catch(e => notify((e && e.error) || "Anfrage fehlgeschlagen."));
+    });
+}
+function storKindUI() {
+  const isNew = document.querySelector('input[name="storKind"]:checked').value === "new";
+  document.getElementById("storExpand").style.display = isNew ? "none" : "";
+  document.getElementById("storNew").style.display = isNew ? "" : "none";
+}
+
 function renderVlan() {
   const q = (document.getElementById("vlanQ").value || "").trim().toLowerCase();
   const all = vlanIndex();
@@ -4413,6 +4634,7 @@ function render() {
   const pend = RES.filter(isPend).length;
   document.getElementById("tabApp").textContent = "Genehmigungen" + (pend ? " (" + pend + ")" : "");
   if (VIEW === "vlan") { renderVlan(); return; }
+  if (VIEW === "stor") { renderStorage(); return; }
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "arch") { renderArchiveTable(); return; }
@@ -4538,6 +4760,7 @@ if (!VIS.decided_by) {
   if (th) th.remove();   // Rolle sieht nicht, wer entschieden hat (Matrix)
 }
 if (!VIS.network) document.getElementById("tabVlan").style.display = "none";
+if (!VIS.storage) document.getElementById("tabStor").style.display = "none";
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
 const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0}, artable:{pin:0},
@@ -4678,6 +4901,7 @@ if (SERVE) {
   setInterval(tickTimer, 1000);
 }
 maybeShowAnnounce();
+if (SERVE) loadStorage();   // STOR.enabled fürs Freigabe-Popup + Storage-Seite
 
 // Deep-Link: #cluster=Name öffnet die Detailkarte direkt (auch teilbar in
 // Tickets/Chats); reagiert zusätzlich auf Hash-Änderungen zur Laufzeit.
@@ -4990,6 +5214,29 @@ const I18N = {
 "✓ gespeichert – gilt beim nächsten Laden der Seite": "✓ saved – takes effect on next page load",
 "Speichern der Sichtbarkeit fehlgeschlagen.": "Saving the visibility failed.",
 "Schreibrechte": "Write permissions",
+// --- Storage-Erweiterungen ---
+"Storage": "Storage",
+"Storage filtern – Cluster, LUN, NAA, Typ …": "Filter storage – cluster, LUN, NAA, type …",
+"Anfragen als CSV": "Requests as CSV", "Storage-Anfragen als CSV (inkl. NAA)": "Storage requests as CSV (incl. NAA)",
+"Datastore / LUN": "Datastore / LUN", "NAA": "NAA", "Erweiterung": "Expansion",
+"Keine Storage-Daten.": "No storage data.",
+"Erweitern": "Expand", "angefragt": "requested",
+"Storage-Erweiterung angefragt.": "Storage expansion requested.",
+"Anfrage fehlgeschlagen.": "Request failed.",
+"Ändern fehlgeschlagen.": "Change failed.",
+"wieder offen": "reopen", "✓ erledigt": "✓ done",
+"+ Storage-Erweiterung": "+ Storage expansion",
+"Bestehende LUN vergrößern": "Grow an existing LUN",
+"Neue LUN anlegen": "Create a new LUN",
+"Wunschgröße muss größer als die aktuelle Größe sein.": "Target size must exceed the current size.",
+"Bitte eine Größe in TB angeben.": "Please enter a size in TB.",
+"Storage-Erweiterungen": "Storage expansions",
+"Storage-Erweiterungen erlauben": "Allow storage expansions",
+"Storage-Erweiterungen erlauben ": "Allow storage expansions ",
+"Ist dies aktiv, können Freigebende beim Genehmigen und alle Berechtigten in der Storage-Übersicht eine LUN-Vergrößerung oder eine neue LUN anfragen. Das Storage-Team ruft die offenen Anfragen per API ab":
+  "When active, approvers (on approval) and everyone entitled (in the storage overview) can request a LUN expansion or a new LUN. The storage team fetches the open requests via the API",
+", auch CSV inkl. NAA) und meldet mit einem Token-Schreibrecht „Storage\" die Umsetzung zurück.":
+  ", also CSV incl. NAA) and reports completion with a token \"Storage\" write permission.",
 "Ändern der Token-Rechte fehlgeschlagen.": "Changing the token permissions failed."
 };
 // Muster mit variablen Teilen (ganzer Text)
@@ -5303,13 +5550,16 @@ def serve(args, password):
                    "announce": args.announce_file,
                    "autoapprove": args.autoapprove_file,
                    "sessions": args.sessions_file,
-                   "visibility": args.visibility_file}
+                   "visibility": args.visibility_file,
+                   "storagecfg": args.storagecfg_file,
+                   "storagereq": args.storagereq_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
         for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify",
-                   "prefs", "announce", "autoapprove", "visibility"):
+                   "prefs", "announce", "autoapprove", "visibility",
+                   "storagecfg", "storagereq"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
                 try:
@@ -6019,6 +6269,29 @@ def serve(args, password):
                 c.get("workload", "")])
         return buf.getvalue()
 
+    def storagereq_csv(rows, lang="de"):
+        """Storage-Erweiterungen als CSV fürs Storage-Team (inkl. NAA)."""
+        import csv
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";")
+        if lang == "en":
+            w.writerow(["id", "cluster", "kind", "lun", "naa", "current_gb",
+                        "target_gb", "new_lun_gb", "comment", "requested_by",
+                        "requested_on", "status", "reservation"])
+        else:
+            w.writerow(["id", "cluster", "typ", "lun", "naa", "aktuell_gb",
+                        "ziel_gb", "neue_lun_gb", "kommentar", "angefragt_von",
+                        "angefragt_am", "status", "reservierung"])
+        for r in rows:
+            w.writerow([r.get("id", ""), r.get("cluster", ""), r.get("kind", ""),
+                        r.get("lun_name", ""), r.get("naa", ""),
+                        r.get("current_gb", ""), r.get("target_gb", ""),
+                        r.get("size_gb", ""), r.get("comment", ""),
+                        r.get("requested_by", ""), r.get("requested_on", ""),
+                        r.get("status", ""), r.get("res_name", "")])
+        return buf.getvalue()
+
     # ---- Audit-Log (JSONL, nur für Admins einsehbar) ----
     # Rotation: ab LOG_MAX_BYTES wird die Datei zu .1 (…, .LOG_KEEP) weggerollt,
     # damit sie nicht unbegrenzt wächst. Gelesen wird nur das Dateiende.
@@ -6240,6 +6513,55 @@ def serve(args, password):
 
     def save_autoapprove():
         store.save("autoapprove", autoapprove_cfg)
+
+    # ---- Storage-Erweiterungen (Freigabe-Workflow -> Storage-Team) ----
+    # Beim Freigeben kann eine LUN-Vergrößerung oder eine neue LUN angefragt
+    # werden; das Storage-Team ruft die offenen Anfragen (inkl. NAA) per API
+    # ab und setzt sie nach Umsetzung auf "erledigt". Dynamisch schaltbar.
+    storage_lock = threading.Lock()
+
+    def load_storagecfg():
+        raw = store.load("storagecfg", None)
+        return {"enabled": bool((raw or {}).get("enabled"))} \
+            if isinstance(raw, dict) else {"enabled": False}
+
+    storage_cfg = load_storagecfg()
+    storage_reqs = store.load("storagereq", None)
+    storage_reqs = storage_reqs if isinstance(storage_reqs, list) else []
+
+    def save_storage_reqs():
+        store.save("storagereq", storage_reqs)
+
+    def clean_storage_req(body, actor):
+        """Eine Storage-Anfrage aus dem Freigabe-Dialog säubern. kind=expand
+        (bestehende LUN auf target_gb) oder kind=new (neue LUN size_gb)."""
+        b = body if isinstance(body, dict) else {}
+        one = lambda v, n: " ".join(str(v or "").split())[:n]
+        kind = "new" if b.get("kind") == "new" else "expand"
+        try:
+            size = int(float(b.get("size_gb") or 0))
+            target = int(float(b.get("target_gb") or 0))
+            cur = int(float(b.get("current_gb") or 0))
+        except (TypeError, ValueError):
+            return None
+        req = {"id": new_res_id(), "res_id": one(b.get("res_id"), 40),
+               "res_name": one(b.get("res_name"), 120),
+               "cluster": one(b.get("cluster"), 120), "kind": kind,
+               "comment": one(b.get("comment"), 200),
+               "requested_by": actor,
+               "requested_on": datetime.now().date().isoformat(),
+               "status": "offen", "done_by": "", "done_on": ""}
+        if kind == "expand":
+            if not one(b.get("lun_name"), 200) or target <= cur:
+                return None
+            req.update(lun_name=one(b.get("lun_name"), 200),
+                       naa=one(b.get("naa"), 80), current_gb=cur,
+                       target_gb=target)
+        else:
+            if size <= 0:
+                return None
+            req.update(lun_name="", naa="", size_gb=size)
+        return req
 
     def auto_check(r, cfg):
         """Schwellen gegen den Ziel-Cluster prüfen — NACH Abzug des Antrags.
@@ -6810,7 +7132,8 @@ def serve(args, password):
                     "refreshing": bool(state["refreshing"]),
                     "clusters": len(state.get("clusters") or []),
                     "error": state.get("error") or None})
-            elif route in ("/api/v1/reservations", "/api/v1/data", "/api/v1/status"):
+            elif route in ("/api/v1/reservations", "/api/v1/data",
+                           "/api/v1/status", "/api/v1/storage-requests"):
                 # Stabile v1-API für externe Anwendungen: Bearer-Token oder Session
                 tok = self._bearer()
                 s = None
@@ -6820,6 +7143,19 @@ def serve(args, password):
                         self._json({"error": "Bearer-Token oder Anmeldung "
                                              "erforderlich"}, 401)
                         return
+                if route == "/api/v1/storage-requests":
+                    # Für das Storage-Team: offene (Standard) oder alle Anfragen,
+                    # inkl. NAA — als JSON oder CSV für die Automatisierung.
+                    only = (query.get("status", ["offen"])[0] or "offen").lower()
+                    with storage_lock:
+                        rows = [dict(x) for x in storage_reqs
+                                if only == "alle" or x.get("status") == only]
+                    if query.get("format", [""])[0] == "csv":
+                        self._send(storagereq_csv(rows, self._lang()),
+                                   "text/csv; charset=utf-8")
+                    else:
+                        self._json({"requests": rows})
+                    return
                 if route == "/api/v1/status":
                     nxt = None
                     if interval > 0 and state["last"]:
@@ -6900,6 +7236,18 @@ def serve(args, password):
                     self._json({"visibility": json.loads(json.dumps(visibility_cfg)),
                                 "features": list(VIS_FEATURES),
                                 "roles": list(VIS_ROLES)})
+            elif route == "/api/storage-requests":
+                # Storage-Übersicht: für jede angemeldete Rolle sichtbar
+                if not self._require():
+                    return
+                with storage_lock:
+                    self._json({"enabled": storage_cfg["enabled"],
+                                "requests": json.loads(json.dumps(storage_reqs))})
+            elif route == "/api/storagecfg":
+                if not self._require("admin"):
+                    return
+                with storage_lock:
+                    self._json({"enabled": storage_cfg["enabled"]})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -6917,7 +7265,43 @@ def serve(args, password):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path == "/api/login":
+            if self.path == "/api/storage-request":
+                # Storage-Erweiterung anlegen — aus dem Freigabe-Dialog (mit
+                # res_id, dann Reviewer-Team-Check) ODER direkt aus der
+                # Storage-Übersicht (ohne res_id, Ad-hoc).
+                s = self._require("admin", "reviewer")
+                if not s:
+                    return
+                with storage_lock:
+                    if not storage_cfg["enabled"]:
+                        self._json({"error": "Storage-Erweiterungen sind nicht "
+                                             "aktiviert."}, 403)
+                        return
+                body = self._body() or {}
+                rid = str(body.get("res_id") or "")
+                if rid and s["role"] == "reviewer":
+                    with res_lock:
+                        r = next((x for x in reservations if x.get("id") == rid), None)
+                        team = current_team(r) if r else None
+                    if not approval_teams or (s.get("abteilung") or "") != (team or ""):
+                        self._json({"error": "Nur das aktuell zuständige Team "
+                                             "darf das zum Antrag anfragen."}, 403)
+                        return
+                req = clean_storage_req(body, s["user"] or "")
+                if req is None:
+                    self._json({"error": "Ungültige Storage-Anfrage (Cluster, "
+                                         "LUN/Größe prüfen)"}, 400)
+                    return
+                with storage_lock:
+                    storage_reqs.append(req)
+                    save_storage_reqs()
+                detail = (f"neue LUN {req['size_gb']} GB" if req["kind"] == "new"
+                          else f"{req['lun_name']} → {req['target_gb']} GB")
+                audit(s["user"], "Storage-Erweiterung angefragt",
+                      f"{req['cluster']} · {detail}"
+                      + (f" (zu {req['res_name']})" if req["res_name"] else ""))
+                self._json({"request": req}, 201)
+            elif self.path == "/api/login":
                 if not auth_enabled:
                     self.send_error(404)
                     return
@@ -7106,6 +7490,27 @@ def serve(args, password):
                 res_decision_notify(op, notify, actor, comment,
                                     action=action, api=True)
                 emit_auto_events(notify, auto_events)
+            elif (self.path.startswith("/api/v1/storage-requests/")
+                    and self.path.endswith("/done")):
+                # Storage-Team meldet Umsetzung: Schreibrecht „Storage"
+                actor = self._bearer_scope("write_storage", "Storage")
+                if not actor:
+                    return
+                sid = urllib.parse.unquote(
+                    self.path[len("/api/v1/storage-requests/"):-len("/done")])
+                with storage_lock:
+                    req = next((x for x in storage_reqs if x.get("id") == sid), None)
+                    if not req:
+                        self._json({"error": "Anfrage nicht gefunden"}, 404)
+                        return
+                    req["status"] = "erledigt"
+                    req["done_by"] = actor
+                    req["done_on"] = datetime.now().date().isoformat()
+                    save_storage_reqs()
+                    result = dict(req)
+                audit(actor, "Storage-Erweiterung erledigt (API)",
+                      req.get("lun_name") or f"neue LUN ({req.get('cluster')})")
+                self._json({"request": result})
             elif self.path == "/api/reservations":
                 s = self._require("admin", "anforderer")
                 if not s:
@@ -7493,6 +7898,38 @@ def serve(args, password):
                 audit(s["user"], "Sichtbarkeit geändert",
                       "ausgeblendet: " + (", ".join(sorted(hidden)) or "nichts"))
                 self._json({"visibility": result})
+            elif self.path == "/api/storagecfg":
+                s = self._require("admin")
+                if not s:
+                    return
+                on = bool((self._body() or {}).get("enabled"))
+                with storage_lock:
+                    storage_cfg["enabled"] = on
+                    store.save("storagecfg", storage_cfg)
+                audit(s["user"], "Storage-Erweiterungen",
+                      "aktiviert" if on else "deaktiviert")
+                self._json({"enabled": on})
+            elif self.path.startswith("/api/storage-request/"):
+                # erledigt/offen umschalten (Admin im UI)
+                s = self._require("admin")
+                if not s:
+                    return
+                sid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+                done = bool((self._body() or {}).get("done"))
+                with storage_lock:
+                    req = next((x for x in storage_reqs if x.get("id") == sid), None)
+                    if not req:
+                        self._json({"error": "Anfrage nicht gefunden"}, 404)
+                        return
+                    req["status"] = "erledigt" if done else "offen"
+                    req["done_by"] = (s["user"] or "") if done else ""
+                    req["done_on"] = datetime.now().date().isoformat() if done else ""
+                    save_storage_reqs()
+                    result = json.loads(json.dumps(storage_reqs))
+                audit(s["user"], "Storage-Erweiterung " +
+                      ("erledigt" if done else "wieder offen"),
+                      req.get("lun_name") or f"neue LUN ({req.get('cluster')})")
+                self._json({"requests": result})
             elif self.path == "/api/autoapprove":
                 s = self._require("admin")
                 if not s:
@@ -7571,14 +8008,17 @@ def serve(args, password):
                         return
                     t["write_res"] = bool(body.get("write_res"))
                     t["write_approve"] = bool(body.get("write_approve"))
+                    t["write_storage"] = bool(body.get("write_storage"))
                     t["scope"] = ("read"
                                   + ("+res" if t["write_res"] else "")
-                                  + ("+approve" if t["write_approve"] else ""))
+                                  + ("+approve" if t["write_approve"] else "")
+                                  + ("+storage" if t["write_storage"] else ""))
                     save_tokens()
                     name = t.get("name", tid)
                     self._json(token_list())
                 rights = [lbl for flag, lbl in (("write_res", "Reservierungen"),
-                                                ("write_approve", "Genehmigungen"))
+                                                ("write_approve", "Genehmigungen"),
+                                                ("write_storage", "Storage"))
                           if body.get(flag)]
                 audit(s["user"], "API-Token-Rechte geändert",
                       f"{name}: " + " + ".join(["lesen"] + rights))
@@ -7932,6 +8372,11 @@ def main():
                     help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
                          "(z. B. ein-/ausgeblendete Tabellenspalten; "
                          "Standard: data/kapa_prefs.json)")
+    ap.add_argument("--storagecfg-file", default="kapa_storagecfg.json",
+                    help="Datei: Schalter für Storage-Erweiterungen")
+    ap.add_argument("--storagereq-file", default="kapa_storage_anfragen.json",
+                    help="Datei mit den Storage-Erweiterungs-Anfragen "
+                         "(fürs Storage-Team, per API abrufbar)")
     ap.add_argument("--visibility-file", default="kapa_sichtbarkeit.json",
                     help="Datei mit der Sichtbarkeits-Matrix je Rolle "
                          "(Pflege über die Verwaltung)")
@@ -7975,6 +8420,8 @@ def main():
     args.autoapprove_file = data_path(args.autoapprove_file, base)
     args.sessions_file = data_path(args.sessions_file, base)
     args.visibility_file = data_path(args.visibility_file, base)
+    args.storagecfg_file = data_path(args.storagecfg_file, base)
+    args.storagereq_file = data_path(args.storagereq_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

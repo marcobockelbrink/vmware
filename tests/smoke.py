@@ -153,6 +153,41 @@ try:
     st, _, _ = req("POST", f"/api/v1/reservations/{rid}/reject", headers=auth)
     check("Entschieden -> reject 404", st == 404)
 
+    print("== Storage-Erweiterungen ==")
+    st, _, _ = req("POST", "/api/storage-request",
+                   {"cluster": "Cluster-01", "kind": "new", "size_gb": 2048})
+    check("Anfrage bei deaktiviertem Feature -> 403", st == 403)
+    req("PUT", "/api/storagecfg", {"enabled": True})
+    st, made, _ = req("POST", "/api/storage-request",
+                      {"cluster": "Cluster-02", "kind": "expand",
+                       "lun_name": "FC-LUN-201", "naa": "naa.6006016012ab",
+                       "current_gb": 4000, "target_gb": 8000, "comment": "SAP"})
+    sreq = made.get("request", {})
+    check("Expand-Anfrage 201 mit NAA", st == 201
+          and sreq.get("naa") == "naa.6006016012ab"
+          and sreq.get("target_gb") == 8000 and sreq.get("status") == "offen")
+    st, bad, _ = req("POST", "/api/storage-request",
+                     {"cluster": "Cluster-02", "kind": "expand",
+                      "lun_name": "X", "current_gb": 8000, "target_gb": 4000})
+    check("Ziel <= aktuell -> 400", st == 400)
+    st, csv_s, _ = req("GET", "/api/v1/storage-requests?format=csv", raw=True)
+    check("v1-CSV mit NAA-Spalte",
+          csv_s.decode().splitlines()[0].split(";")[4] == "naa"
+          and "naa.6006016012ab" in csv_s.decode())
+    # Token-Schreibrecht Storage -> /done
+    sid = sreq["id"]
+    req("PUT", f"/api/tokens/{tid}", {"write_res": True, "write_approve": True,
+                                      "write_storage": True})
+    st, dr, _ = req("POST", f"/api/v1/storage-requests/{sid}/done", headers=auth)
+    check("API-erledigt mit Storage-Recht",
+          st == 200 and dr["request"]["status"] == "erledigt"
+          and dr["request"]["done_by"] == "api:Smoke-Writer")
+    st, openl, _ = req("GET", "/api/v1/storage-requests")
+    st2, alll, _ = req("GET", "/api/v1/storage-requests?status=alle")
+    check("Filter offen/alle",
+          len(openl["requests"]) == 0 and len(alll["requests"]) == 1)
+    req("PUT", "/api/storagecfg", {"enabled": False})
+
     print("== CSV / Sprache / OpenAPI ==")
     st, csv_de, _ = req("GET", "/api/v1/reservations?format=csv", raw=True)
     st2, csv_en, _ = req("GET", "/api/v1/reservations?format=csv&lang=en", raw=True)

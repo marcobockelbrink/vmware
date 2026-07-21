@@ -52,6 +52,11 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   "approved (auto)", every evaluation incl. numbers in the audit log; never blocks,
   never rejects
 - **Archive** for rejected/cancelled requests (own menu item, permanent, same team visibility)
+- **Storage expansions** (dynamically enabled): approvers request — on approval
+  or in the new **storage overview** (menu between VLAN search and reservations)
+  — a **LUN expansion** or a **new LUN**; the storage team fetches the open
+  requests **via the API** (`/api/v1/storage-requests`, also CSV **incl. NAA**)
+  and reports completion with a token "Storage" write permission
 - Automatic **expiry** after `--res-ttl-days`; warning when a request exceeds free capacity
 
 **Roles, AD & security**
