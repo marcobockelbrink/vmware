@@ -45,6 +45,12 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 **Reservations & approval workflow**
 - Capacity requests with optional **change/Jira ticket**; dedicated reservation page with **search field** and totals row; **configurable capa-ID format** (`id-prefix`/`id-length`)
 - **Multi-stage approval** via teams (review order), approve/reject/cancel, status history
+- **Auto-approval** (Administration → Auto-approval): if the target cluster meets
+  configurable thresholds after subtracting the request (vCPU/RAM free %, largest
+  free LUN %, workload ≤ %), **stages checked per team are approved automatically**
+  (e.g. stage 1 manual, stages 2+3 automatic) — approver "Auto-Freigabe", badge
+  "approved (auto)", every evaluation incl. numbers in the audit log; never blocks,
+  never rejects
 - **Archive** for rejected/cancelled requests (own menu item, permanent, same team visibility)
 - Automatic **expiry** after `--res-ttl-days`; warning when a request exceeds free capacity
 
@@ -69,7 +75,7 @@ the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
 **Administration (admin UI)**
-- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / API tokens / Backup & configuration**
+- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Auto-approval / API tokens / Backup & configuration**
 - **Announcement popup**: admins publish an announcement on demand (title +
   text, activatable) — every user sees it **once** after sign-in ("Got it"
   marker per user); changing the text shows it to everyone again. Ideal for

@@ -206,6 +206,52 @@ try:
     st, p2, _ = req("PUT", "/api/prefs", {"cols": {}, "theme": "neon"})
     check("Ungültiges Theme wird verworfen", "theme" not in p2)
 
+    print("== Auto-Freigabe ==")
+    # Team 1 manuell, Team 2 auto; großzügige Schwellen (Sample-Cluster-03
+    # hat Luft und einen Workload-Wert)
+    st, aa, _ = req("PUT", "/api/autoapprove",
+                    {"enabled": True, "min_cpu_pct": 1, "min_ram_pct": 1,
+                     "min_lun_pct": 1, "max_workload_pct": 100,
+                     "teams": {"Team Security": True}})
+    check("Konfig speichern (Team-Haken gefiltert)",
+          aa["autoapprove"]["enabled"] is True
+          and aa["autoapprove"]["teams"] == {"Team Security": True})
+    st, res3, _ = req("POST", "/api/reservations",
+                      {"name": "Auto-Kaskade", "cluster": "Cluster-03",
+                       "vcpu": 1, "ram_gb": 1, "storage_gb": 1})
+    r3 = next(x for x in res3 if x["name"] == "Auto-Kaskade")
+    check("Stufe 1 manuell -> bleibt beantragt", not r3.get("approved")
+          and not (r3.get("approvals") or []))
+    st, out, _ = req("POST", f"/api/reservations/{r3['id']}/approve", {})
+    r3b = next(x for x in out if x["id"] == r3["id"])
+    check("Nach Stufe 1 kaskadiert Stufe 2 automatisch",
+          r3b.get("approved") is True
+          and r3b["approvals"][-1]["by"] == "Auto-Freigabe"
+          and r3b["approved_by"] == "Auto-Freigabe")
+    # Vollauto: beide Teams angehakt -> sofort genehmigt bei Anlage
+    req("PUT", "/api/autoapprove",
+        {"enabled": True, "min_cpu_pct": 1, "min_ram_pct": 1,
+         "min_lun_pct": 1, "max_workload_pct": 100,
+         "teams": {"Team Netzwerk": True, "Team Security": True}})
+    st, res4, _ = req("POST", "/api/reservations",
+                      {"name": "Voll-Auto", "cluster": "Cluster-03",
+                       "vcpu": 1, "ram_gb": 1})
+    r4 = next(x for x in res4 if x["name"] == "Voll-Auto")
+    check("Vollauto bei Anlage", r4.get("approved") is True
+          and len(r4["approvals"]) == 2)
+    # Schwelle blockiert -> bleibt beantragt (Audit nennt den Grund)
+    req("PUT", "/api/autoapprove",
+        {"enabled": True, "min_cpu_pct": 99, "min_ram_pct": 99,
+         "min_lun_pct": 99, "max_workload_pct": 0,
+         "teams": {"Team Netzwerk": True, "Team Security": True}})
+    st, res5, _ = req("POST", "/api/reservations",
+                      {"name": "Zu-Gross", "cluster": "Cluster-03",
+                       "vcpu": 1, "ram_gb": 1})
+    r5 = next(x for x in res5 if x["name"] == "Zu-Gross")
+    check("Schwelle greift nicht -> normaler Weg",
+          not r5.get("approved") and not (r5.get("approvals") or []))
+    req("PUT", "/api/autoapprove", {"enabled": False})
+
     print("== Anmeldemaske: Passwort-Detektor ==")
     DATA2 = tempfile.mkdtemp(prefix="kapa_smoke_ad_")
     P2 = free_port()

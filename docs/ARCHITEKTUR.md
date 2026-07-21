@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.8.4. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.9. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -143,6 +143,10 @@ stateDiagram-v2
     end note
 ```
 
+Optional gibt eine **Auto-Freigabe** je Team angehakte Stufen automatisch
+frei, wenn der Ziel-Cluster nach Abzug des Antrags konfigurierte Schwellen
+(vCPU/RAM/größte LUN/Workload) einhält — geprüft bei Antragstellung und
+Stufenwechsel, konservativ (fehlende Daten blockieren), voll auditiert.
 Erst der Status **genehmigt** zählt gegen die freie Kapazität — zusammen mit
 den automatisch gelesenen **Tanzu-Namespace-Reservierungen**. Mails gehen je
 Ereignis nach der Matrix in der Verwaltung (Anlage/Ablehnung/Freigabe/„Team

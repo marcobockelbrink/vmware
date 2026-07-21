@@ -45,6 +45,11 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 **Reservierungen & Genehmigungs-Workflow**
 - Kapazitätsanfragen mit optionalem **Change/Jira-Ticket**; eigene Reservierungsseite mit **Suchmaske** und Summenzeile; **Kapa-ID-Format konfigurierbar** (`id-prefix`/`id-length`)
 - **Mehrstufige Genehmigung** über Teams (Prüfreihenfolge), Freigabe/Ablehnung/Storno, Status-Historie
+- **Auto-Freigabe** (Verwaltung → Auto-Freigabe): erfüllt der Ziel-Cluster nach Abzug
+  des Antrags einstellbare Schwellen (vCPU/RAM frei %, größte freie LUN %, Workload ≤ %),
+  werden **je Team angehakte Stufen automatisch freigegeben** (z. B. Stufe 1 manuell,
+  Stufe 2+3 automatisch) — Freigebender „Auto-Freigabe", Badge „genehmigt (auto)",
+  jede Prüfung samt Zahlen im Audit-Log; blockiert nie, lehnt nie ab
 - **Archiv** für abgelehnte/stornierte Anfragen (eigener Menüpunkt, dauerhaft, gleiche Team-Sichtbarkeit)
 - Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt
 
@@ -69,7 +74,7 @@ und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
   Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
 **Verwaltung (Admin-UI)**
-- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / API-Tokens / Backup & Konfiguration**
+- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / Auto-Freigabe / API-Tokens / Backup & Konfiguration**
 - **Ankündigungs-Popup**: Admins veröffentlichen bei Bedarf eine Ankündigung
   (Titel + Text, aktivierbar) — jeder Benutzer sieht sie **einmal** nach der
   Anmeldung („Verstanden"-Merker je Benutzer); Textänderung zeigt sie allen

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.8.4"
+VERSION = "2.9"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -761,6 +761,7 @@ def sftp_backup(args):
                          args.rolenames_file, args.selector_file, args.notify_file,
                          getattr(args, "prefs_file", ""),
                          getattr(args, "announce_file", ""),
+                         getattr(args, "autoapprove_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1856,6 +1857,8 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   h1 { font-size:20px; margin:0 0 2px; }
   .sub { color:var(--muted); margin-bottom:20px; }
   a { color:var(--accent); }
+  .aanum { width:70px; background:var(--field); border:1px solid var(--line);
+           color:var(--text); border-radius:6px; padding:4px 6px; text-align:center; }
   .authbox { background:var(--card); border:1px solid var(--line); border-radius:12px;
              padding:14px 16px; margin-bottom:20px; }
   .authbox label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
@@ -2458,6 +2461,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabSel" onclick="setAdmTab('sel')">Cluster-Selektor</span>
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
+  <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Auto-Freigabe</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
@@ -2536,6 +2540,38 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </table>
 </div>
 </div><!-- admGrpSel -->
+
+<div id="admGrpAuto" style="display:none">
+<div class="sechead">Auto-Freigabe (Schwellenwerte)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:10px">
+  Erfüllt der Ziel-Cluster <b>nach</b> Abzug des Antrags alle Schwellen, gibt
+  das System markierte Stufen automatisch frei (Freigebender:
+  „Auto-Freigabe", vollständig im Audit-Log). Geprüft wird bei der
+  Antragstellung und immer, wenn eine Stufe neu an der Reihe ist. Greift eine
+  Schwelle nicht oder fehlen Daten (z. B. kein Workload-Wert), geht der Antrag
+  ganz normal an das Team — die Auto-Freigabe lehnt nie ab.</div>
+<div style="margin-bottom:12px">
+  <label style="font-size:13px"><input type="checkbox" id="aaEnabled"> aktiv – Auto-Freigabe einschalten</label>
+</div>
+<table class="kt" style="max-width:560px">
+  <tr><td>vCPU frei mindestens</td>
+      <td class="num"><input type="number" id="aaCpu" min="0" max="100" class="aanum"> %</td></tr>
+  <tr><td>RAM frei mindestens</td>
+      <td class="num"><input type="number" id="aaRam" min="0" max="100" class="aanum"> %</td></tr>
+  <tr><td>Größte freie LUN mindestens frei</td>
+      <td class="num"><input type="number" id="aaLun" min="0" max="100" class="aanum"> %</td></tr>
+  <tr><td>Workload höchstens</td>
+      <td class="num"><input type="number" id="aaWl" min="0" max="100" class="aanum"> %</td></tr>
+</table>
+<div class="sechead" style="margin-top:18px">Stufen mit Auto-Freigabe</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Nur angehakte Teams werden automatisch freigegeben — z. B. Team 1 prüft
+  manuell, die weiteren Stufen laufen automatisch durch. Ohne Teams gilt der
+  Haken sinngemäß für die einstufige Freigabe.</div>
+<div id="aaTeams" style="margin-bottom:12px"></div>
+<button class="btn approve" onclick="saveAutoApprove()">✓ Auto-Freigabe speichern</button>
+<span id="aaSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div><!-- admGrpAuto -->
 
 <div id="admGrpTok" style="display:none">
 <div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
@@ -2956,7 +2992,7 @@ function stBadge(r) {
   if (r.cancelled)
     return `<span class="st canc" title="storniert${r.cancelled_by ? " von " + esc(r.cancelled_by) : ""} am ${fmtDate(r.cancelled_on)}${cmt}">storniert</span>`;
   if (r.approved)
-    return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt</span>`;
+    return `<span class="st ok" title="genehmigt${r.approved_by ? " von " + esc(r.approved_by) : ""} am ${fmtDate(r.approved_on)}${cmt}">genehmigt${r.approved_by === "Auto-Freigabe" ? " (auto)" : ""}</span>`;
   if (TEAMS.length && stageOf(r) > 0) {
     // teilweise freigegeben -> in Prüfung; Mouseover zeigt, wer schon freigab
     const done = approvalsText(r);
@@ -3491,7 +3527,7 @@ function setView(v) {
       : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
       : v === "vlan" ? "#vlan-suche" : location.pathname);
   } catch (e) {}
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); }
   if (v === "log") loadLog();
   render();
 }
@@ -3861,6 +3897,48 @@ function saveAnnounce() {
       if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
     }).catch(() => notify("Speichern der Ankündigung fehlgeschlagen."));
 }
+// ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
+let AA_CFG = null;
+function loadAutoApprove() {
+  fetch("api/autoapprove").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.autoapprove) { AA_CFG = d.autoapprove; if (VIEW === "adm") renderAutoApprove(); }
+  }).catch(() => {});
+}
+function renderAutoApprove() {
+  if (!AA_CFG) return;
+  const set = (id, v) => { const el = document.getElementById(id);
+    if (el && document.activeElement !== el) el.value = v; };
+  const en = document.getElementById("aaEnabled");
+  if (en) en.checked = !!AA_CFG.enabled;
+  set("aaCpu", AA_CFG.min_cpu_pct); set("aaRam", AA_CFG.min_ram_pct);
+  set("aaLun", AA_CFG.min_lun_pct); set("aaWl", AA_CFG.max_workload_pct);
+  const box = document.getElementById("aaTeams");
+  if (box) box.innerHTML = (TEAMS.length ? TEAMS : []).map((t, i) =>
+    `<label style="display:block;font-size:13px;margin:3px 0">
+       <input type="checkbox" data-aateam="${esc(t)}"
+         ${AA_CFG.teams && AA_CFG.teams[t] ? "checked" : ""}>
+       Stufe ${i + 1}: ${esc(t)}</label>`).join("")
+    || `<span style="color:var(--muted);font-size:12px">Keine Teams – einstufig (Haken entfällt, es gelten nur die Schwellen).</span>`;
+}
+function saveAutoApprove() {
+  const num = id => parseInt((document.getElementById(id) || {}).value, 10) || 0;
+  const teams = {};
+  document.querySelectorAll("input[data-aateam]").forEach(cb => {
+    if (cb.checked) teams[cb.getAttribute("data-aateam")] = true;
+  });
+  fetch("api/autoapprove", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ enabled: !!(document.getElementById("aaEnabled") || {}).checked,
+        min_cpu_pct: num("aaCpu"), min_ram_pct: num("aaRam"),
+        min_lun_pct: num("aaLun"), max_workload_pct: num("aaWl"), teams: teams }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      if (d && d.autoapprove) { AA_CFG = d.autoapprove; renderAutoApprove(); }
+      const st = document.getElementById("aaSaved");
+      if (st) { st.textContent = "✓ gespeichert"; setTimeout(() => { if (st) st.textContent = ""; }, 2500); }
+    }).catch(() => notify("Speichern der Auto-Freigabe fehlgeschlagen."));
+}
+
 function previewAnnounce() {
   _annPreview = true;
   document.querySelector("#annTitle span").textContent =
@@ -3892,9 +3970,9 @@ let ADM_TAB = "users";
 function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
-                 ann: "atabAnn", tok: "atabTok", conf: "atabConf" };
+                 ann: "atabAnn", auto: "atabAuto", tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
-                 ann: "admGrpAnn", tok: "admGrpTok", conf: "admGrpConf" };
+                 ann: "admGrpAnn", auto: "admGrpAuto", tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -4217,7 +4295,7 @@ function render() {
   if (VIEW === "res") { renderResTable(); return; }
   if (VIEW === "app") { renderAppTable(); return; }
   if (VIEW === "arch") { renderArchiveTable(); return; }
-  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
+  if (VIEW === "adm") { renderAdmTable(); renderRoleNames(); renderTeams(); renderNotify(); renderMailTemplate(); renderAnnounce(); renderAutoApprove(); renderSelector(); renderTokenTable(); renderConfig("configSheet"); renderConfig("configMail", "Mail / SMTP"); setAdmTab(ADM_TAB); return; }
   if (VIEW === "log") { renderLogTable(); return; }
   renderClusterSelector();
   const idxs = filteredIdx();
@@ -4746,6 +4824,25 @@ const I18N = {
 "Namespace": "Namespace", "CPU (MHz)": "CPU (MHz)", "vCPU-Äquiv.": "vCPU equiv.",
 // --- Token-Schreibrechte / Verwaltungs-Reiter ---
 "Cluster-Selektor": "Cluster selector", "API-Tokens": "API tokens",
+// --- Auto-Freigabe ---
+"Auto-Freigabe": "Auto-approval",
+"Auto-Freigabe (Schwellenwerte)": "Auto-approval (thresholds)",
+"Erfüllt der Ziel-Cluster": "If the target cluster meets all thresholds",
+"nach": "after",
+"Abzug des Antrags alle Schwellen, gibt das System markierte Stufen automatisch frei (Freigebender: „Auto-Freigabe\", vollständig im Audit-Log). Geprüft wird bei der Antragstellung und immer, wenn eine Stufe neu an der Reihe ist. Greift eine Schwelle nicht oder fehlen Daten (z. B. kein Workload-Wert), geht der Antrag ganz normal an das Team — die Auto-Freigabe lehnt nie ab.":
+  "subtracting the request, the system approves marked stages automatically (approver: „Auto-Freigabe“, fully audit-logged). Evaluated on request creation and whenever a stage becomes current. If a threshold is missed or data is missing (e.g. no workload value), the request simply goes to the team — auto-approval never rejects.",
+"aktiv – Auto-Freigabe einschalten": "active – enable auto-approval",
+"vCPU frei mindestens": "vCPU free at least",
+"RAM frei mindestens": "RAM free at least",
+"Größte freie LUN mindestens frei": "Largest free LUN at least free",
+"Workload höchstens": "Workload at most",
+"Stufen mit Auto-Freigabe": "Stages with auto-approval",
+"Nur angehakte Teams werden automatisch freigegeben — z. B. Team 1 prüft manuell, die weiteren Stufen laufen automatisch durch. Ohne Teams gilt der Haken sinngemäß für die einstufige Freigabe.":
+  "Only checked teams are approved automatically — e.g. team 1 reviews manually, the later stages pass through automatically. Without teams, the thresholds apply to the single-stage approval.",
+"Keine Teams – einstufig (Haken entfällt, es gelten nur die Schwellen).": "No teams – single-stage (no checkboxes, only the thresholds apply).",
+"✓ Auto-Freigabe speichern": "✓ Save auto-approval",
+"Speichern der Auto-Freigabe fehlgeschlagen.": "Saving the auto-approval failed.",
+"genehmigt (auto)": "approved (auto)",
 "Schreibrechte": "Write permissions",
 "Ändern der Token-Rechte fehlgeschlagen.": "Changing the token permissions failed."
 };
@@ -4775,6 +4872,7 @@ const I18N_RX = [
   [/^Zuletzt geändert: (.+?) durch (.+)$/, "Last changed: $1 by $2"],
   [/^Zuletzt geändert: (.+)$/, "Last changed: $1"],
   [/^Tanzu-Namespaces \((\d+)\)$/, "Tanzu namespaces ($1)"],
+  [/^Stufe (\d+): (.+)$/, "Stage $1: $2"],
   [/^Kubernetes-Namespace-Reservierungen aus vROps – zählen wie genehmigte Reservierungen gegen die freie Kapazität \(CPU: ([\d.,]+) MHz je vCPU\)\.$/,
    "Kubernetes namespace reservations from vROps – count against free capacity like approved reservations (CPU: $1 MHz per vCPU)."],
   [/^Rollenzuweisung für „(.+)“ entfernen\?$/, "Remove role assignment for „$1“?"],
@@ -5055,13 +5153,14 @@ def serve(args, password):
                    "teams": args.teams_file, "selector": args.selector_file,
                    "rolenames": args.rolenames_file, "tokens": args.tokens_file,
                    "notify": args.notify_file, "prefs": args.prefs_file,
-                   "announce": args.announce_file}
+                   "announce": args.announce_file,
+                   "autoapprove": args.autoapprove_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
         for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify",
-                   "prefs", "announce"):
+                   "prefs", "announce", "autoapprove"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
                 try:
@@ -5916,6 +6015,119 @@ def serve(args, password):
         else:
             audit(actor, "Antrag storniert" + tag, res_detail(snap) + cmt)
 
+    # ---- Auto-Freigabe: Schwellenwert-basierte automatische Stufen-Freigabe ----
+    autoapprove_lock = threading.Lock()
+
+    def clean_autoapprove(raw):
+        raw = raw if isinstance(raw, dict) else {}
+        pct = lambda k, d: min(100, max(0, int(raw.get(k, d) or 0)
+                                        if str(raw.get(k, d)).lstrip("-").isdigit()
+                                        else d))
+        teams_raw = raw.get("teams") if isinstance(raw.get("teams"), dict) else {}
+        return {"enabled": bool(raw.get("enabled")),
+                "min_cpu_pct": pct("min_cpu_pct", 20),
+                "min_ram_pct": pct("min_ram_pct", 20),
+                "min_lun_pct": pct("min_lun_pct", 25),
+                "max_workload_pct": pct("max_workload_pct", 70),
+                "teams": {str(k): True for k, v in teams_raw.items() if v}}
+
+    autoapprove_cfg = clean_autoapprove(store.load("autoapprove", None))
+
+    def save_autoapprove():
+        store.save("autoapprove", autoapprove_cfg)
+
+    def auto_check(r, cfg):
+        """Schwellen gegen den Ziel-Cluster prüfen — NACH Abzug des Antrags.
+        Rückgabe (ok, begruendung). Fehlende Daten -> konservativ ablehnen."""
+        c = next((x for x in (state.get("clusters") or [])
+                  if x.get("name") == r.get("cluster")), None)
+        if not c:
+            return False, "Cluster nicht im aktuellen Datenstand"
+        rv_cpu = rv_ram = 0.0
+        for x in reservations:                     # unter res_lock aufgerufen
+            if x.get("approved") and not x.get("cancelled") \
+                    and x.get("cluster") == c.get("name") \
+                    and x.get("id") != r.get("id"):
+                rv_cpu += int(x.get("vcpu") or 0)
+                rv_ram += float(x.get("ram_gb") or 0)
+        checks = []
+        cap = float(c.get("vcpuCap") or 0)
+        if cap <= 0:
+            return False, "keine vCPU-Kapazität bekannt"
+        free = (float(c.get("vcpuFree") or 0) - rv_cpu
+                - float(c.get("tanzuVcpu") or 0) - int(r.get("vcpu") or 0))
+        p = free / cap * 100
+        if p < cfg["min_cpu_pct"]:
+            return False, f"vCPU frei {p:.0f} % < {cfg['min_cpu_pct']} %"
+        checks.append(f"vCPU frei {p:.0f} % ≥ {cfg['min_cpu_pct']} %")
+        cap = float(c.get("ramCap") or 0)
+        if cap <= 0:
+            return False, "keine RAM-Kapazität bekannt"
+        free = (float(c.get("ramFree") or 0) - rv_ram
+                - float(c.get("tanzuRamGb") or 0) - float(r.get("ram_gb") or 0))
+        p = free / cap * 100
+        if p < cfg["min_ram_pct"]:
+            return False, f"RAM frei {p:.0f} % < {cfg['min_ram_pct']} %"
+        checks.append(f"RAM frei {p:.0f} % ≥ {cfg['min_ram_pct']} %")
+        luns = c.get("datastores") or []
+        if not luns:
+            return False, "keine Storage-Daten für den Cluster"
+        best = max(luns, key=lambda l: float(l.get("cap_gb") or 0)
+                   - float(l.get("used_gb") or 0))
+        lcap = float(best.get("cap_gb") or 0)
+        if lcap <= 0:
+            return False, "größte LUN ohne Kapazitätswert"
+        lfree = (lcap - float(best.get("used_gb") or 0)
+                 - float(r.get("storage_gb") or 0))
+        p = lfree / lcap * 100
+        if p < cfg["min_lun_pct"]:
+            return False, (f"größte freie LUN '{best.get('name')}' "
+                           f"{p:.0f} % < {cfg['min_lun_pct']} %")
+        checks.append(f"LUN '{best.get('name')}' {p:.0f} % ≥ {cfg['min_lun_pct']} %")
+        wl = c.get("workload")
+        if wl is None:
+            return False, "kein Workload-Wert aus vROps (konservativ blockiert)"
+        if float(wl) > cfg["max_workload_pct"]:
+            return False, f"Workload {wl} % > {cfg['max_workload_pct']} %"
+        checks.append(f"Workload {wl} % ≤ {cfg['max_workload_pct']} %")
+        return True, " · ".join(checks)
+
+    def emit_auto_events(snap, events):
+        """Audit-Einträge der Auto-Freigabe (nach dem res_lock ausgeben)."""
+        for kind, msg in events:
+            if kind == "ok":
+                audit("Auto-Freigabe", "Antrag automatisch freigegeben",
+                      res_detail(snap) + " – " + msg)
+            else:
+                audit("Auto-Freigabe", "Auto-Freigabe nicht angewendet",
+                      res_detail(snap) + " – " + msg)
+
+    def try_auto_approve(r):
+        """Unter res_lock: auto-freigebbare Stufen kaskadierend freigeben.
+        Läuft bei Antragstellung und nach jeder manuellen Freigabe. Rückgabe:
+        Liste der Audit-Ereignisse (nach dem Lock ausgeben). Blockiert nie —
+        greift eine Schwelle nicht, bleibt der Antrag einfach beim Team."""
+        with autoapprove_lock:
+            cfg = dict(autoapprove_cfg)
+        if not cfg.get("enabled"):
+            return []
+        events = []
+        while not r.get("approved") and not r.get("rejected") \
+                and not r.get("cancelled"):
+            team = current_team(r)
+            if approval_teams and not cfg["teams"].get(team or ""):
+                break                     # diese Stufe prüft manuell
+            ok, why = auto_check(r, cfg)
+            if not ok:
+                events.append(("skip", f"{team or 'einstufig'}: {why}"))
+                break
+            action = res_apply_approve(r, "Auto-Freigabe", "")
+            res_put(r)
+            events.append(("ok", f"{action} – {why}"))
+            if not approval_teams:
+                break
+        return events
+
     def public_res(r):
         """Reservierung ohne serverinterne Felder (z. B. die aufgelöste
         Empfänger-Mailadresse von_mail) – so wie sie an Clients gehen darf."""
@@ -6446,6 +6658,11 @@ def serve(args, password):
                     return
                 with announce_lock:
                     self._json({"announce": json.loads(json.dumps(announce_cfg))})
+            elif route == "/api/autoapprove":
+                if not self._require("admin"):
+                    return
+                with autoapprove_lock:
+                    self._json({"autoapprove": json.loads(json.dumps(autoapprove_cfg))})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -6602,11 +6819,16 @@ def serve(args, password):
                     prune_reservations()
                     reservations.append(entry)
                     res_put(entry)
-                self._json({"reservation": public_res(entry)}, 201)
-                audit(actor, "Antrag erstellt (API)", res_detail(entry))
-                mail_event("created", entry, actor=actor)
-                if approval_teams:
-                    mail_event("team_turn", entry, team=current_team(entry),
+                    auto_events = try_auto_approve(entry)
+                    snap = dict(entry)
+                self._json({"reservation": public_res(snap)}, 201)
+                audit(actor, "Antrag erstellt (API)", res_detail(snap))
+                emit_auto_events(snap, auto_events)
+                mail_event("created", snap, actor=actor)
+                if snap.get("approved"):
+                    mail_event("approved", snap, actor="Auto-Freigabe")
+                elif approval_teams:
+                    mail_event("team_turn", snap, team=current_team(snap),
                                actor=actor)
             elif (self.path.startswith("/api/v1/reservations/")
                     and self.path.endswith(("/approve", "/reject", "/cancel"))):
@@ -6622,17 +6844,21 @@ def serve(args, password):
                 comment = str((self._body() or {}).get("comment") or "").strip()[:64]
                 notify = None
                 action = None
+                auto_events = []
                 with res_lock:
                     r = res_find_open(rid, for_cancel=(op == "cancel"))
                     if r is not None:
                         if op == "approve":
                             action = res_apply_approve(r, actor, comment)
+                            res_put(r)
+                            auto_events = try_auto_approve(r)
                         elif op == "reject":
                             res_apply_reject(r, actor, comment)
+                            res_put(r)
                         else:
                             res_apply_cancel(r, actor, comment)
+                            res_put(r)
                         notify = dict(r)
-                        res_put(r)
                 if notify is None:
                     self._json({"error": "Antrag nicht gefunden oder bereits "
                                          "entschieden."}, 404)
@@ -6640,6 +6866,7 @@ def serve(args, password):
                 self._json({"reservation": public_res(notify)})
                 res_decision_notify(op, notify, actor, comment,
                                     action=action, api=True)
+                emit_auto_events(notify, auto_events)
             elif self.path == "/api/reservations":
                 s = self._require("admin", "anforderer")
                 if not s:
@@ -6676,11 +6903,16 @@ def serve(args, password):
                     prune_reservations()
                     reservations.append(entry)
                     res_put(entry)
+                    auto_events = try_auto_approve(entry)
+                    snap = dict(entry)
                     self._json(visible_res(s))
-                audit(s["user"], "Antrag erstellt", res_detail(entry))
-                mail_event("created", entry, actor=s["user"] or "")
-                if approval_teams:               # erstes Team ist ab jetzt dran
-                    mail_event("team_turn", entry, team=current_team(entry),
+                audit(s["user"], "Antrag erstellt", res_detail(snap))
+                emit_auto_events(snap, auto_events)
+                mail_event("created", snap, actor=s["user"] or "")
+                if snap.get("approved"):
+                    mail_event("approved", snap, actor="Auto-Freigabe")
+                elif approval_teams:             # nächstes manuelles Team ist dran
+                    mail_event("team_turn", snap, team=current_team(snap),
                                actor=s["user"] or "")
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith(("/approve", "/reject"))):
@@ -6708,8 +6940,10 @@ def serve(args, password):
                                    "an der Reihe.", 403)
                         elif op == "approve":
                             action = res_apply_approve(r, s["user"] or "", comment)
-                            notify = dict(r)
                             res_put(r)
+                            # danach ggf. auto-freigebbare Folgestufen
+                            auto_events = try_auto_approve(r)
+                            notify = dict(r)
                         else:
                             res_apply_reject(r, s["user"] or "", comment)
                             notify = dict(r)
@@ -6722,6 +6956,8 @@ def serve(args, password):
                 if notify:
                     res_decision_notify(op, notify, s["user"] or "", comment,
                                         action=action)
+                    if op == "approve":
+                        emit_auto_events(notify, auto_events)
             elif (self.path.startswith("/api/reservations/")
                     and self.path.endswith("/cancel")):
                 # Storno: jemand aus derselben Abteilung (oder der Anforderer
@@ -6858,6 +7094,12 @@ def serve(args, password):
                         if old in te:
                             te[new] = te.pop(old)
                             save_notify()
+                    # Auto-Freigabe-Haken auf den neuen Namen umziehen
+                    with autoapprove_lock:
+                        ta = autoapprove_cfg.get("teams") or {}
+                        if old in ta:
+                            ta[new] = ta.pop(old)
+                            save_autoapprove()
                     # Zugewiesene Reviewer auf den neuen Team-Namen umziehen
                     moved = 0
                     for entry in roles.values():
@@ -6919,6 +7161,14 @@ def serve(args, password):
                         te.pop(k, None)
                     if orphan:
                         save_notify()
+                # verwaiste Auto-Freigabe-Haken entfernen
+                with autoapprove_lock:
+                    ta = autoapprove_cfg.get("teams") or {}
+                    gone = [k for k in ta if k not in new]
+                    for k in gone:
+                        ta.pop(k, None)
+                    if gone:
+                        save_autoapprove()
                 audit(s["user"], "Genehmigungs-Teams geändert",
                       " → ".join(new) if new else "(keine – einstufig)")
                 self._json({"teams": list(approval_teams)})
@@ -6985,6 +7235,31 @@ def serve(args, password):
                          if result["team_email"] else "")
                       + ("; Vorlage angepasst" if result.get("template_html") else ""))
                 self._json({"notify": result})
+            elif self.path == "/api/autoapprove":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body()
+                if not isinstance(body, dict):
+                    self._json({"error": "Objekt mit Auto-Freigabe-Konfiguration erwartet"}, 400)
+                    return
+                clean = clean_autoapprove(body)
+                with teams_lock:
+                    valid = set(approval_teams)
+                clean["teams"] = {k: True for k in clean["teams"] if k in valid}
+                with autoapprove_lock:
+                    autoapprove_cfg.clear()
+                    autoapprove_cfg.update(clean)
+                    save_autoapprove()
+                    result = json.loads(json.dumps(autoapprove_cfg))
+                audit(s["user"], "Auto-Freigabe geändert",
+                      ("aktiv" if result["enabled"] else "inaktiv")
+                      + f" · vCPU ≥ {result['min_cpu_pct']} %, RAM ≥ "
+                      + f"{result['min_ram_pct']} %, LUN ≥ {result['min_lun_pct']} %, "
+                      + f"Workload ≤ {result['max_workload_pct']} %"
+                      + (" · Teams: " + ", ".join(sorted(result["teams"]))
+                         if result["teams"] else " · keine Team-Haken"))
+                self._json({"autoapprove": result})
             elif self.path == "/api/announce":
                 s = self._require("admin")
                 if not s:
@@ -7399,6 +7674,9 @@ def main():
                     help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
                          "(z. B. ein-/ausgeblendete Tabellenspalten; "
                          "Standard: data/kapa_prefs.json)")
+    ap.add_argument("--autoapprove-file", default="kapa_autofreigabe.json",
+                    help="Datei mit der Auto-Freigabe-Konfiguration (Schwellen "
+                         "je Cluster-Kapazität; Pflege über die Verwaltung)")
     ap.add_argument("--announce-file", default="kapa_ankuendigung.json",
                     help="Datei mit der Ankündigung (Popup nach der Anmeldung; "
                          "Standard: data/kapa_ankuendigung.json); Pflege über "
@@ -7430,6 +7708,7 @@ def main():
     args.notify_file = data_path(args.notify_file, base)
     args.prefs_file = data_path(args.prefs_file, base)
     args.announce_file = data_path(args.announce_file, base)
+    args.autoapprove_file = data_path(args.autoapprove_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

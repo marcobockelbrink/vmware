@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.8.4. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.9. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -143,7 +143,11 @@ stateDiagram-v2
     end note
 ```
 
-Only the **approved** status counts against free capacity — together with the
+Optionally an **auto-approval** approves per-team-checked stages
+automatically when the target cluster meets configured thresholds
+(vCPU/RAM/largest LUN/workload) after subtracting the request — evaluated on
+creation and stage changes, conservative (missing data blocks), fully
+audited. Only the **approved** status counts against free capacity — together with the
 automatically read **Tanzu namespace reservations**. Mails fire per event
 according to the matrix in the administration (created/rejected/approved/
 "team's turn"/reminder), rendered through the **editable HTML template**.
