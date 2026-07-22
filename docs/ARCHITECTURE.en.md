@@ -104,10 +104,10 @@ sequenceDiagram
     participant B as build_summary
     participant ST as state + cache
 
-    S->>C: do_refresh (all sources in turn;<br/>only due areas — VMs/network/storage<br/>at their own interval, rest from raw cache)
+    S->>C: do_refresh (all sources in turn,<br/>only due areas VMs/network/storage<br/>at their own interval, rest from raw cache)
     C->>V: clusters, hosts, VMs (+ metrics/properties, bulk)
-    C->>V: host HBA WWPNs (storageAdapter:vmhbaN|port_WWN,<br/>candidate range in bulk)
-    C->>V: datastores (storage, vSAN factor,<br/>NAA from properties OR metric keys "Devices|naa…")
+    C->>V: host HBA WWPNs (storageAdapter vmhbaN port_WWN,<br/>candidate range in bulk)
+    C->>V: datastores (storage, vSAN factor,<br/>NAA from properties OR metric keys Devices naa)
     C->>V: tags, workload badge
     C->>V: dvSwitches → port groups (VLAN cache,<br/>full re-read once a day)
     C->>V: Tanzu namespaces (reservations,<br/>candidate keys, best effort)
@@ -116,7 +116,7 @@ sequenceDiagram
     B->>B: apply filters: minimum LUN + storage name filter,<br/>network filter (port-group name/VLAN ID)
     B->>ST: cluster list (+ source badge)
     ST->>ST: daily snapshot per cluster into the<br/>statistics history (trends, 2 years)
-    Note over B,ST: offline sources (import) pass through<br/>the SAME build_summary — identical math,<br/>appended with imported=True
+    Note over B,ST: offline sources (import) pass through<br/>the SAME build_summary, identical math,<br/>appended with imported=True
     Note over ST: partial-failure tolerant: if one source fails,<br/>the others keep delivering
 ```
 

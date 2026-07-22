@@ -104,10 +104,10 @@ sequenceDiagram
     participant B as build_summary
     participant ST as state + Cache
 
-    S->>C: do_refresh (alle Quellen nacheinander;<br/>nur fällige Teilbereiche — VMs/Netzwerk/Storage<br/>je eigenem Intervall, Rest aus Rohdaten-Cache)
+    S->>C: do_refresh (alle Quellen nacheinander,<br/>nur fällige Teilbereiche VMs/Netzwerk/Storage<br/>je eigenem Intervall, Rest aus Rohdaten-Cache)
     C->>V: Cluster, Hosts, VMs (+ Metriken/Properties, Bulk)
-    C->>V: Host-HBA-WWPNs (storageAdapter:vmhbaN|port_WWN,<br/>Kandidaten-Range im Bulk)
-    C->>V: Datastores (Storage, vSAN-Faktor,<br/>NAA aus Properties ODER Metrik-Keys "Devices|naa…")
+    C->>V: Host-HBA-WWPNs (storageAdapter vmhbaN port_WWN,<br/>Kandidaten-Range im Bulk)
+    C->>V: Datastores (Storage, vSAN-Faktor,<br/>NAA aus Properties ODER Metrik-Keys Devices naa)
     C->>V: Tags, Workload-Badge
     C->>V: dvSwitches → Portgruppen (VLAN-Cache,<br/>Voll-Abruf 1x täglich)
     C->>V: Tanzu-Namespaces (Reservierungen,<br/>Kandidaten-Keys, best effort)
@@ -116,7 +116,7 @@ sequenceDiagram
     B->>B: Filter anwenden: Mindest-LUN + Storage-Namensfilter,<br/>Netzwerk-Filter (Portgruppen-Name/VLAN-ID)
     B->>ST: Cluster-Liste (+ source-Badge)
     ST->>ST: Tages-Snapshot je Cluster in die<br/>Statistik-Historie (Trends, 2 Jahre)
-    Note over B,ST: Offline-Quellen (Import) laufen durch<br/>DIESELBE build_summary — gleiche Mathematik,<br/>angehängt mit imported=True
+    Note over B,ST: Offline-Quellen (Import) laufen durch<br/>DIESELBE build_summary, gleiche Mathematik,<br/>angehängt mit imported=True
     Note over ST: Teilausfall-tolerant: fällt eine Quelle aus,<br/>liefern die übrigen weiter
 ```
 
