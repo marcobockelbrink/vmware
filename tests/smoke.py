@@ -228,6 +228,13 @@ try:
                                    "exclude_names": ""})
 
     print("== AD-Gruppen-Check ==")
+    # Regression: AD-Gruppen (case-sensitiv gespeichert) müssen löschbar sein
+    req("POST", "/api/roles", {"user": "Kapa-Admins", "role": "admin", "kind": "group"})
+    st, after_add, _ = req("GET", "/api/roles")
+    req("DELETE", "/api/roles/Kapa-Admins")
+    st, after_del, _ = req("GET", "/api/roles")
+    check("AD-Gruppe löschbar (Original-Case)",
+          "Kapa-Admins" in after_add and "Kapa-Admins" not in after_del)
     st, adg, _ = req("POST", "/api/ad/group-members", {"cn": "Kapa-Admins"})
     check("Ohne AD-Config -> 400 mit Hinweis",
           st == 400 and "AD" in adg.get("error", ""))

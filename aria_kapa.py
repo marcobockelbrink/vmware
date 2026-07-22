@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.16"
+VERSION = "2.16.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -5325,6 +5325,7 @@ const I18N = {
   "API-Token-Rechte geändert": "API token permissions changed",
   "API-Token widerrufen": "API token revoked",
   "Rolle entfernt": "Role removed",
+  "AD-Gruppe entfernt": "AD group removed",
   "Rolle zugewiesen": "Role assigned",
   "AD-Gruppe zugewiesen": "AD group assigned",
   // Ganz-Satz-Hints (mit Inline-<b>/<code>, per i18nFlatten übersetzt)
@@ -8604,14 +8605,20 @@ def serve(args, password):
                 s = self._require("admin")
                 if not s:
                     return
-                user = urllib.parse.unquote(self.path.rsplit("/", 1)[1]).lower()
+                raw = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
                 with roles_lock:
-                    removed = roles.pop(user, None)
-                    save_roles()
+                    # AD-Gruppen sind case-sensitiv gespeichert, Benutzer klein –
+                    # daher zuerst exakt, dann klein probieren (nicht blind lower()).
+                    key = raw if raw in roles else raw.lower()
+                    removed = roles.pop(key, None)
+                    if removed:
+                        save_roles()
                 self._json(roles_with_mail())
                 if removed:
-                    audit(s["user"], "Rolle entfernt",
-                          f"{user} (war {removed.get('role')})")
+                    audit(s["user"],
+                          "AD-Gruppe entfernt" if removed.get("kind") == "group"
+                          else "Rolle entfernt",
+                          f"{key} (war {removed.get('role')})")
             else:
                 self.send_error(404)
 
