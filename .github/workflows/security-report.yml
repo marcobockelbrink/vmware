@@ -1,0 +1,65 @@
+# Fasst die Funde aller Scanner (CodeQL, Bandit, Semgrep, Trivy, Scorecard) aus
+# dem Security-Tab zu EINEM Bericht zusammen:
+#   - direkt lesbar in der Zusammenfassung des Workflow-Laufs (Markdown)
+#   - als HTML + PDF zum Herunterladen (Artefakt, 90 Tage aufbewahrt)
+#   - optional als E-Mail (nur wenn SMTP-Secrets hinterlegt sind)
+# Läuft wöchentlich und jederzeit manuell über "Run workflow".
+name: Security-Report
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # wöchentlich montags 06:00 UTC (nach den Scans)
+  workflow_dispatch:       # Knopf "Run workflow" für einen Bericht auf Abruf
+
+permissions:
+  contents: read
+  security-events: read    # Code-Scanning-Alerts lesen
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Bericht erzeugen (Markdown + HTML)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/security_report.py \
+            "${{ github.repository }}" security-report | tee report.env
+          # Markdown direkt in die Lauf-Zusammenfassung schreiben
+          cat security-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: PDF erzeugen
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq wkhtmltopdf
+          wkhtmltopdf --quiet --enable-local-file-access \
+            security-report.html security-report.pdf || \
+            echo "PDF-Erzeugung uebersprungen (HTML bleibt verfuegbar)"
+
+      - name: Bericht als Artefakt hochladen
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-report
+          path: |
+            security-report.md
+            security-report.html
+            security-report.pdf
+          retention-days: 90
+
+      # Optional: Bericht per E-Mail. Wird NUR ausgeführt, wenn die Secrets
+      # SMTP_HOST/SMTP_USER/SMTP_PASS/SMTP_TO im Repo hinterlegt sind
+      # (Settings -> Secrets and variables -> Actions).
+      - name: Bericht per E-Mail (optional)
+        if: ${{ secrets.SMTP_HOST != '' }}
+        uses: dawidd6/action-send-mail@4226df7daafa6fc901a43789c49bf7ab309066e7 # v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT || 587 }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          from: "Security-Report <${{ secrets.SMTP_USER }}>"
+          to: ${{ secrets.SMTP_TO }}
+          subject: "Sicherheitsreport ${{ github.repository }}"
+          html_body: file://security-report.html
+          attachments: security-report.pdf
