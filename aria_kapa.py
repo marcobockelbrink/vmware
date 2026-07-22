@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.17"
+VERSION = "2.17.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -4923,7 +4923,7 @@ function renderStorage() {
           <td style="font-family:monospace;font-size:12px">${esc(r.naa||"–")}</td>
           <td>${esc(r.requested_by||"–")} · ${fmtDate(r.requested_on)}</td>
           <td>${done?`erledigt${r.done_by?" ("+esc(r.done_by)+")":""}`:'<b style="color:var(--warn)">offen</b>'}</td>
-          ${IS_ADMIN?`<td><button class="btn" onclick="toggleStorDone('${esc(r.id)}',${done?'false':'true'})">${done?"wieder offen":"✓ erledigt"}</button></td>`:""}
+          ${IS_ADMIN?`<td style="white-space:nowrap"><button class="btn" onclick="toggleStorDone('${esc(r.id)}',${done?'false':'true'})">${done?"wieder offen":"✓ erledigt"}</button> <button class="del" title="Anfrage löschen (z. B. versehentlich angelegt)" onclick="delStorReq('${esc(r.id)}')">✕ Löschen</button></td>`:""}
         </tr>`; }).join("")}
       </table>
     </div>` : "";
@@ -4955,6 +4955,15 @@ function toggleStorDone(id, done) {
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(d => { if (d.requests) { STOR.requests = d.requests; renderStorage(); } })
     .catch(() => notify("Ändern fehlgeschlagen."));
+}
+function delStorReq(id) {
+  askConfirm({ title: "Storage-Anfrage löschen", okLabel: "✕ Löschen", okClass: "danger",
+    message: "Diese Storage-Anfrage wirklich löschen? Das lässt sich nicht rückgängig machen." })
+    .then(ok => { if (!ok) return;
+      fetch("api/storage-request/" + encodeURIComponent(id), { method: "DELETE" })
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(d => { if (d.requests) { STOR.requests = d.requests; renderStorage(); } })
+        .catch(() => notify("Löschen fehlgeschlagen.")); });
 }
 // Erweiterungs-Dialog — genutzt aus der Storage-Seite UND aus dem Freigabe-Popup
 function openStorReq(cluster, lun, naa, curGb, resId, resName) {
@@ -5360,6 +5369,12 @@ const I18N = {
   "optional, z. B. Change/Grund": "optional, e.g. change/reason",
   "(keine erweiterbare LUN)": "(no expandable LUN)",
   "Storage-Erweiterung angefragt": "Storage expansion requested",
+  "Storage-Anfrage löschen": "Delete storage request",
+  "Storage-Erweiterung gelöscht": "Storage expansion deleted",
+  "Diese Storage-Anfrage wirklich löschen? Das lässt sich nicht rückgängig machen.":
+    "Really delete this storage request? This cannot be undone.",
+  "Anfrage löschen (z. B. versehentlich angelegt)":
+    "Delete request (e.g. created by mistake)",
   "Storage-Erweiterung erledigt (API)": "Storage expansion completed (API)",
   "Storage-Erweiterung erledigt": "Storage expansion completed",
   "Storage-Erweiterung wieder offen": "Storage expansion reopened",
@@ -8687,6 +8702,28 @@ def serve(args, password):
                           "AD-Gruppe entfernt" if removed.get("kind") == "group"
                           else "Rolle entfernt",
                           f"{key} (war {removed.get('role')})")
+            elif self.path.startswith("/api/storage-request/"):
+                # Storage-Anfrage ganz entfernen (Admin im UI) – für versehentlich
+                # angelegte Anfragen. "erledigt"/"offen" bleibt davon unberührt.
+                s = self._require("admin")
+                if not s:
+                    return
+                sid = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+                with storage_lock:
+                    removed = next((x for x in storage_reqs
+                                    if x.get("id") == sid), None)
+                    if not removed:
+                        self._json({"error": "Anfrage nicht gefunden"}, 404)
+                        return
+                    storage_reqs[:] = [x for x in storage_reqs
+                                       if x.get("id") != sid]
+                    save_storage_reqs()
+                    result = json.loads(json.dumps(storage_reqs))
+                audit(s["user"], "Storage-Erweiterung gelöscht",
+                      (removed.get("lun_name")
+                       or f"neue LUN ({removed.get('cluster')})")
+                      + f" – {removed.get('status')}")
+                self._json({"requests": result})
             else:
                 self.send_error(404)
 

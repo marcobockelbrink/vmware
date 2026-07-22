@@ -192,6 +192,15 @@ try:
     st2, alll, _ = req("GET", "/api/v1/storage-requests?status=alle")
     check("Filter offen/alle",
           len(openl["requests"]) == 0 and len(alll["requests"]) == 1)
+    # Löschen einer versehentlich angelegten Anfrage (Admin) – netto ±0
+    st, mk, _ = req("POST", "/api/storage-request",
+                    {"cluster": "Cluster-01", "kind": "new", "size_gb": 512})
+    delid = mk["request"]["id"]
+    st, dd, _ = req("DELETE", f"/api/storage-request/{delid}")
+    st404, _, _ = req("DELETE", "/api/storage-request/gibtsnicht")
+    check("Anfrage löschbar (Admin)",
+          st == 200 and all(x["id"] != delid for x in dd["requests"])
+          and st404 == 404)
     # Maximum: Anfrage über dem Limit wird abgelehnt (Feature noch aktiv)
     req("PUT", "/api/storagecfg", {"enabled": True, "max_lun_gb": 10240})  # 10 TB
     st, big, _ = req("POST", "/api/storage-request",
