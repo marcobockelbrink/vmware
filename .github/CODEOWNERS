@@ -1,0 +1,5 @@
+# Code-Owner für das gesamte Repository. GitHub fordert automatisch ein Review
+# dieser Person an, sobald eine Pull-Request-Regel Reviews verlangt.
+# Code owner for the whole repository; requested for review automatically when
+# a branch/PR rule requires reviews.
+*       @marcobockelbrink
