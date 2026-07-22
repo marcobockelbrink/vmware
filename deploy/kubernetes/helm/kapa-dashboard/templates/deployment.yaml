@@ -26,6 +26,10 @@ spec:
         - name: kapa
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Härtung (Trivy-geprüft): non-root, kein Privileg-Aufstieg, read-only
+          # Root-FS (Schreibpfade /opt/kapa/data + /tmp als Volume), keine Caps.
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - containerPort: 8080
               name: http
@@ -43,6 +47,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/kapa/data
+            - name: tmp
+              mountPath: /tmp
             - name: config
               mountPath: /etc/kapa/kapa.ini
               subPath: kapa.ini
@@ -69,6 +75,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "kapa.fullname" .)) }}
+        - name: tmp
+          emptyDir: {}
         - name: config
           configMap:
             name: {{ include "kapa.fullname" . }}-config

@@ -28,6 +28,18 @@ spec:
         - name: kapa
           image: ghcr.io/marcobockelbrink/kapa-dashboard:2.11
           imagePullPolicy: IfNotPresent
+          # Härtung (empfohlen, von Trivy geprüft): non-root, kein Privileg-
+          # Aufstieg, read-only Root-FS (Schreibpfade sind /opt/kapa/data und
+          # /tmp – beide als Volume gemountet), alle Capabilities entfernt.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 8080
               name: http
@@ -42,6 +54,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/kapa/data
+            - name: tmp
+              mountPath: /tmp
             - name: config
               mountPath: /etc/kapa/kapa.ini
               subPath: kapa.ini
@@ -68,6 +82,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: kapa-dashboard-data
+        - name: tmp        # schreibbares /tmp trotz read-only Root-FS
+          emptyDir: {}
         - name: config
           configMap:
             name: kapa-dashboard-config

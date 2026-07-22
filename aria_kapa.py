@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.24.2"
+VERSION = "2.24.3"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -94,6 +94,7 @@ class AriaOps:
         self.ctx = None
         if not verify_tls:
             self.ctx = ssl.create_default_context()
+            self.ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             self.ctx.check_hostname = False
             self.ctx.verify_mode = ssl.CERT_NONE
         # Optionaler HTTP(S)-Proxy für abgesicherte Umgebungen: alle Aria-Aufrufe
@@ -311,6 +312,7 @@ def ldap_bind(url, username, password, timeout=10, insecure=False):
     try:
         if u.scheme == "ldaps":
             ctx = ssl.create_default_context()
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             if insecure:
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
@@ -427,6 +429,7 @@ def ldap_member_of(url, bind_dn, bind_pw, base_dn, user_upn,
     try:
         if u.scheme == "ldaps":
             ctx = ssl.create_default_context()
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             if insecure:
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
@@ -510,6 +513,7 @@ def ldap_user_attr(url, bind_dn, bind_pw, base_dn, user_upn, attr,
     try:
         if u.scheme == "ldaps":
             ctx = ssl.create_default_context()
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             if insecure:
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
@@ -592,6 +596,7 @@ def ldap_group_members(url, bind_dn, bind_pw, base_dn, group_cn,
     try:
         if u.scheme == "ldaps":
             ctx = ssl.create_default_context()
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             if insecure:
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE

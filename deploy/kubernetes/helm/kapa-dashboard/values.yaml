@@ -8,6 +8,18 @@ image:
 # MUSS 1 bleiben — Dateizustand im PVC (RWO). / MUST stay 1 — file state in PVC.
 replicaCount: 1
 
+# Container-Härtung (Trivy-geprüft). Bei Bedarf überschreibbar. / Container
+# hardening (checked by Trivy); override if needed.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
 service:
   port: 8080
 
