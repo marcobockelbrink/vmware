@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.19.2"
+VERSION = "2.19.3"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3096,7 +3096,11 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 
 <div id="admGrpUsers">
 <div class="sechead">Benutzer und Rollen</div>
-<div style="text-align:right;margin-bottom:6px"><span id="colctl_mtable"></span></div>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+  <input class="filterbox" id="admUserFilter" type="search" style="max-width:280px"
+         placeholder="Benutzer filtern …" oninput="render()">
+  <span id="colctl_mtable" style="margin-left:auto"></span>
+</div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
   <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Team</th><th class="nosort">Aktion</th></tr></thead>
@@ -4227,9 +4231,10 @@ function setView(v) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
-  document.getElementById("filter").style.display = (v === "vlan" || v === "stor" || v === "res" || v === "arch") ? "none" : "";
+  // Verwaltung hat eine eigene Filterbox im Tab „Benutzer und Rollen"
+  document.getElementById("filter").style.display = (v === "vlan" || v === "stor" || v === "res" || v === "arch" || v === "adm") ? "none" : "";
   document.getElementById("filter").placeholder =
-    v === "kapa" ? "Cluster filtern …" : v === "adm" ? "Benutzer filtern …"
+    v === "kapa" ? "Cluster filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
   hideCard();   // VOR dem Hash-Schreiben: räumt ggf. den #cluster-Hash weg
   try {
@@ -4955,7 +4960,7 @@ function syncRoleField(pfx, u) {
     roleField(pfx === "adm" ? "admDept" : "editDept", roleEl.value, val, pfx === "edit" ? u : null);
 }
 function renderAdmTable() {
-  const q = (document.getElementById("filter").value || "").trim().toLowerCase();
+  const q = ((document.getElementById("admUserFilter") || {}).value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
     !q || u.includes(q) || (ROLES[u].abteilung || "").toLowerCase().includes(q));
   const rows = users.map(u => {
