@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.24"
+VERSION = "2.24.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3537,15 +3537,32 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <div class="sechead" style="margin-top:22px">Kapa-Anfragen aus CSV (XLS-Ablösung)</div>
 <div class="hint" style="color:var(--muted);margin-bottom:8px">
   Übernimmt eure bestehende Excel-Liste: in Excel als <b>CSV speichern</b> und
-  hier hochladen. Erkannte Spalten (Reihenfolge egal, per Kopfzeile):
-  <code>Kapa-Nummer</code>, <code>Projekt</code>, <code>Cluster</code>,
-  <code>CPU</code>, <code>RAM</code>, <code>Storage</code>, <code>Datum</code> —
-  optional <code>Change</code>, <code>Anforderer</code>, <code>Team</code>.
-  Alle Zeilen kommen als <b>genehmigt</b> an (Freigebender „Import"); die
-  Gültigkeit rechnet ab dem <b>Original-Datum</b> — ältere Einträge laufen
-  entsprechend sofort ab (wird gemeldet). Bereits vorhandene Kapa-Nummern
-  werden übersprungen, ein erneuter Import erzeugt also keine Duplikate.</div>
+  hier hochladen. Alle Zeilen kommen als <b>genehmigt</b> an (Freigebender
+  „Import"); die Gültigkeit rechnet ab dem <b>Original-Datum</b> — ältere
+  Einträge laufen entsprechend sofort ab (wird gemeldet). Bereits vorhandene
+  Kapa-Nummern werden übersprungen, ein erneuter Import erzeugt also keine
+  Duplikate. Spalten werden an der <b>Kopfzeile</b> erkannt — Reihenfolge
+  egal, zusätzliche Spalten werden ignoriert:</div>
+<div class="tablewrap" style="max-width:760px;margin-bottom:10px">
+<table class="kt">
+  <thead><tr><th>Spalte (Kopfzeile)</th><th>Pflicht</th><th>Format</th><th>Beispiel</th></tr></thead>
+  <tbody>
+    <tr><td><code>Kapa-Nummer</code></td><td>ja</td><td>wird die ID; muss eindeutig sein</td><td style="font-family:monospace">KAPA-2024-017</td></tr>
+    <tr><td><code>Projekt</code></td><td>ja</td><td>Freitext (Name der Anfrage)</td><td>SAP-Erweiterung Q4</td></tr>
+    <tr><td><code>Cluster</code></td><td>ja</td><td>Cluster-Name wie im Dashboard</td><td style="font-family:monospace">Cluster-01</td></tr>
+    <tr><td><code>CPU</code></td><td>ja</td><td>ganze Zahl (vCPUs)</td><td style="font-family:monospace">16</td></tr>
+    <tr><td><code>RAM</code></td><td>ja</td><td>ganze Zahl in <b>GB</b></td><td style="font-family:monospace">128</td></tr>
+    <tr><td><code>Storage</code></td><td>ja</td><td>ganze Zahl in <b>GB</b> (Tausenderpunkt erlaubt)</td><td style="font-family:monospace">2.000</td></tr>
+    <tr><td><code>Datum</code></td><td>ja</td><td>TT.MM.JJJJ (auch JJJJ-MM-TT)</td><td style="font-family:monospace">15.06.2026</td></tr>
+    <tr><td><code>Change</code></td><td>–</td><td>Change-/Jira-Ticket</td><td style="font-family:monospace">OPS-4711</td></tr>
+    <tr><td><code>Anforderer</code></td><td>–</td><td>Benutzer/Mail</td><td style="font-family:monospace">anna.schmidt@firma.local</td></tr>
+    <tr><td><code>Team</code></td><td>–</td><td>Team-Name wie im Dashboard</td><td>Team Betrieb</td></tr>
+  </tbody>
+</table>
+</div>
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+  <a class="btn" href="api/import/reservations/beispiel" download="kapa-import-beispiel.csv"
+     title="Vorlage mit Kopfzeile und zwei Beispielzeilen – in Excel öffnen und befüllen">⬇ Beispiel-CSV (Vorlage)</a>
   <label class="btn">CSV-Datei wählen &amp; importieren<input
     type="file" accept=".csv,text/csv" hidden onchange="importKapaCsv(event)"></label>
   <span id="kapaCsvStatus" style="font-size:12px;color:var(--muted)"></span>
@@ -6173,6 +6190,25 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Kapa-CSV-Format-Doku
+  "Übernimmt eure bestehende Excel-Liste: in Excel als CSV speichern und hier hochladen. Alle Zeilen kommen als genehmigt an (Freigebender „Import\"); die Gültigkeit rechnet ab dem Original-Datum — ältere Einträge laufen entsprechend sofort ab (wird gemeldet). Bereits vorhandene Kapa-Nummern werden übersprungen, ein erneuter Import erzeugt also keine Duplikate. Spalten werden an der Kopfzeile erkannt — Reihenfolge egal, zusätzliche Spalten werden ignoriert:": "Takes over your existing Excel list: save it as CSV in Excel and upload it here. All rows arrive as approved (approver “Import”); validity counts from the original date — older entries expire immediately accordingly (reported). Existing kapa numbers are skipped, so re-importing does not create duplicates. Columns are matched by the header row — any order, extra columns are ignored:",
+  "Spalte (Kopfzeile)": "Column (header)",
+  "Pflicht": "Required",
+  "Format": "Format",
+  "Beispiel": "Example",
+  "ja": "yes",
+  "wird die ID; muss eindeutig sein": "becomes the ID; must be unique",
+  "Freitext (Name der Anfrage)": "free text (name of the request)",
+  "Cluster-Name wie im Dashboard": "cluster name as shown in the dashboard",
+  "ganze Zahl (vCPUs)": "whole number (vCPUs)",
+  "ganze Zahl in GB": "whole number in GB",
+  "ganze Zahl in GB (Tausenderpunkt erlaubt)": "whole number in GB (thousands dot allowed)",
+  "TT.MM.JJJJ (auch JJJJ-MM-TT)": "DD.MM.YYYY (also YYYY-MM-DD)",
+  "Change-/Jira-Ticket": "change/Jira ticket",
+  "Benutzer/Mail": "user/mail",
+  "Team-Name wie im Dashboard": "team name as shown in the dashboard",
+  "⬇ Beispiel-CSV (Vorlage)": "⬇ Sample CSV (template)",
+  "Vorlage mit Kopfzeile und zwei Beispielzeilen – in Excel öffnen und befüllen": "Template with header row and two sample rows – open in Excel and fill in",
   // Kapa-CSV-Import
   "Übernimmt eure bestehende Excel-Liste: in Excel als CSV speichern und hier hochladen. Erkannte Spalten (Reihenfolge egal, per Kopfzeile): Kapa-Nummer, Projekt, Cluster, CPU, RAM, Storage, Datum — optional Change, Anforderer, Team. Alle Zeilen kommen als genehmigt an (Freigebender „Import\"); die Gültigkeit rechnet ab dem Original-Datum — ältere Einträge laufen entsprechend sofort ab (wird gemeldet). Bereits vorhandene Kapa-Nummern werden übersprungen, ein erneuter Import erzeugt also keine Duplikate.": "Takes over your existing Excel list: save it as CSV in Excel and upload it here. Recognized columns (any order, by header): Kapa-Nummer, Projekt, Cluster, CPU, RAM, Storage, Datum — optional Change, Anforderer, Team. All rows arrive as approved (approver “Import”); validity counts from the original date — older entries expire immediately accordingly (reported). Existing kapa numbers are skipped, so re-importing does not create duplicates.",
   "Kapa-Anfragen aus CSV (XLS-Ablösung)": "Capacity requests from CSV (replacing the XLS)",
@@ -9112,6 +9148,21 @@ def serve(args, password):
                          "imported_on": e.get("imported_on") or "",
                          "imported_by": e.get("imported_by") or ""}
                         for src, e in sorted(import_sources.items())]})
+            elif route == "/api/import/reservations/beispiel":
+                # Vorlage für den Kapa-CSV-Import: Kopfzeile + Beispielzeilen,
+                # mit BOM und Semikolon, damit Excel sie direkt sauber öffnet.
+                if not self._require("admin"):
+                    return
+                sample = ("﻿Kapa-Nummer;Projekt;Cluster;CPU;RAM;Storage;"
+                          "Datum;Change;Anforderer;Team\r\n"
+                          "KAPA-2024-017;SAP-Erweiterung Q4;Cluster-01;16;128;"
+                          "2000;15.06.2026;OPS-4711;anna.schmidt@firma.local;"
+                          "Team Betrieb\r\n"
+                          "KAPA-2024-018;Fileservice Migration;Cluster-02;8;64;"
+                          "12000;01.07.2026;;;\r\n")
+                self._send(sample, "text/csv; charset=utf-8", headers={
+                    "Content-Disposition":
+                        'attachment; filename="kapa-import-beispiel.csv"'})
             elif route == "/api/import/powercli":
                 if not self._require("admin"):
                     return
