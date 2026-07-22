@@ -283,6 +283,50 @@ try:
           and ncfg.get("exclude_names") == "vlan2")
     req("PUT", "/api/netcfg", {"exclude_names": "", "exclude_vlans": ""})
 
+    print("== Offline-Quellen (Cluster-Import) ==")
+    imp = [{"name": "Insel-01",
+            "hosts": [{"name": "esx-i1", "cores": 32, "ram_gb": 512},
+                      {"name": "esx-i2", "cores": 32, "ram_gb": 512}],
+            "vms": [{"name": "ivm1", "vcpu": 4, "ram_gb": 16, "on": True}],
+            "datastores": [{"name": "insel-lun", "type": "VMFS",
+                            "cap_gb": 4000, "used_gb": 1000}],
+            "portgroups": [{"name": "PG-Insel-VLAN900", "vlan": "900"}]}]
+    st, r0, _ = req("POST", "/api/import", {"source": "RZ-Insel", "clusters": imp})
+    check("Import angenommen", st == 201 and r0.get("clusters") == 1)
+    st, bad, _ = req("POST", "/api/import", {"clusters": imp})
+    st2, bad2, _ = req("POST", "/api/import", {"source": "X", "clusters": []})
+    check("Import-Validierung (ohne Quelle/leer -> 400)",
+          st == 400 and st2 == 400)
+    t0 = time.time()
+    while time.time() - t0 < 12:
+        di = req("GET", "/api/v1/data")[1]
+        if not req("GET", "/api/status")[1].get("refreshing"):
+            break
+        time.sleep(0.5)
+    ic = next((c for c in di["clusters"] if c["name"] == "Insel-01"), None)
+    check("Import-Cluster im Datenpaket (Quelle, N+1, Tag)",
+          ic is not None and ic.get("source") == "RZ-Insel"
+          and ic.get("imported") is True
+          and ic.get("vcpuCap") > 0 and ic.get("hostCount") == 2
+          and any(t.startswith("Import:") for t in ic.get("tags") or []))
+    st, lst, _ = req("GET", "/api/import")
+    check("Import-Quellenliste", st == 200 and len(lst["sources"]) == 1
+          and lst["sources"][0]["vms"] == 1)
+    st, ps1, _ = req("GET", "/api/import/powercli", raw=True)
+    check("PowerCLI-Skript abrufbar",
+          st == 200 and b"VMware.PowerCLI" in ps1 and b"ConvertTo-Json" in ps1)
+    st, _, _ = req("DELETE", "/api/import/RZ-Insel")
+    st404, _, _ = req("DELETE", "/api/import/gibtsnicht")
+    t0 = time.time()
+    while time.time() - t0 < 12:
+        di2 = req("GET", "/api/v1/data")[1]
+        if not req("GET", "/api/status")[1].get("refreshing"):
+            break
+        time.sleep(0.5)
+    check("Import-Quelle löschbar (Cluster verschwindet)",
+          st == 200 and st404 == 404
+          and not any(c["name"] == "Insel-01" for c in di2["clusters"]))
+
     print("== AD-Gruppen-Check ==")
     # Regression: AD-Gruppen (case-sensitiv gespeichert) müssen löschbar sein
     req("POST", "/api/roles", {"user": "Kapa-Admins", "role": "admin", "kind": "group"})

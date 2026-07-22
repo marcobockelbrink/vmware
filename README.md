@@ -87,7 +87,15 @@ Cluster und Kommentare bleiben wie erfasst).
   Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
 **Verwaltung (Admin-UI)**
-- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / Freigabe / Sichtbarkeit / Storage / API-Tokens / Backup & Konfiguration**
+- Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / Freigabe / Sichtbarkeit / Storage / Netzwerk / Import / API-Tokens / Backup & Konfiguration**
+- **Offline-Quellen (Cluster-Import)**: Bereiche **ohne Netzanbindung** an ein
+  vROps werden per mitgeliefertem **PowerCLI-Skript** (Download im Import-Tab)
+  exportiert und als JSON unter einem **festen Quellnamen** hochgeladen. Die
+  Cluster erscheinen wie eine eigene vROps-Quelle — inkl. Kapazitätsanfragen,
+  VLAN-Suche und Storage-Übersicht; dieselbe Kapazitäts-Rechnung (Overcommit,
+  N+1, vSAN-Faktor, Namens-/VLAN-Filter). Die Daten sind statisch (Import-Datum
+  als Tag am Cluster); die **Auto-Freigabe klammert Import-Cluster bewusst
+  aus**. Erneuter Import ersetzt die Quelle, mehrere Quellen parallel möglich
 - **Sichtbarkeits-Matrix**: je Rolle (außer Admin) per Haken einstellbar, welche
   Merkmale sie sieht — Workload, Host-/VM-Listen, Netzwerk & VLAN-Suche,
   Storage-Drilldown, vSphere-Tags, „Entschieden von". Wirkt im UI **und**

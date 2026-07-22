@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.20.1"
+VERSION = "2.21"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -945,6 +945,7 @@ def sftp_backup(args):
                          getattr(args, "storagecfg_file", ""),
                          getattr(args, "storagereq_file", ""),
                          getattr(args, "netcfg_file", ""),
+                         getattr(args, "import_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1997,6 +1998,104 @@ def sample_data():
                     "namespaces": namespaces,
                     "storage": {"cap_gb": cap_gb, "used_gb": used_gb, "luns": luns}}
     return data
+
+
+# PowerCLI-Export für Offline-Quellen (Verwaltung -> Import, als .ps1-Download).
+# Erzeugt genau das JSON, das POST /api/import erwartet. Bewusst nur mit
+# PowerCLI-Bordmitteln und ohne Schreibzugriffe auf das vCenter.
+POWERCLI_PS1 = r"""#Requires -Modules VMware.PowerCLI
+<#
+  Kapa-Dashboard: Offline-Export eines vCenters ohne vROps-Anbindung.
+
+  Aufruf (auf einem Rechner mit Netz zum isolierten vCenter):
+    .\kapa_export.ps1 -Server vcenter.insel.local
+    .\kapa_export.ps1 -Server vcenter.insel.local -Cluster "Prod*" -OutFile insel.json
+
+  Ergebnis: eine JSON-Datei, die sich im Dashboard unter
+  Verwaltung -> Import mit einem frei gewaehlten Quellnamen hochladen laesst.
+  Erfasst je Cluster: ESXi-Hosts (Cores/RAM), VMs (vCPU/RAM/Power),
+  Datastores (Groesse/Belegung/Typ) und Portgruppen mit VLAN-ID.
+#>
+param(
+    [Parameter(Mandatory = $true)][string]$Server,
+    [string]$Cluster = "*",
+    [string]$OutFile = "kapa_import.json"
+)
+
+Connect-VIServer -Server $Server | Out-Null
+
+$result = @()
+foreach ($cl in (Get-Cluster -Name $Cluster | Sort-Object Name)) {
+    Write-Host "Lese Cluster $($cl.Name) ..."
+    $vmhosts = @($cl | Get-VMHost)
+
+    $hosts = @()
+    foreach ($h in $vmhosts) {
+        $hosts += [ordered]@{
+            name   = $h.Name
+            cores  = [int]$h.NumCpu
+            ram_gb = [math]::Round($h.MemoryTotalGB, 1)
+        }
+    }
+
+    $vms = @()
+    foreach ($vm in ($cl | Get-VM)) {
+        $vms += [ordered]@{
+            name   = $vm.Name
+            vcpu   = [int]$vm.NumCpu
+            ram_gb = [math]::Round($vm.MemoryGB, 1)
+            on     = ($vm.PowerState -eq "PoweredOn")
+        }
+    }
+
+    $ds = @()
+    foreach ($d in ($cl | Get-Datastore)) {
+        $ds += [ordered]@{
+            name    = $d.Name
+            type    = "" + $d.Type
+            cap_gb  = [math]::Round($d.CapacityGB, 1)
+            used_gb = [math]::Round(($d.CapacityGB - $d.FreeSpaceGB), 1)
+        }
+    }
+
+    # Portgruppen: Standard-vSwitches je Host + dvSwitches der Cluster-Hosts.
+    # Es reicht die VLAN-ID (einzeln oder Bereich) - keine weiteren Details.
+    $pgs = @{}
+    foreach ($pg in ($vmhosts | Get-VirtualPortGroup -Standard -ErrorAction SilentlyContinue)) {
+        $pgs[$pg.Name] = "" + $pg.VLanId
+    }
+    $vds = @($vmhosts | Get-VDSwitch -ErrorAction SilentlyContinue | Sort-Object -Unique Name)
+    foreach ($sw in $vds) {
+        foreach ($pg in (Get-VDPortgroup -VDSwitch $sw -ErrorAction SilentlyContinue)) {
+            $v = $pg.VlanConfiguration
+            if ($null -ne $v -and $null -ne $v.VlanId) {
+                $pgs[$pg.Name] = "" + $v.VlanId
+            } elseif ($null -ne $v -and $v.Ranges) {
+                $pgs[$pg.Name] = (@($v.Ranges | ForEach-Object {
+                    "$($_.StartVlanId)-$($_.EndVlanId)" }) -join ",")
+            } elseif (-not $pgs.ContainsKey($pg.Name)) {
+                $pgs[$pg.Name] = ""
+            }
+        }
+    }
+    $pglist = @()
+    foreach ($k in ($pgs.Keys | Sort-Object)) {
+        $pglist += [ordered]@{ name = $k; vlan = $pgs[$k] }
+    }
+
+    $result += [ordered]@{
+        name       = $cl.Name
+        hosts      = $hosts
+        vms        = $vms
+        datastores = $ds
+        portgroups = $pglist
+    }
+}
+
+[ordered]@{ clusters = $result } | ConvertTo-Json -Depth 6 |
+    Out-File -FilePath $OutFile -Encoding UTF8
+Write-Host "Fertig: $OutFile ($($result.Count) Cluster)"
+"""
 
 # ------------------------------------------------------------------ Dashboard --
 
@@ -3101,6 +3200,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
   <span class="tab" id="atabStorCfg" onclick="setAdmTab('storcfg')">Storage</span>
   <span class="tab" id="atabNet" onclick="setAdmTab('net')">Netzwerk</span>
+  <span class="tab" id="atabImp" onclick="setAdmTab('imp')">Import</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
@@ -3310,6 +3410,41 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <button class="btn approve" onclick="saveNetCfg()">✓ Speichern &amp; anwenden</button>
 <span id="netCfgSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div><!-- admGrpNet -->
+
+<div id="admGrpImp" style="display:none">
+<div class="sechead">Offline-Quellen (Cluster ohne vROps-Anbindung)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Für Bereiche <b>ohne Netzanbindung</b> an ein vROps: Ein Kollege führt das
+  PowerCLI-Skript gegen das isolierte vCenter aus und lädt das erzeugte JSON
+  hier mit einem <b>Quellnamen</b> hoch. Die Cluster erscheinen dann wie eine
+  eigene vROps-Quelle — inklusive Kapazitätsanfragen, VLAN-Suche und
+  Storage-Übersicht. Die Daten sind <b>statisch</b> (Stand = Import-Datum,
+  als Tag am Cluster sichtbar); die Auto-Freigabe klammert diese Cluster
+  bewusst aus. Ein erneuter Import unter demselben Namen <b>ersetzt</b> die
+  Quelle.</div>
+<div style="margin-bottom:14px">
+  <a class="btn" href="api/import/powercli" download="kapa_export.ps1"
+     title="PowerCLI-Skript, das das Import-JSON erzeugt">⬇ PowerCLI-Skript (kapa_export.ps1)</a>
+  <span style="color:var(--muted);font-size:12px;margin-left:8px">
+    Aufruf: <code>.\kapa_export.ps1 -Server vcenter.insel.local</code></span>
+</div>
+<div class="sechead">JSON importieren</div>
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+  <input class="filterbox" id="impSource" style="max-width:240px"
+         placeholder="Quellname, z. B. RZ-Insel">
+  <label class="btn" id="impFileBtn">JSON-Datei wählen &amp; importieren<input
+    type="file" accept=".json,application/json" hidden onchange="importOffline(event)"></label>
+  <span id="impStatus" style="font-size:12px;color:var(--muted)"></span>
+</div>
+<div class="tablewrap" style="max-width:820px">
+<table class="kt" id="imptable">
+  <thead><tr><th>Quelle</th><th class="num">Cluster</th><th class="num">Hosts</th>
+    <th class="num">VMs</th><th>importiert am</th><th>durch</th>
+    <th class="nosort">Aktion</th></tr></thead>
+  <tbody id="impbody"></tbody>
+</table>
+</div>
+</div><!-- admGrpImp -->
 
 <div id="admGrpTok" style="display:none">
 <div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
@@ -4313,7 +4448,7 @@ function setView(v) {
       : v === "vlan" ? "#vlan-suche" : v === "stor" ? "#storage" : location.pathname);
   } catch (e) {}
   if (v === "stor") loadStorage();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); loadImports(); }
   if (v === "log") loadLog();
   render();
 }
@@ -4852,6 +4987,59 @@ function saveNetCfg() {
                        (e && e.message ? " (" + e.message + ")" : "") + "."));
 }
 
+// ---- Offline-Quellen (Verwaltung -> Import) ----
+let IMPORTS = [];
+function loadImports() {
+  fetch("api/import").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.sources) { IMPORTS = d.sources; renderImports(); }
+  }).catch(() => {});
+}
+function renderImports() {
+  const tb = document.getElementById("impbody");
+  if (!tb) return;
+  tb.innerHTML = IMPORTS.map(s => `<tr>
+    <td>${esc(s.name)}</td><td class="num">${s.clusters}</td>
+    <td class="num">${s.hosts}</td><td class="num">${fmt(s.vms)}</td>
+    <td>${esc(fmtDate(s.imported_on))}</td><td>${esc(s.imported_by || "–")}</td>
+    <td><button class="del" title="Offline-Quelle entfernen" onclick="delImport('${esc(s.name)}')">✕ Löschen</button></td>
+  </tr>`).join("") ||
+    `<tr><td colspan="7" style="color:var(--muted)">Noch keine Offline-Quelle importiert.</td></tr>`;
+}
+function importOffline(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  ev.target.value = "";
+  const src = (document.getElementById("impSource").value || "").trim();
+  if (!src) { notify("Bitte zuerst einen Quellnamen eingeben (z. B. RZ-Insel)."); return; }
+  const st = document.getElementById("impStatus");
+  f.text().then(t => {
+    const d = JSON.parse(t);
+    const clusters = Array.isArray(d) ? d : (d && d.clusters);
+    if (!Array.isArray(clusters)) { notify("Ungültige Datei: es fehlt die clusters-Liste."); return; }
+    if (st) st.textContent = "importiere …";
+    fetch("api/import", { method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ source: src, clusters: clusters }) })
+      .then(r => r.json().then(j => ({ ok: r.ok, j: j })))
+      .then(x => {
+        if (!x.ok) { if (st) st.textContent = ""; return notify(x.j.error || "Import fehlgeschlagen."); }
+        if (st) { st.textContent = "✓ importiert – Daten werden neu berechnet";
+                  setTimeout(() => { st.textContent = ""; }, 5000); }
+        loadImports(); pollStatus();
+      })
+      .catch(() => { if (st) st.textContent = ""; notify("Import fehlgeschlagen (Netzwerk/Server)."); });
+  }).catch(() => notify("Datei konnte nicht gelesen werden (kein gültiges JSON)."));
+}
+function delImport(name) {
+  askConfirm({ title: "Offline-Quelle entfernen", okLabel: "✕ Löschen", okClass: "danger",
+    message: "Quelle „" + name + "“ samt ihrer Cluster aus der Übersicht entfernen?\n" +
+             "Bestehende Kapazitätsanfragen auf diese Cluster bleiben erhalten." })
+    .then(ok => { if (!ok) return;
+      fetch("api/import/" + encodeURIComponent(name), { method: "DELETE" })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+        .then(() => { loadImports(); pollStatus(); })
+        .catch(e => notify("Löschen fehlgeschlagen" +
+                           (e && e.message ? " (" + e.message + ")" : "") + ".")); });
+}
+
 // ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
 let AA_CFG = null;
 function loadAutoApprove() {
@@ -4926,10 +5114,10 @@ function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
                  ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
-                 storcfg: "atabStorCfg", net: "atabNet", tok: "atabTok", conf: "atabConf" };
+                 storcfg: "atabStorCfg", net: "atabNet", imp: "atabImp", tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
                  ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
-                 storcfg: "admGrpStorCfg", net: "admGrpNet", tok: "admGrpTok", conf: "admGrpConf" };
+                 storcfg: "admGrpStorCfg", net: "admGrpNet", imp: "admGrpImp", tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -5680,6 +5868,31 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Offline-Quellen / Cluster-Import (Verwaltung -> Import)
+  "Für Bereiche ohne Netzanbindung an ein vROps: Ein Kollege führt das PowerCLI-Skript gegen das isolierte vCenter aus und lädt das erzeugte JSON hier mit einem Quellnamen hoch. Die Cluster erscheinen dann wie eine eigene vROps-Quelle — inklusive Kapazitätsanfragen, VLAN-Suche und Storage-Übersicht. Die Daten sind statisch (Stand = Import-Datum, als Tag am Cluster sichtbar); die Auto-Freigabe klammert diese Cluster bewusst aus. Ein erneuter Import unter demselben Namen ersetzt die Quelle.": "For areas without network access to a vROps: a colleague runs the PowerCLI script against the isolated vCenter and uploads the resulting JSON here under a source name. The clusters then appear like a separate vROps source — including capacity requests, VLAN search and storage overview. The data is static (as of the import date, visible as a tag on the cluster); auto-approval deliberately excludes these clusters. Re-importing under the same name replaces the source.",
+  "Aufruf: .\\kapa_export.ps1 -Server vcenter.insel.local": "Run: .\\kapa_export.ps1 -Server vcenter.island.local",
+  "Offline-Quellen (Cluster ohne vROps-Anbindung)": "Offline sources (clusters without vROps connection)",
+  "⬇ PowerCLI-Skript (kapa_export.ps1)": "⬇ PowerCLI script (kapa_export.ps1)",
+  "PowerCLI-Skript, das das Import-JSON erzeugt": "PowerCLI script that produces the import JSON",
+  "JSON importieren": "Import JSON",
+  "Quellname, z. B. RZ-Insel": "Source name, e.g. DC-Island",
+  "JSON-Datei wählen & importieren": "Choose & import JSON file",
+  "Quelle": "Source",
+  "importiert am": "imported on",
+  "Noch keine Offline-Quelle importiert.": "No offline source imported yet.",
+  "importiere …": "importing …",
+  "✓ importiert – Daten werden neu berechnet": "✓ imported – data is being recalculated",
+  "Bitte zuerst einen Quellnamen eingeben (z. B. RZ-Insel).": "Please enter a source name first (e.g. DC-Island).",
+  "Ungültige Datei: es fehlt die clusters-Liste.": "Invalid file: the clusters list is missing.",
+  "Import fehlgeschlagen.": "Import failed.",
+  "Import fehlgeschlagen (Netzwerk/Server).": "Import failed (network/server).",
+  "Datei konnte nicht gelesen werden (kein gültiges JSON).": "File could not be read (not valid JSON).",
+  "Offline-Quelle entfernen": "Remove offline source",
+  "Offline-Quelle importiert": "Offline source imported",
+  "Offline-Quelle gelöscht": "Offline source deleted",
+  "Quellname erforderlich (z. B. RZ-Insel)": "Source name required (e.g. DC-Island)",
+  "clusters: Liste mit mindestens einem Cluster erwartet": "clusters: expected a list with at least one cluster",
+  "kein verwertbarer Cluster im Import": "no usable cluster in the import",
   // Netzwerk-Filter (Verwaltung -> Netzwerk)
   "Portgruppen, die hier zutreffen, werden komplett ausgeblendet — in der VLAN-Suche, im Netzwerk-Reiter der Cluster-Details und im Datenpaket. Die Änderung löst gleich einen neuen Datenabruf aus.": "Port groups that match here are hidden completely — in the VLAN search, in the network tab of the cluster details and in the data package. The change immediately triggers a new data collection.",
   "Portgruppen, deren Name einen dieser Begriffe enthält. Mehrere durch Komma trennen, Groß-/Kleinschreibung egal — */? gehen als Platzhalter (*-uplink, PG-Test-?). Leer = kein Filter.": "Port groups whose name contains one of these terms. Separate several by comma, case-insensitive — */? work as wildcards (*-uplink, PG-Test-?). Empty = no filter.",
@@ -6128,6 +6341,9 @@ const I18N_RX = [
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
   [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
   [/^AD-Gruppe: (.+)$/, "AD group: $1"],
+  [/^Quelle „(.+)“ samt ihrer Cluster aus der Übersicht entfernen\? Bestehende Kapazitätsanfragen auf diese Cluster bleiben erhalten\.$/,
+   "Remove source „$1“ and its clusters from the overview? Existing capacity requests for these clusters are kept."],
+  [/^Cluster „(.+)“: keine Hosts im Import$/, "Cluster „$1“: no hosts in the import"],
   [/^Speichern fehlgeschlagen \(HTTP (\d+)\)\.$/, "Saving failed (HTTP $1)."],
   [/^Gruppe „(.+)“ nicht im AD gefunden \(unter (.+)\)\.$/, "Group „$1“ not found in AD (under $2)."],
   [/^Keine Verbindung zum AD \((.+)\): (.+)$/, "No connection to AD ($1): $2"],
@@ -6462,7 +6678,8 @@ def serve(args, password):
                    "visibility": args.visibility_file,
                    "storagecfg": args.storagecfg_file,
                    "storagereq": args.storagereq_file,
-                   "netcfg": args.netcfg_file}
+                   "netcfg": args.netcfg_file,
+                   "manual": args.import_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
@@ -7503,6 +7720,115 @@ def serve(args, password):
                 "exclude_vlans": _clean_vlans(raw.get("exclude_vlans"))}
 
     net_cfg = load_netcfg()
+
+    # ---- Offline-Quellen: manuell importierte Cluster (ohne vROps) ----------
+    # Bereiche ohne Netzanbindung werden per PowerCLI-JSON exportiert und hier
+    # unter einem festen Quellnamen importiert. Die Rohdaten laufen bei jedem
+    # Abruf durch build_summary — dieselbe Kapazitäts-Mathematik wie echte
+    # Quellen (Overcommit, N+1, vSAN-Faktor, Namens-/VLAN-Filter).
+    import_lock = threading.Lock()
+    import_sources = store.load("manual", None)
+    import_sources = import_sources if isinstance(import_sources, dict) else {}
+
+    def save_imports():
+        store.save("manual", import_sources)
+
+    def _num(v, cast=float, lo=0):
+        try:
+            return max(lo, cast(float(v or 0)))
+        except (TypeError, ValueError):
+            return lo
+
+    def clean_import_clusters(raw):
+        """Import-JSON prüfen/normalisieren. Gibt (clusters, fehler) zurück."""
+        if not isinstance(raw, list) or not raw:
+            return None, "clusters: Liste mit mindestens einem Cluster erwartet"
+        oneline = lambda v, n: " ".join(str(v or "").split())[:n]
+        out = []
+        for c in raw[:100]:
+            if not isinstance(c, dict):
+                continue
+            name = oneline(c.get("name"), 120)
+            if not name:
+                return None, "Cluster ohne Namen im Import"
+            hosts = [{"name": oneline(h.get("name"), 200),
+                      "cores": _num(h.get("cores"), int),
+                      "ram_gb": round(_num(h.get("ram_gb")), 1)}
+                     for h in (c.get("hosts") or [])[:500]
+                     if isinstance(h, dict)]
+            if not hosts:
+                return None, f"Cluster „{name}“: keine Hosts im Import"
+            vms = [{"name": oneline(v.get("name"), 200),
+                    "vcpu": _num(v.get("vcpu"), int),
+                    "ram_gb": round(_num(v.get("ram_gb")), 1),
+                    "on": bool(v.get("on"))}
+                   for v in (c.get("vms") or [])[:20000]
+                   if isinstance(v, dict)]
+            luns = []
+            for d in (c.get("datastores") or c.get("luns") or [])[:500]:
+                if not isinstance(d, dict):
+                    continue
+                nm = oneline(d.get("name"), 200)
+                typ = oneline(d.get("type"), 40)
+                cap = round(_num(d.get("cap_gb")), 1)
+                used = min(round(_num(d.get("used_gb")), 1), cap)
+                # vSAN spiegelt: brutto zählt nur anteilig (wie bei collect()).
+                f = args.vsan_factor if "vsan" in (typ + nm).lower() else 1.0
+                luns.append({"name": nm, "type": typ or "unbekannt",
+                             "naa": oneline(d.get("naa"), 80),
+                             "factor": f, "raw_cap_gb": cap,
+                             "cap_gb": round(cap * f, 1),
+                             "used_gb": round(used * f, 1)})
+            pgs = [{"name": oneline(p.get("name"), 200),
+                    "vlan": oneline(p.get("vlan"), 20)}
+                   for p in (c.get("portgroups") or [])[:2000]
+                   if isinstance(p, dict) and p.get("name")]
+            out.append({"name": name, "hosts": hosts, "vms": vms,
+                        "luns": luns, "portgroups": pgs})
+        if not out:
+            return None, "kein verwertbarer Cluster im Import"
+        return out, ""
+
+    def import_clusters_summary():
+        """Alle Offline-Quellen als fertige Cluster-Dicts (wie von collect())."""
+        with import_lock:
+            srcs = json.loads(json.dumps(import_sources))
+        result = []
+        for src in sorted(srcs):
+            entry = srcs[src]
+            data = {}
+            when = entry.get("imported_on") or ""
+            try:
+                when_de = datetime.fromisoformat(when).strftime("%d.%m.%Y")
+            except ValueError:
+                when_de = when
+            for c in entry.get("clusters") or []:
+                data[c["name"]] = {
+                    "hosts": c.get("hosts") or [],
+                    "vms": c.get("vms") or [],
+                    "tags": [f"Import: {when_de}"] if when_de else [],
+                    "portgroups": c.get("portgroups") or [],
+                    "workload": None, "namespaces": [],
+                    "storage": {
+                        "cap_gb": sum(l["cap_gb"] for l in c.get("luns") or []),
+                        "used_gb": sum(l["used_gb"] for l in c.get("luns") or []),
+                        "luns": c.get("luns") or []}}
+            if not data:
+                continue
+            with storage_lock:
+                mn, sx = (storage_cfg.get("min_lun_gb", 0),
+                          storage_cfg.get("exclude_names") or [])
+            with net_lock:
+                nn, nv = (net_cfg.get("exclude_names") or [],
+                          net_cfg.get("exclude_vlans") or [])
+            cl = build_summary(data, args.cpu_factor, args.failover_hosts,
+                               args.tanzu_mhz_per_vcpu, mn, sx, nn, nv)
+            for c in cl:
+                c["source"] = src
+                c["imported"] = True   # Auto-Freigabe überspringt statische Daten
+            result.extend(cl)
+        return result
+
     storage_reqs = store.load("storagereq", None)
     storage_reqs = storage_reqs if isinstance(storage_reqs, list) else []
 
@@ -7547,6 +7873,10 @@ def serve(args, password):
                   if x.get("name") == r.get("cluster")), None)
         if not c:
             return False, "Cluster nicht im aktuellen Datenstand"
+        if c.get("imported"):
+            # Offline-Quelle: Zahlen sind statisch, echte Auslastung kann höher
+            # liegen -> nie automatisch freigeben, immer ans Team.
+            return False, "Offline-Quelle (statische Import-Daten) – manuelle Freigabe"
         rv_cpu = rv_ram = 0.0
         for x in reservations:                     # unter res_lock aufgerufen
             if x.get("approved") and not x.get("cancelled") \
@@ -7758,6 +8088,13 @@ def serve(args, password):
                 if errors and not clusters:
                     raise RuntimeError("; ".join(errors))
                 state["error"] = "Teilausfall: " + "; ".join(errors) if errors else None
+            # Offline-Quellen (manuelle Importe) wie zusätzliche vROps anhängen
+            manual = import_clusters_summary()
+            if manual:
+                clusters = clusters + manual
+                print(f"Offline-Quellen: {len(manual)} Cluster aus "
+                      f"{len({c['source'] for c in manual})} Import(en)",
+                      file=sys.stderr)
             strip_uplinks(clusters, not args.show_uplink_portgroups)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -8266,6 +8603,26 @@ def serve(args, password):
                                     net_cfg.get("exclude_names") or []),
                                 "exclude_vlans": ", ".join(
                                     net_cfg.get("exclude_vlans") or [])})
+            elif route == "/api/import":
+                if not self._require("admin"):
+                    return
+                with import_lock:
+                    self._json({"sources": [
+                        {"name": src,
+                         "clusters": len(e.get("clusters") or []),
+                         "hosts": sum(len(c.get("hosts") or [])
+                                      for c in e.get("clusters") or []),
+                         "vms": sum(len(c.get("vms") or [])
+                                    for c in e.get("clusters") or []),
+                         "imported_on": e.get("imported_on") or "",
+                         "imported_by": e.get("imported_by") or ""}
+                        for src, e in sorted(import_sources.items())]})
+            elif route == "/api/import/powercli":
+                if not self._require("admin"):
+                    return
+                self._send(POWERCLI_PS1, "text/plain; charset=utf-8", headers={
+                    "Content-Disposition":
+                        'attachment; filename="kapa_export.ps1"'})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -8738,6 +9095,41 @@ def serve(args, password):
                 audit(self._session()["user"],
                       "AD-Gruppe zugewiesen" if kind == "group" else "Rolle zugewiesen",
                       f"{key} -> {role}" + (f" ({dept})" if dept else ""))
+            elif self.path == "/api/import":
+                # Offline-Quelle importieren/ersetzen (PowerCLI-JSON + Quellname)
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body() or {}
+                src = " ".join(str(body.get("source") or "").split())[:40]
+                src = re.sub(r"[^\w .\-äöüÄÖÜß]", "", src).strip()
+                if not src:
+                    self._json({"error": "Quellname erforderlich "
+                                "(z. B. RZ-Insel)"}, 400)
+                    return
+                raw = body.get("clusters")
+                if raw is None and isinstance(body.get("data"), dict):
+                    raw = body["data"].get("clusters")
+                cleaned, err = clean_import_clusters(raw)
+                if err:
+                    self._json({"error": err}, 400)
+                    return
+                with import_lock:
+                    replaced = src in import_sources
+                    import_sources[src] = {
+                        "imported_on": datetime.now().date().isoformat(),
+                        "imported_by": s["user"] or "",
+                        "clusters": cleaned}
+                    save_imports()
+                audit(s["user"], "Offline-Quelle importiert",
+                      f"{src}: {len(cleaned)} Cluster, "
+                      f"{sum(len(c['hosts']) for c in cleaned)} Hosts, "
+                      f"{sum(len(c['vms']) for c in cleaned)} VMs"
+                      + (" – ersetzt" if replaced else ""))
+                if not state["refreshing"]:
+                    threading.Thread(target=do_refresh, daemon=True).start()
+                self._json({"ok": True, "source": src,
+                            "clusters": len(cleaned)}, 201)
             elif self.path == "/api/ad/group-members":
                 # AD-Gruppen-Check: direkte Benutzer-Mitglieder einer Gruppe holen,
                 # damit Admins prüfen können, ob der Gruppenabruf sauber läuft.
@@ -9159,6 +9551,25 @@ def serve(args, password):
                           "AD-Gruppe entfernt" if removed.get("kind") == "group"
                           else "Rolle entfernt",
                           f"{key} (war {removed.get('role')})")
+            elif self.path.startswith("/api/import/"):
+                # Offline-Quelle entfernen — die Cluster verschwinden mit dem
+                # nächsten Abruf aus der Übersicht.
+                s = self._require("admin")
+                if not s:
+                    return
+                src = urllib.parse.unquote(self.path.split("/api/import/", 1)[1])
+                with import_lock:
+                    removed = import_sources.pop(src, None)
+                    if removed:
+                        save_imports()
+                if not removed:
+                    self._json({"error": "Quelle nicht gefunden"}, 404)
+                    return
+                audit(s["user"], "Offline-Quelle gelöscht",
+                      f"{src} ({len(removed.get('clusters') or [])} Cluster)")
+                if not state["refreshing"]:
+                    threading.Thread(target=do_refresh, daemon=True).start()
+                self._json({"ok": True})
             elif self.path.startswith("/api/storage-request/"):
                 # Storage-Anfrage ganz entfernen (Admin im UI) – für versehentlich
                 # angelegte Anfragen. "erledigt"/"offen" bleibt davon unberührt.
@@ -9498,6 +9909,9 @@ def main():
     ap.add_argument("--netcfg-file", default="kapa_netcfg.json",
                     help="Datei: Netzwerk-Filter (Portgruppen nach Name/"
                          "VLAN-ID ausblenden)")
+    ap.add_argument("--import-file", default="kapa_import.json",
+                    help="Datei: manuell importierte Offline-Quellen "
+                         "(Cluster ohne vROps-Anbindung, per PowerCLI-JSON)")
     ap.add_argument("--visibility-file", default="kapa_sichtbarkeit.json",
                     help="Datei mit der Sichtbarkeits-Matrix je Rolle "
                          "(Pflege über die Verwaltung)")
@@ -9544,6 +9958,7 @@ def main():
     args.storagecfg_file = data_path(args.storagecfg_file, base)
     args.storagereq_file = data_path(args.storagereq_file, base)
     args.netcfg_file = data_path(args.netcfg_file, base)
+    args.import_file = data_path(args.import_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

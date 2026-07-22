@@ -86,7 +86,15 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
 **Administration (admin UI)**
-- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Approval / Visibility / Storage / API tokens / Backup & configuration**
+- Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Approval / Visibility / Storage / Network / Import / API tokens / Backup & configuration**
+- **Offline sources (cluster import)**: areas **without network access** to a
+  vROps are exported with the bundled **PowerCLI script** (download in the
+  import tab) and uploaded as JSON under a **fixed source name**. The clusters
+  appear like a separate vROps source — incl. capacity requests, VLAN search
+  and storage overview; same capacity math (overcommit, N+1, vSAN factor,
+  name/VLAN filters). Data is static (import date as a tag on the cluster);
+  **auto-approval deliberately excludes imported clusters**. Re-importing
+  replaces the source; multiple sources can coexist
 - **Visibility matrix**: per role (except admin), checkboxes control which
   features it sees — workload, host/VM lists, network & VLAN search, storage
   drill-down, vSphere tags, "decided by". Applies in the UI **and**
