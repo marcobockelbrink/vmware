@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.18"
+VERSION = "2.18.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2976,6 +2976,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <input class="filterbox" id="storFilter" type="search" placeholder="Storage filtern – Cluster, LUN, NAA, Typ …" oninput="renderStorage()">
   <a class="btn" id="storCsvBtn" href="api/v1/storage-requests?format=csv&status=alle" download="storage-anfragen.csv" title="Storage-Anfragen als CSV (inkl. NAA)">Anfragen als CSV</a>
   <span id="storCount" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+  <span id="colctl_stortable"></span>
 </div>
 <div id="storReqBox"></div>
 <div class="tablewrap">
@@ -5351,7 +5352,8 @@ if (!VIS.storage) document.getElementById("tabStor").style.display = "none";
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
 const SORT_CFG = { ktable:{pin:0}, rtable:{pin:1}, atable:{pin:0}, artable:{pin:0},
-                   ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1}, vtable:{pin:0} };
+                   ltable:{pin:0}, mtable:{pin:1}, ttable:{pin:1}, vtable:{pin:0},
+                   stortable:{pin:0} };
 const sortState = {};
 function cellVal(td) {
   let t = (td ? td.textContent : "").trim();
