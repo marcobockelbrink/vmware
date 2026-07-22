@@ -30,7 +30,7 @@ Alle Reservierungen (ungefiltert, wie die Admin-Sicht). Felder je Eintrag:
 |---|---|
 | `id` | Eindeutige ID |
 | `name` | Bezeichnung / Projekt |
-| `change` | Change-Nummer (CHB…/CHI…) |
+| `change` | Change-Nummer / Jira-Ticket (z. B. `OPS-4711`, `INFRA-1042`) |
 | `cluster` | Ziel-Cluster |
 | `vcpu`, `ram_gb`, `storage_gb` | Angefragte Kapazität (Storage nur informativ) |
 | `von`, `abteilung` | Anforderer und Abteilung |

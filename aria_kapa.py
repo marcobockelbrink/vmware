@@ -8891,7 +8891,7 @@ def serve(args, password):
                 th = str(body.get("template_html") or "")[:20000] or DEFAULT_MAIL_TEMPLATE
                 ts = str(body.get("template_subject") or "")[:300] or DEFAULT_MAIL_SUBJECT
                 sample = {"id": "KAPA-1a2b3c", "name": "SAP HANA Erweiterung",
-                          "change": "CHB0012345", "cluster": "Cluster-03",
+                          "change": "OPS-12345", "cluster": "Cluster-03",
                           "source": "RZ-Nord", "vcpu": 32, "ram_gb": 256,
                           "storage_gb": 2000, "von": "anna.schmidt@firma.local",
                           "abteilung": "Team Netzwerk", "created": "2026-07-15",

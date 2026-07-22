@@ -31,7 +31,7 @@ All reservations (unfiltered, like the admin view). Fields per entry:
 |---|---|
 | `id` | unique ID |
 | `name` | name / project |
-| `change` | change number (CHB…/CHI…) |
+| `change` | change number / Jira ticket (e.g. `OPS-4711`, `INFRA-1042`) |
 | `cluster` | target cluster |
 | `vcpu`, `ram_gb`, `storage_gb` | requested capacity (storage informational only) |
 | `von`, `abteilung` | requester and team/department |
