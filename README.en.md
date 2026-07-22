@@ -493,6 +493,11 @@ python3 aria_kapa.py --url https://aria-ops.example.com --user svc-aria --serve 
   the system looks up the user's AD groups (`memberOf`) after sign-in.
   Directly assigned user roles take precedence; with multiple groups the
   highest permission wins.
+- **AD group check**: next to each AD group, administration shows a **"👥
+  Members"** button. A click looks the group up live in the directory and shows
+  its **direct user members** (name · UPN) in a popup — handy to verify that the
+  service account, base DN and group name resolve cleanly. Uses a single search
+  (`(memberOf=…)`); nested groups are not resolved.
 - **Renaming role labels**: the displayed names of the four roles are freely
   changeable in the "Administration" tab ("Role labels" section), stored in
   `data/kapa_rollennamen.json`. Internal role keys and therefore

@@ -520,6 +520,12 @@ python3 aria_kapa.py --url https://aria-ops.firma.de --user svc-aria --serve \
   mit dem das System nach der Anmeldung die AD-Gruppen (`memberOf`) des Benutzers
   sucht. Direkt zugewiesene Benutzerrollen haben Vorrang; bei mehreren Gruppen
   gewinnt die höchste Berechtigung.
+- **AD-Gruppen-Check**: Neben jeder AD-Gruppe steht in der Verwaltung ein Button
+  **„👥 Mitglieder"**. Ein Klick schlägt die Gruppe live im Verzeichnis nach und
+  zeigt ihre **direkten Benutzer-Mitglieder** (Name · UPN) im Popup — praktisch,
+  um zu prüfen, ob Service-Konto, Base-DN und Gruppenname sauber greifen. Nutzt
+  eine einzige Suche (`(memberOf=…)`), verschachtelte Gruppen werden nicht
+  aufgelöst.
 - **Rollen-Bezeichnungen umbenennen**: Die angezeigten Namen der vier Rollen
   sind im Tab „Verwaltung" (Abschnitt „Rollen-Bezeichnungen") **frei wählbar**
   (z. B. „Anforderer" → „Antragsteller"), gespeichert in

@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.15.2"
+VERSION = "2.16"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -334,6 +334,17 @@ def _tlv(tag, payload):
     return bytes([tag]) + _ber_len(len(payload)) + payload
 
 
+def _ber_int(n):
+    """Nicht-negativen INTEGER minimal und positiv (kein gesetztes Vorzeichenbit)
+    als BER-Wert kodieren."""
+    if n <= 0:
+        return b"\x00"
+    b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    if b[0] & 0x80:                     # führendes Bit gesetzt -> sonst negativ
+        b = b"\x00" + b
+    return b
+
+
 def _read_tlv(sock, buf):
     """Ein vollständiges BER-Element aus dem Socket lesen. Gibt (tag, value,
     restpuffer) zurück."""
@@ -540,6 +551,144 @@ def ldap_user_attr(url, bind_dn, bind_pw, base_dn, user_upn, attr,
         return ""
     finally:
         sock.close()
+
+
+def ldap_group_members(url, bind_dn, bind_pw, base_dn, group_cn,
+                       timeout=10, insecure=False, limit=500):
+    """Direkte Benutzer-Mitglieder einer AD-Gruppe über das Service-Konto lesen.
+    Bindet als Service-Konto, findet die Gruppe per (cn=group_cn) und sucht dann
+    alle Benutzer mit (&(objectCategory=person)(memberOf=<GruppenDN>)) — eine
+    einzige Suche, unabhängig von der Mitgliederzahl (kein AD-Range-Limit).
+    Gibt {ok, error, group_dn, members:[{name,upn,sam}], truncated} zurück.
+    Verschachtelte Gruppen werden NICHT aufgelöst (nur direkte Mitglieder)."""
+    import socket
+    res = {"ok": False, "error": "", "group_dn": "", "members": [], "truncated": False}
+    if not (bind_dn and bind_pw and base_dn and group_cn):
+        res["error"] = "AD ist nicht vollständig konfiguriert (Service-Konto/Base-DN)."
+        return res
+    u = urllib.parse.urlparse(url if "//" in url else "ldap://" + url)
+    host, port = u.hostname, u.port or (636 if u.scheme == "ldaps" else 389)
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+    except OSError as e:
+        res["error"] = f"Keine Verbindung zum AD ({host}:{port}): {e}"
+        return res
+    try:
+        if u.scheme == "ldaps":
+            ctx = ssl.create_default_context()
+            if insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+        # 1) Bind als Service-Konto
+        bind_req = _tlv(0x60, _tlv(0x02, b"\x03")
+                        + _tlv(0x04, bind_dn.encode())
+                        + _tlv(0x80, bind_pw.encode()))
+        sock.sendall(_tlv(0x30, _tlv(0x02, b"\x01") + bind_req))
+        buf = b""
+        tag, val, buf = _read_tlv(sock, buf)
+        ok = False
+        for t, v in _iter_tlv(val):
+            if t == 0x61:
+                for t2, v2 in _iter_tlv(v):
+                    if t2 == 0x0A:
+                        ok = (v2[:1] == b"\x00")
+                        break
+                break
+        if not ok:
+            res["error"] = "Bind mit dem Service-Konto fehlgeschlagen (Zugangsdaten?)."
+            return res
+
+        def _search(msgid, filt, want_attrs, cap):
+            """Eine Suche ausführen; liefert (entries, truncated). Jede entry =
+            (objectName, {attr_lower: [werte]})."""
+            attrs = _tlv(0x30, b"".join(_tlv(0x04, a.encode()) for a in want_attrs))
+            search = _tlv(0x63,
+                          _tlv(0x04, base_dn.encode())
+                          + _tlv(0x0A, b"\x02")            # scope: subtree
+                          + _tlv(0x0A, b"\x00")            # derefAliases: never
+                          + _tlv(0x02, _ber_int(cap))    # sizeLimit
+                          + _tlv(0x02, bytes([30]))        # timeLimit
+                          + _tlv(0x01, b"\x00") + filt + attrs)
+            sock.sendall(_tlv(0x30, _tlv(0x02, bytes([msgid])) + search))
+            entries, trunc = [], False
+            for _ in range(5000):
+                _tag, _val, buf2 = _read_tlv(sock, _search.buf)
+                _search.buf = buf2
+                op = None
+                for t, v in _iter_tlv(_val):
+                    if t in (0x64, 0x65):
+                        op = (t, v)
+                        break
+                if not op:
+                    continue
+                if op[0] == 0x65:                          # SearchResultDone
+                    for t, v in _iter_tlv(op[1]):
+                        if t == 0x0A and v[:1] == b"\x04":  # resultCode 4 = sizeLimitExceeded
+                            trunc = True
+                        break
+                    break
+                # SearchResultEntry
+                inner = list(_iter_tlv(op[1]))
+                obj_name = ""
+                amap = {}
+                for t, v in inner:
+                    if t == 0x04 and not obj_name:
+                        obj_name = v.decode(errors="replace")
+                    elif t == 0x30:                        # PartialAttributeList
+                        for _t, a in _iter_tlv(v):
+                            sub = list(_iter_tlv(a))
+                            if not sub:
+                                continue
+                            nm = sub[0][1].decode(errors="replace").lower()
+                            vals = []
+                            for st, sv in sub[1:]:
+                                if st == 0x31:
+                                    for _vt, vv in _iter_tlv(sv):
+                                        vals.append(vv.decode(errors="replace"))
+                            amap[nm] = vals
+                entries.append((obj_name, amap))
+            return entries, trunc
+        _search.buf = buf
+
+        # 1) Gruppe per CN finden -> DN
+        gfilt = _tlv(0xA3, _tlv(0x04, b"cn") + _tlv(0x04, group_cn.encode()))
+        gents, _ = _search(2, gfilt, ["cn"], 2)
+        gents = [e for e in gents if e[0]]
+        if not gents:
+            res["error"] = f"Gruppe „{group_cn}“ nicht im AD gefunden (unter {base_dn})."
+            return res
+        group_dn = gents[0][0]
+        res["group_dn"] = group_dn
+
+        # 2) direkte Benutzer-Mitglieder holen
+        mfilt = _tlv(0xA0,
+                     _tlv(0xA3, _tlv(0x04, b"objectCategory") + _tlv(0x04, b"person"))
+                     + _tlv(0xA3, _tlv(0x04, b"memberOf") + _tlv(0x04, group_dn.encode())))
+        ments, trunc = _search(3, mfilt, ["displayName", "userPrincipalName",
+                                          "sAMAccountName"], limit)
+        members = []
+        for obj_name, amap in ments:
+            def first(k):
+                return (amap.get(k.lower()) or [""])[0]
+            members.append({
+                "name": first("displayName") or _dn_to_cn(obj_name),
+                "upn": first("userPrincipalName"),
+                "sam": first("sAMAccountName"),
+            })
+        members.sort(key=lambda m: (m["name"] or m["upn"] or "").lower())
+        res["members"] = members
+        res["truncated"] = trunc or len(members) >= limit
+        res["ok"] = True
+        return res
+    except Exception as e:
+        res["error"] = f"AD-Fehler: {e}"
+        return res
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
 
 # ----------------------------------------------------------- Datendateien ----
 
@@ -3977,6 +4126,38 @@ function delRole(u) {
       .then(d => { ROLES = d; if (EDIT_USER === u) EDIT_USER = null; render(); })
       .catch(() => notify("Löschen fehlgeschlagen.")); });
 }
+// AD-Gruppen-Check: Mitglieder einer AD-Gruppe direkt im Verzeichnis nachschlagen,
+// um zu prüfen, ob der Gruppenabruf (Service-Konto, Base-DN) sauber funktioniert.
+const _grpChecking = {};
+function checkGroup(cn) {
+  if (_grpChecking[cn]) return;
+  _grpChecking[cn] = true;
+  fetch("api/ad/group-members", { method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ cn: cn }) })
+    .then(r => r.json())
+    .then(d => {
+      if (!d || d.error || !d.ok) {
+        return askConfirm({ title: "AD-Gruppe: " + cn, okLabel: "Schließen", hideCancel: true,
+          html: `<div style="color:var(--warn)">${esc((d && d.error) || "Unbekannter Fehler beim AD-Abruf.")}</div>` });
+      }
+      const m = d.members || [];
+      const rows = m.length ? m.map(x =>
+        `<div style="padding:4px 0;border-bottom:1px solid var(--line)">${esc(x.name || x.upn || x.sam || "?")}`
+        + (x.upn ? ` <span style="color:var(--muted)">· ${esc(x.upn)}</span>` : "")
+        + `</div>`).join("")
+        : `<div style="color:var(--muted)">Keine direkten Benutzer-Mitglieder gefunden.</div>`;
+      askConfirm({ title: "AD-Gruppe: " + cn, okLabel: "Schließen", hideCancel: true, html: `
+        <div style="font-size:13px">
+          <div style="margin-bottom:6px">${m.length} <span>direkte Mitglied(er)</span></div>
+          ${d.truncated ? `<div style="color:var(--warn);font-size:12px;margin-bottom:8px">Liste gekürzt – es werden nicht alle Mitglieder angezeigt.</div>` : ""}
+          <div style="color:var(--muted);font-size:11px;word-break:break-all;margin-bottom:10px">${esc(d.group_dn || "")}</div>
+          <div style="max-height:300px;overflow:auto;padding-right:4px">${rows}</div>
+          <div style="color:var(--muted);font-size:11px;margin-top:10px">Nur direkte Benutzer-Mitglieder — verschachtelte Gruppen werden nicht aufgelöst.</div>
+        </div>` });
+    })
+    .catch(() => notify("AD-Abfrage fehlgeschlagen (Netzwerk/Server)."))
+    .finally(() => { delete _grpChecking[cn]; });
+}
 let EDIT_USER = null;   // Benutzer, dessen Zeile gerade bearbeitet wird
 function editRole(u) { EDIT_USER = u; render(); document.getElementById("editDept").focus(); }
 function cancelEditRole() { EDIT_USER = null; render(); }
@@ -4500,7 +4681,7 @@ function renderAdmTable() {
       : `<span title="${r.mail ? 'AD-Mail: ' + esc(r.mail) : 'keine AD-Mail aufgelöst (nur mit --ad-mail-attribute)'}">${esc(u)}${r.mail ? ' <span style="color:var(--muted)" title="AD-Mail: ' + esc(r.mail) + '">✉</span>' : ''}</span>`;
     return `<tr><td>${esc(typ)}</td><td>${mailCell}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
      <td>${esc(r.abteilung || "–")}${warn}</td>
-     <td><button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
+     <td>${isGroup ? `<button class="edit" title="Mitglieder der AD-Gruppe im AD nachschlagen" onclick="checkGroup('${esc(u)}')">👥 Mitglieder</button> ` : ""}<button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
   const firstRole = ROLE_ORDER[0];
@@ -5105,6 +5286,16 @@ const I18N = {
   "Backup fehlgeschlagen": "Backup failed",
   "API-Zugriff abgewiesen": "API access denied",
   "API-Schreibzugriff abgewiesen": "API write access denied",
+  "👥 Mitglieder": "👥 Members",
+  "direkte Mitglied(er)": "direct member(s)",
+  "Liste gekürzt – es werden nicht alle Mitglieder angezeigt.": "List truncated – not all members are shown.",
+  "Keine direkten Benutzer-Mitglieder gefunden.": "No direct user members found.",
+  "Nur direkte Benutzer-Mitglieder — verschachtelte Gruppen werden nicht aufgelöst.": "Direct user members only — nested groups are not resolved.",
+  "Unbekannter Fehler beim AD-Abruf.": "Unknown error during AD lookup.",
+  "Bind mit dem Service-Konto fehlgeschlagen (Zugangsdaten?).": "Bind with the service account failed (credentials?).",
+  "AD ist nicht vollständig konfiguriert (Service-Konto/Base-DN).": "AD is not fully configured (service account/base DN).",
+  "Keine AD-Anmeldung konfiguriert (--ad-url fehlt).": "No AD login configured (--ad-url missing).",
+  "AD-Abfrage fehlgeschlagen (Netzwerk/Server).": "AD query failed (network/server).",
   "Wunschgröße (GB):": "Desired size (GB):",
   "Kommentar:": "Comment:",
   "Neue LUN, Größe (TB):": "New LUN, size (TB):",
@@ -5506,6 +5697,9 @@ const I18N_RX = [
    "$1 clusters, $2 VMs from $3 sources in $4 s"],
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
   [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
+  [/^AD-Gruppe: (.+)$/, "AD group: $1"],
+  [/^Gruppe „(.+)“ nicht im AD gefunden \(unter (.+)\)\.$/, "Group „$1“ not found in AD (under $2)."],
+  [/^Keine Verbindung zum AD \((.+)\): (.+)$/, "No connection to AD ($1): $2"],
   [/^aktuell ([\d.,]+) GB$/, "current $1 GB"],
   [/^(\d+) Einträge \(gefiltert von (\d+)\)$/, "$1 entries (filtered from $2)"],
   [/^(\d+) Eintrag \(gefiltert von (\d+)\)$/, "$1 entry (filtered from $2)"],
@@ -8024,6 +8218,27 @@ def serve(args, password):
                 audit(self._session()["user"],
                       "AD-Gruppe zugewiesen" if kind == "group" else "Rolle zugewiesen",
                       f"{key} -> {role}" + (f" ({dept})" if dept else ""))
+            elif self.path == "/api/ad/group-members":
+                # AD-Gruppen-Check: direkte Benutzer-Mitglieder einer Gruppe holen,
+                # damit Admins prüfen können, ob der Gruppenabruf sauber läuft.
+                if not self._require("admin"):
+                    return
+                cn = str((self._body() or {}).get("cn") or "").strip()
+                if not cn:
+                    self._json({"error": "Gruppenname (CN) erforderlich"}, 400)
+                    return
+                if not args.ad_url:
+                    self._json({"error": "Keine AD-Anmeldung konfiguriert "
+                                "(--ad-url fehlt)."}, 400)
+                    return
+                r = ldap_group_members(args.ad_url, args.ad_bind_dn,
+                                       args.ad_bind_password, args.ad_base_dn, cn,
+                                       insecure=args.ad_insecure)
+                audit(s["user"] if (s := self._session()) else None,
+                      "AD-Gruppe geprüft",
+                      f"{cn}: " + (f"{len(r['members'])} Mitglied(er)"
+                                   if r["ok"] else f"Fehler – {r['error']}"))
+                self._json(r)
             elif self.path == "/api/teams/rename":
                 s = self._require("admin")
                 if not s:

@@ -227,6 +227,13 @@ try:
     req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0,
                                    "exclude_names": ""})
 
+    print("== AD-Gruppen-Check ==")
+    st, adg, _ = req("POST", "/api/ad/group-members", {"cn": "Kapa-Admins"})
+    check("Ohne AD-Config -> 400 mit Hinweis",
+          st == 400 and "AD" in adg.get("error", ""))
+    st2, adn, _ = req("POST", "/api/ad/group-members", {})
+    check("Ohne CN -> 400", st2 == 400)
+
     print("== CSV / Sprache / OpenAPI ==")
     st, csv_de, _ = req("GET", "/api/v1/reservations?format=csv", raw=True)
     st2, csv_en, _ = req("GET", "/api/v1/reservations?format=csv&lang=en", raw=True)
