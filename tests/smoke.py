@@ -368,6 +368,30 @@ try:
           st == 200 and st404 == 404
           and not any(c["name"] == "Insel-01" for c in di2["clusters"]))
 
+    print("== Kapa-CSV-Import (XLS-Ablösung) ==")
+    today = time.strftime("%d.%m.%Y")
+    csvtxt = ("﻿Kapa-Nummer;Projekt;Cluster;CPU;RAM;Storage;Datum;Team\n"
+              f"KAPA-X-001;CSV-Projekt;Cluster-01;8;64;1.000;{today};Team Betrieb\n"
+              "KAPA-X-002;Uralt;Cluster-02;4;32;500;01.01.2020;\n"
+              "KAPA-X-003;Kaputt;Cluster-01;4;32;500;;\n")
+    st, ci, _ = req("POST", "/api/import/reservations", {"csv": csvtxt})
+    check("CSV-Import (BOM/;/dt. Zahlen/Datum)",
+          st == 201 and ci["imported"] == 2 and ci["expired"] == 1
+          and len(ci["errors"]) == 1)
+    st, rl, _ = req("GET", "/api/v1/reservations")
+    r1 = next((x for x in rl if x["id"] == "KAPA-X-001"), None)
+    check("Import als genehmigt mit Original-Feldern",
+          r1 and r1.get("approved") is True and r1.get("approved_by") == "Import"
+          and r1.get("storage_gb") == 1000 and r1.get("abteilung") == "Team Betrieb"
+          and not any(x["id"] == "KAPA-X-002" for x in rl))
+    st, ci2, _ = req("POST", "/api/import/reservations", {"csv": csvtxt})
+    check("Re-Import ohne Duplikate", ci2["skipped"] >= 1
+          and sum(1 for x in req("GET", "/api/v1/reservations")[1]
+                  if x["id"] == "KAPA-X-001") == 1)
+    st, cbad, _ = req("POST", "/api/import/reservations",
+                      {"csv": "foo;bar\n1;2\n"})
+    check("CSV ohne erkennbare Spalten -> 400", st == 400)
+
     print("== AD-Gruppen-Check ==")
     # Regression: AD-Gruppen (case-sensitiv gespeichert) müssen löschbar sein
     req("POST", "/api/roles", {"user": "Kapa-Admins", "role": "admin", "kind": "group"})

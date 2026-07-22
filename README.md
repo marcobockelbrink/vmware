@@ -54,6 +54,11 @@ Cluster und Kommentare bleiben wie erfasst).
   Stufe 2+3 automatisch) — Freigebender „Auto-Freigabe", Badge „genehmigt (auto)",
   jede Prüfung samt Zahlen im Audit-Log; blockiert nie, lehnt nie ab
 - **Archiv** für abgelehnte/stornierte Anfragen (eigener Menüpunkt, dauerhaft, gleiche Team-Sichtbarkeit)
+- **Kapa-CSV-Import** (Verwaltung → Import): die bestehende Excel-Liste als CSV
+  hochladen (Excel-Eigenheiten wie Semikolon, BOM, `TT.MM.JJJJ`, Tausenderpunkt
+  werden verstanden; Spalten per Kopfzeile erkannt). Einträge kommen als
+  **genehmigt** an (Freigebender „Import"), Gültigkeit ab Original-Datum;
+  vorhandene Kapa-Nummern werden übersprungen (kein Duplikat beim Re-Import)
 - **Statistik (Trends)**: eigener Tab mit täglichen Snapshots der Datensammlung —
   Ø RAM/vCPU/**Disk je VM**, VM-Anzahl, RAM-/Storage-Auslastung als Verlaufskurven
   (selbst gezeichnete SVGs, kein CDN) plus **VM-Größenklassen** im Vorher/Nachher-

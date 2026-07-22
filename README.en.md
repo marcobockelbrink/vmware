@@ -54,6 +54,11 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   "approved (auto)", every evaluation incl. numbers in the audit log; never blocks,
   never rejects
 - **Archive** for rejected/cancelled requests (own menu item, permanent, same team visibility)
+- **Capacity CSV import** (Administration → Import): upload your existing Excel
+  list as CSV (Excel quirks like semicolons, BOM, `DD.MM.YYYY`, thousands dots
+  are understood; columns matched by header). Entries arrive as **approved**
+  (approver "Import"), validity from the original date; existing kapa numbers
+  are skipped (no duplicates on re-import)
 - **Statistics (trends)**: its own tab fed by daily snapshots of the data
   collection — avg RAM/vCPU/**disk per VM**, VM count, RAM/storage utilization
   as time-series charts (self-drawn SVGs, no CDN) plus **VM size classes** in a

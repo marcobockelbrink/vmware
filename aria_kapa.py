@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.23"
+VERSION = "2.24"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3534,6 +3534,22 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="impbody"></tbody>
 </table>
 </div>
+<div class="sechead" style="margin-top:22px">Kapa-Anfragen aus CSV (XLS-Ablösung)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Übernimmt eure bestehende Excel-Liste: in Excel als <b>CSV speichern</b> und
+  hier hochladen. Erkannte Spalten (Reihenfolge egal, per Kopfzeile):
+  <code>Kapa-Nummer</code>, <code>Projekt</code>, <code>Cluster</code>,
+  <code>CPU</code>, <code>RAM</code>, <code>Storage</code>, <code>Datum</code> —
+  optional <code>Change</code>, <code>Anforderer</code>, <code>Team</code>.
+  Alle Zeilen kommen als <b>genehmigt</b> an (Freigebender „Import"); die
+  Gültigkeit rechnet ab dem <b>Original-Datum</b> — ältere Einträge laufen
+  entsprechend sofort ab (wird gemeldet). Bereits vorhandene Kapa-Nummern
+  werden übersprungen, ein erneuter Import erzeugt also keine Duplikate.</div>
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+  <label class="btn">CSV-Datei wählen &amp; importieren<input
+    type="file" accept=".csv,text/csv" hidden onchange="importKapaCsv(event)"></label>
+  <span id="kapaCsvStatus" style="font-size:12px;color:var(--muted)"></span>
+</div>
 </div><!-- admGrpImp -->
 
 <div id="admGrpTok" style="display:none">
@@ -5279,6 +5295,32 @@ function importOffline(ev) {
       .catch(() => { if (st) st.textContent = ""; notify("Import fehlgeschlagen (Netzwerk/Server)."); });
   }).catch(() => notify("Datei konnte nicht gelesen werden (kein gültiges JSON)."));
 }
+function importKapaCsv(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  ev.target.value = "";
+  const st = document.getElementById("kapaCsvStatus");
+  if (st) st.textContent = "importiere …";
+  f.text().then(t =>
+    fetch("api/import/reservations", { method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ csv: t }) })
+      .then(r => r.json().then(j => ({ ok: r.ok, j: j })))
+      .then(x => {
+        if (st) st.textContent = "";
+        if (!x.ok) return notify(x.j.error || "Import fehlgeschlagen.");
+        let msg = x.j.imported + " Kapa-Anfragen übernommen (genehmigt)";
+        if (x.j.skipped) msg += " · " + x.j.skipped + " übersprungen (Kapa-Nummer schon vorhanden)";
+        if (x.j.expired) msg += " · " + x.j.expired + " sofort abgelaufen (Original-Datum älter als die Gültigkeit)";
+        if ((x.j.unknown_clusters || []).length)
+          msg += " · Unbekannte Cluster: " + x.j.unknown_clusters.join(", ");
+        if ((x.j.errors || []).length)
+          msg += "\n\nÜbersprungene Zeilen: \n" + x.j.errors.join("\n");
+        notify(msg, "CSV-Import");
+        apiRes("GET", "").then(setRes).catch(() => {});
+      }))
+    .catch(() => { if (st) st.textContent = "";
+      notify("Datei konnte nicht gelesen werden."); });
+}
 function delImport(name) {
   askConfirm({ title: "Offline-Quelle entfernen", okLabel: "✕ Löschen", okClass: "danger",
     message: "Quelle „" + name + "“ samt ihrer Cluster aus der Übersicht entfernen?\n" +
@@ -6131,6 +6173,12 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Kapa-CSV-Import
+  "Übernimmt eure bestehende Excel-Liste: in Excel als CSV speichern und hier hochladen. Erkannte Spalten (Reihenfolge egal, per Kopfzeile): Kapa-Nummer, Projekt, Cluster, CPU, RAM, Storage, Datum — optional Change, Anforderer, Team. Alle Zeilen kommen als genehmigt an (Freigebender „Import\"); die Gültigkeit rechnet ab dem Original-Datum — ältere Einträge laufen entsprechend sofort ab (wird gemeldet). Bereits vorhandene Kapa-Nummern werden übersprungen, ein erneuter Import erzeugt also keine Duplikate.": "Takes over your existing Excel list: save it as CSV in Excel and upload it here. Recognized columns (any order, by header): Kapa-Nummer, Projekt, Cluster, CPU, RAM, Storage, Datum — optional Change, Anforderer, Team. All rows arrive as approved (approver “Import”); validity counts from the original date — older entries expire immediately accordingly (reported). Existing kapa numbers are skipped, so re-importing does not create duplicates.",
+  "Kapa-Anfragen aus CSV (XLS-Ablösung)": "Capacity requests from CSV (replacing the XLS)",
+  "CSV-Datei wählen & importieren": "Choose & import CSV file",
+  "CSV-Import": "CSV import",
+  "CSV-Inhalt fehlt": "CSV content missing",
   // Gestaffelte Abruf-Intervalle
   "Wie ein Cronjob: jeder Teilbereich hat seinen eigenen Takt — so muss nicht alles bei jedem Abruf gelesen werden. Kapazität (VMs, CPU/RAM/Disk, Tanzu), Netzwerk (Portgruppen/VLANs) und Storage (Datastores/LUNs). Cluster, Hosts und Tags laufen immer mit. Leer oder 0 = Standard-Intervall. Der ⟳-Knopf oben kann jederzeit alles oder einen einzelnen Bereich sofort aktualisieren.": "Like a cron job: each area has its own pace — so not everything has to be read on every refresh. Capacity (VMs, CPU/RAM/disk, Tanzu), Network (port groups/VLANs) and Storage (datastores/LUNs). Clusters, hosts and tags always run along. Empty or 0 = default interval. The ⟳ button above can refresh everything or a single area at any time.",
   "Datenabruf-Intervalle (gestaffelt)": "Data refresh intervals (tiered)",
@@ -6634,6 +6682,10 @@ const I18N_RX = [
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
   [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
   [/^AD-Gruppe: (.+)$/, "AD group: $1"],
+  [/^(\d+) Kapa-Anfragen übernommen \(genehmigt\)$/, "$1 capacity requests imported (approved)"],
+  [/^(\d+) übersprungen \(Kapa-Nummer schon vorhanden\)$/, "$1 skipped (kapa number already exists)"],
+  [/^(\d+) sofort abgelaufen \(Original-Datum älter als die Gültigkeit\)$/, "$1 expired immediately (original date older than the validity)"],
+  [/^Unbekannte Cluster: (.+)$/, "Unknown clusters: $1"],
   [/^\(leer = Standard: (\d+) min\)$/, "(empty = default: $1 min)"],
   [/^(\d+) Tage$/, "$1 days"],
   [/^(\d+) Datenpunkte · (.+)$/, "$1 data points · $2"],
@@ -6683,6 +6735,11 @@ const I18N_RX = [
 ];
 // Teil-Ersetzungen nur für zusammengesetzte Meta-Zeilen (Gate: enthält " · ")
 const I18N_SUB = [
+  [/(\d+) Kapa-Anfragen übernommen \(genehmigt\)/g, "$1 capacity requests imported (approved)"],
+  [/(\d+) übersprungen \(Kapa-Nummer schon vorhanden\)/g, "$1 skipped (kapa number already exists)"],
+  [/(\d+) sofort abgelaufen \(Original-Datum älter als die Gültigkeit\)/g, "$1 expired immediately (original date older than validity)"],
+  [/Unbekannte Cluster: /g, "Unknown clusters: "],
+  [/Übersprungene Zeilen: /g, "Skipped rows: "],
   [/VMware Kapazitätsplanung/g, "VMware Capacity Planning"],
   [/Quelle: /g, "Source: "], [/ nutzbare Cores/g, " usable cores"],
   [/\(davon (\d+) aus\)/g, "($1 powered off)"], [/(\d+) genehmigt/g, "$1 approved"],
@@ -9626,6 +9683,141 @@ def serve(args, password):
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"ok": True, "source": src,
                             "clusters": len(cleaned)}, 201)
+            elif self.path == "/api/import/reservations":
+                # Kapa-Anfragen aus einer Excel-CSV übernehmen (XLS-Ablösung).
+                # Alle Zeilen kommen als GENEHMIGT an (Freigebender „Import"),
+                # Gültigkeit rechnet ab dem Original-Datum aus der Datei.
+                s = self._require("admin")
+                if not s:
+                    return
+                text = str((self._body() or {}).get("csv") or "")
+                if not text.strip():
+                    self._json({"error": "CSV-Inhalt fehlt"}, 400)
+                    return
+                import csv as _csv
+                import io as _io
+                text = text.lstrip("﻿")             # Excel-BOM
+                delim = ";" if text.splitlines()[0].count(";") \
+                    >= text.splitlines()[0].count(",") else ","
+                rows = list(_csv.reader(_io.StringIO(text), delimiter=delim))
+                if len(rows) < 2:
+                    self._json({"error": "CSV braucht Kopfzeile + mindestens "
+                                "eine Datenzeile"}, 400)
+                    return
+                # Spaltenköpfe tolerant zuordnen
+                ALIAS = {"id": ("kapa-nummer", "kapanummer", "kapa", "nummer", "id"),
+                         "name": ("projekt", "projektname", "name", "bezeichnung",
+                                  "anfrage"),
+                         "cluster": ("cluster", "ziel-cluster", "zielcluster"),
+                         "vcpu": ("cpu", "vcpu", "vcpus", "cores"),
+                         "ram_gb": ("ram", "ram_gb", "ram (gb)", "memory"),
+                         "storage_gb": ("storage", "storage_gb", "storage (gb)",
+                                        "disk", "platte"),
+                         "created": ("datum", "datum der anfrage", "angefragt",
+                                     "angefragt am", "beantragt am", "erstellt"),
+                         "change": ("change", "jira", "ticket", "change/jira"),
+                         "von": ("anforderer", "von", "requester"),
+                         "abteilung": ("team", "abteilung")}
+                head = [h.strip().lower().lstrip("﻿") for h in rows[0]]
+                colmap = {}
+                for field, names in ALIAS.items():
+                    for i, h in enumerate(head):
+                        if h in names:
+                            colmap[field] = i
+                            break
+                missing = [f for f in ("id", "name", "cluster", "vcpu",
+                                       "ram_gb", "storage_gb", "created")
+                           if f not in colmap]
+                if missing:
+                    self._json({"error": "Spalten nicht gefunden: "
+                                + ", ".join(missing) + " – erkannte Köpfe: "
+                                + ", ".join(head)}, 400)
+                    return
+
+                def _int_de(v):
+                    v = str(v or "").strip().replace(" ", "")
+                    if "." in v and "," in v:
+                        v = v.replace(".", "").replace(",", ".")
+                    elif "," in v:
+                        v = v.replace(",", ".")
+                    elif v.count(".") == 1 and len(v.split(".")[1]) == 3:
+                        v = v.replace(".", "")     # 1.024 = Tausenderpunkt
+                    return int(float(v))
+
+                def _date_de(v):
+                    v = str(v or "").strip()
+                    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%y"):
+                        try:
+                            return datetime.strptime(v, fmt).date().isoformat()
+                        except ValueError:
+                            continue
+                    raise ValueError(f"Datum nicht lesbar: {v!r}")
+
+                oneline = lambda v, n: " ".join(str(v or "").split())[:n]
+                imported, skipped, errors = [], 0, []
+                with res_lock:
+                    existing = {r.get("id") for r in reservations}
+                    known_cl = {c.get("name") for c in state.get("clusters") or []}
+                    unknown_cl = set()
+                    for ln, row in enumerate(rows[1:], start=2):
+                        if not any(x.strip() for x in row):
+                            continue
+                        get = lambda f: (row[colmap[f]].strip()
+                                         if f in colmap and colmap[f] < len(row)
+                                         else "")
+                        try:
+                            rid = oneline(get("id"), 40)
+                            if not rid:
+                                raise ValueError("Kapa-Nummer fehlt")
+                            if rid in existing:
+                                skipped += 1
+                                continue
+                            cl = oneline(get("cluster"), 120)
+                            if not cl:
+                                raise ValueError("Cluster fehlt")
+                            if cl not in known_cl:
+                                unknown_cl.add(cl)
+                            entry = {"id": rid,
+                                     "name": oneline(get("name"), 120)
+                                             or rid,
+                                     "cluster": cl,
+                                     "change": oneline(get("change"), 60),
+                                     "vcpu": _int_de(get("vcpu")),
+                                     "ram_gb": _int_de(get("ram_gb")),
+                                     "storage_gb": _int_de(get("storage_gb")),
+                                     "von": oneline(get("von"), 120)
+                                            or (s["user"] or "Import"),
+                                     "von_mail": "",
+                                     "abteilung": oneline(get("abteilung"), 60),
+                                     "created": _date_de(get("created")),
+                                     "approvals": [],
+                                     "approved": True,
+                                     "approved_by": "Import",
+                                     "approved_on": datetime.now().date()
+                                                    .isoformat()}
+                            imported.append(entry)
+                            existing.add(rid)
+                        except (ValueError, IndexError) as e:
+                            errors.append(f"Zeile {ln}: {e}")
+                    if not imported and errors:
+                        self._json({"error": "Keine Zeile importierbar – "
+                                    + "; ".join(errors[:5])}, 400)
+                        return
+                    reservations.extend(imported)
+                    before = len(reservations)
+                    reservations[:] = prune_res(reservations)
+                    expired = before - len(reservations)
+                    save_res()
+                audit(s["user"], "Kapa-Anfragen importiert (CSV)",
+                      f"{len(imported)} übernommen (genehmigt, Freigebender "
+                      f"„Import“), {skipped} übersprungen (ID vorhanden), "
+                      f"{expired} sofort abgelaufen (Original-Datum + TTL)"
+                      + (f"; unbekannte Cluster: {', '.join(sorted(unknown_cl))}"
+                         if unknown_cl else ""))
+                self._json({"imported": len(imported), "skipped": skipped,
+                            "expired": expired,
+                            "unknown_clusters": sorted(unknown_cl),
+                            "errors": errors[:20]}, 201)
             elif self.path == "/api/ad/group-members":
                 # AD-Gruppen-Check: direkte Benutzer-Mitglieder einer Gruppe holen,
                 # damit Admins prüfen können, ob der Gruppenabruf sauber läuft.
