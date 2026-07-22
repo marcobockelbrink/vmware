@@ -171,9 +171,15 @@ try:
                       "lun_name": "X", "current_gb": 8000, "target_gb": 4000})
     check("Ziel <= aktuell -> 400", st == 400)
     st, csv_s, _ = req("GET", "/api/v1/storage-requests?format=csv", raw=True)
+    hdr = csv_s.decode().splitlines()[0].split(";")
     check("v1-CSV mit NAA-Spalte",
-          csv_s.decode().splitlines()[0].split(";")[4] == "naa"
-          and "naa.6006016012ab" in csv_s.decode())
+          hdr[5] == "naa" and "naa.6006016012ab" in csv_s.decode())
+    check("v1-CSV mit Hosts-Spalte", hdr[2] == "hosts")
+    # JSON: Hosts des Clusters an der Anfrage
+    st, sral, _ = req("GET", "/api/v1/storage-requests?status=alle")
+    check("Storage-Anfrage enthält Cluster-Hosts",
+          isinstance(sral["requests"][0].get("hosts"), list)
+          and len(sral["requests"][0]["hosts"]) >= 1)
     # Token-Schreibrecht Storage -> /done
     sid = sreq["id"]
     req("PUT", f"/api/tokens/{tid}", {"write_res": True, "write_approve": True,

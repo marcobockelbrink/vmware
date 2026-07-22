@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.16.2"
+VERSION = "2.17"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1995,11 +1995,14 @@ def openapi_spec(lang="de"):
                 "summary": T("Storage-Erweiterungen (fürs Storage-Team)",
                              "Storage expansions (for the storage team)"),
                 "description": T("Angefragte LUN-Vergrößerungen und neue LUNs, "
-                                 "inkl. NAA-Kennung. Standard: offene; status=alle "
-                                 "für alle. Als CSV mit format=csv.",
-                                 "Requested LUN expansions and new LUNs, incl. NAA. "
-                                 "Default: open ones; status=alle for all. As CSV "
-                                 "with format=csv."),
+                                 "inkl. NAA-Kennung und der ESXi-Hosts des Clusters "
+                                 "(Feld hosts, fürs Zoning/Mapping). Standard: "
+                                 "offene; status=alle für alle. Als CSV mit "
+                                 "format=csv.",
+                                 "Requested LUN expansions and new LUNs, incl. NAA "
+                                 "and the cluster's ESXi hosts (field hosts, for "
+                                 "zoning/mapping). Default: open ones; status=alle "
+                                 "for all. As CSV with format=csv."),
                 "parameters": [
                     {"name": "status", "in": "query", "schema": {"type": "string",
                      "enum": ["offen", "erledigt", "alle"], "default": "offen"}},
@@ -6809,15 +6812,16 @@ def serve(args, password):
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=";")
         if lang == "en":
-            w.writerow(["id", "cluster", "kind", "lun", "naa", "current_gb",
-                        "target_gb", "new_lun_gb", "comment", "requested_by",
-                        "requested_on", "status", "reservation"])
+            w.writerow(["id", "cluster", "hosts", "kind", "lun", "naa",
+                        "current_gb", "target_gb", "new_lun_gb", "comment",
+                        "requested_by", "requested_on", "status", "reservation"])
         else:
-            w.writerow(["id", "cluster", "typ", "lun", "naa", "aktuell_gb",
-                        "ziel_gb", "neue_lun_gb", "kommentar", "angefragt_von",
-                        "angefragt_am", "status", "reservierung"])
+            w.writerow(["id", "cluster", "hosts", "typ", "lun", "naa",
+                        "aktuell_gb", "ziel_gb", "neue_lun_gb", "kommentar",
+                        "angefragt_von", "angefragt_am", "status", "reservierung"])
         for r in rows:
-            w.writerow([r.get("id", ""), r.get("cluster", ""), r.get("kind", ""),
+            w.writerow([r.get("id", ""), r.get("cluster", ""),
+                        ", ".join(r.get("hosts") or []), r.get("kind", ""),
                         r.get("lun_name", ""), r.get("naa", ""),
                         r.get("current_gb", ""), r.get("target_gb", ""),
                         r.get("size_gb", ""), r.get("comment", ""),
@@ -7698,6 +7702,16 @@ def serve(args, password):
                     with storage_lock:
                         rows = [dict(x) for x in storage_reqs
                                 if only == "alle" or x.get("status") == only]
+                    # ESXi-Hosts des jeweiligen Clusters mitgeben — das Storage-
+                    # Team braucht sie fürs Zoning/LUN-Mapping. Token (externe
+                    # App) bekommt sie immer; eine Session nur, wenn die Rolle
+                    # Host-Sicht hat (Sichtbarkeits-Matrix).
+                    if bool(tok) or (s and vis_for(s["role"]).get("hosts", True)):
+                        hmap = {c.get("name"): [h.get("name")
+                                                for h in (c.get("hosts") or [])]
+                                for c in state["clusters"]}
+                        for r in rows:
+                            r["hosts"] = hmap.get(r.get("cluster"), [])
                     if query.get("format", [""])[0] == "csv":
                         self._send(storagereq_csv(rows, self._lang()),
                                    "text/csv; charset=utf-8")
