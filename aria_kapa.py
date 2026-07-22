@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.16.1"
+VERSION = "2.16.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -218,6 +218,22 @@ class AriaOps:
                     props[p["name"]] = p.get("value")
             result[rid] = props
         return result
+
+    def statkeys(self, resource_id):
+        """Alle verfügbaren Metrik-Schlüssel einer Ressource als Liste von
+        Strings. In vROps taucht die LUN-/Device-NAA nicht als Property, sondern
+        als Metrik-INSTANZ im Schlüssel auf (z. B. 'Devices|naa.6000…|…') — die
+        NAA lässt sich dann direkt aus dem Schlüsselnamen lesen."""
+        try:
+            resp = self._request("GET", f"/resources/{resource_id}/statkeys")
+        except RuntimeError:
+            return []
+        out = []
+        for s in resp.get("stat-key", []) or resp.get("statKey", []):
+            k = s.get("key") if isinstance(s, dict) else s
+            if k:
+                out.append(k)
+        return out
 
     def related(self, resource_id, kinds=None, rel="ALL"):
         """Identifier der verwandten Ressourcen (optional gefiltert nach
@@ -1293,7 +1309,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             try:
                 d0 = next((d for d in datastores
                            if "vsan" not in name_of(d).lower()), datastores[0])
-                p0 = api.all_properties(d0["identifier"])
+                did0 = d0["identifier"]
+                p0 = api.all_properties(did0)
                 hits = {k: v for k, v in p0.items()
                         if re.search(r"naa\.[0-9a-fA-F]{8,}", str(v))
                         or re.search(r"disk|device|canonical|extent", k, re.I)}
@@ -1301,21 +1318,58 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                     "Device/NAA-Kandidaten: "
                     + (", ".join(f"{k}={str(v)[:60]}" for k, v in
                                  sorted(hits.items())[:8]) or "keine gefunden"))
-            except Exception:
-                pass
+                # Metrik-Schlüssel des Datastores: hier liegt die NAA je nach
+                # vROps-Version (Gruppe 'Devices' mit naa.…-Instanzen).
+                sk = api.statkeys(did0)
+                sk_hits = [k for k in sk
+                           if re.search(r"naa\.[0-9a-fA-F]{8,}|device", k, re.I)]
+                log(f"Datastore-Metrik-Schlüssel (Beispiel '{name_of(d0)}', "
+                    f"{len(sk)} gesamt) – Device/NAA-Kandidaten: "
+                    + (", ".join(sorted(sk_hits)[:8]) or "keine gefunden"))
+                # Fallback-Suche: NAA auch über verwandte Hosts sichtbar machen
+                if not sk_hits:
+                    for hid in (api.related(did0, {"HostSystem"}) or [])[:1]:
+                        hk = [k for k in api.statkeys(hid)
+                              if re.search(r"naa\.[0-9a-fA-F]{8,}", k)]
+                        log("Host-Metrik-Schlüssel mit NAA (Beispiel-Host): "
+                            + (", ".join(sorted(hk)[:6]) or "keine gefunden"))
+            except Exception as e:
+                log(f"NAA-Diagnose übersprungen: {e}")
     except Exception as e:
         log(f"Storage-Kapazität nicht verfügbar: {e}")
 
+    _NAA_RX = re.compile(r"naa\.[0-9a-fA-F]{8,}")
+    ds_statkey_naa = {}     # Cache: {datastoreId: "naa.…" oder ""}
+
+    def _naa_from_statkeys(did):
+        """NAA aus den Metrik-Schlüsseln des Datastores lesen (z. B.
+        'Devices|naa.6000…|…'). Ergebnis pro Datastore gecacht, damit jeder
+        Datastore höchstens einen /statkeys-Aufruf verursacht."""
+        if did in ds_statkey_naa:
+            return ds_statkey_naa[did]
+        naa = ""
+        try:
+            for k in api.statkeys(did):
+                m = _NAA_RX.search(k)
+                if m:
+                    naa = m.group(0)
+                    break
+        except Exception:
+            naa = ""
+        ds_statkey_naa[did] = naa
+        return naa
+
     def ds_naa(did):
-        """NAA/Device-Kennung eines Datastores (erster gefüllter Kandidat;
-        notfalls ein naa.…-Muster in irgendeinem Kandidatenwert)."""
+        """NAA/Device-Kennung eines Datastores. Zuerst aus den Properties
+        (Kandidaten-Schlüssel), sonst aus den Metrik-Schlüsseln (Device-Metrik
+        'Devices|naa.…'), da vROps die NAA je nach Version nur dort führt."""
         p = ds_props.get(did) or {}
         for k in DS_NAA_KEYS:
             v = str(p.get(k) or "").strip()
             if v:
-                m = re.search(r"naa\.[0-9a-fA-F]{8,}", v)
+                m = _NAA_RX.search(v)
                 return m.group(0) if m else v[:80]
-        return ""
+        return _naa_from_statkeys(did)
 
     def ds_type(did, name):
         """Storage-Typ eines Datastores (erste gefüllte Kandidaten-Eigenschaft)."""

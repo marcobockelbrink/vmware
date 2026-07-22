@@ -232,11 +232,17 @@ Ablehnungen, Stornos und Backups:
   Belegung**, damit die Auslastung stimmt — vROps meldet beide Werte brutto.
   Die LUN-Liste zeigt den **Storage-Typ** (vSAN/VMFS/NFS) und bei vSAN die
   Bruttokapazität im Tooltip. Bei FC-/iSCSI-LUNs wird zusätzlich die
-  **NAA-Kennung** des Backing-Devices (`naa.6000…`) best effort aus den
-  Datastore-Eigenschaften gelesen — sie steht im LUN-Tooltip, im Datenpaket
-  (`/api/v1/data`, Feld `naa` je Datastore) und damit im Cache; das Log nennt
-  die erkannten Schlüssel (`Datastore-Properties (Beispiel …)`, `NAA erkannt:
-  X/Y`) zum Abgleich mit dem eigenen vROps. Der Typ kommt aus den Datastore-Eigenschaften;
+  **NAA-Kennung** des Backing-Devices (`naa.6000…`) best effort gelesen — zuerst
+  aus den Datastore-Eigenschaften, andernfalls aus den **Metrik-Schlüsseln**
+  des Datastores (in vielen vROps-Versionen liegt die NAA nicht als Property,
+  sondern als Metrik-Instanz in der Gruppe **`Devices`**, z. B.
+  `Devices|naa.6000…|…`; die Kennung wird direkt aus dem Schlüsselnamen gelesen).
+  Sie steht im LUN-Tooltip, im Datenpaket (`/api/v1/data`, Feld `naa` je
+  Datastore) und damit im Cache. Zum Abgleich mit dem eigenen vROps nennt das
+  Log sowohl die geprüften **Properties** als auch die **Metrik-Schlüssel**
+  (`Datastore-Properties (Beispiel …)`, `Datastore-Metrik-Schlüssel (Beispiel …)`,
+  `NAA erkannt: X/Y`) — findet ein Datastore selbst keine, wird zusätzlich ein
+  verwandter Host auf `naa.…`-Schlüssel geprüft. Der Typ kommt aus den Datastore-Eigenschaften;
   wird keiner geliefert, greift die Erkennung über den Datastore-Namen.
   - **LUN-Detail**: Ein Klick auf den Storage-Wert (oder auf den Clusternamen)
     öffnet die Detailkarte mit **jedem einzelnen Datastore/LUN** – wahlweise
