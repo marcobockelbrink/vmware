@@ -120,6 +120,12 @@ Cluster und Kommentare bleiben wie erfasst).
 - **Performance**: gzip-komprimierte Antworten (Seite ~¼, JSON ~⅛ der Größe) und ein
   **VLAN-Cache** — Portgruppen-VLANs werden zwischen Abrufen wiederverwendet (einmal
   täglich Voll-Abruf), statt je Portgruppe einen API-Aufruf zu machen
+- **Gestaffelte Abruf-Intervalle** (Verwaltung → Backup & Konfiguration): wie ein
+  Cronjob bekommt jeder Teilbereich seinen eigenen Takt — **Kapazität** (VMs),
+  **Netzwerk** (Portgruppen), **Storage** (Datastores), z. B. 60/180/360 Minuten;
+  übersprungene Bereiche übernehmen den Stand des letzten Laufs. Der ⟳-Knopf
+  bietet Admins zusätzlich **„Alles / nur Kapazität / nur Netzwerk / nur
+  Storage" sofort aktualisieren** (Stand je Bereich sichtbar)
 - **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend), **`/healthz`**
   fürs Monitoring (ohne Anmeldung: Status, Datenalter, Cluster-Anzahl)
 - **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**

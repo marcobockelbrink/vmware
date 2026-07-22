@@ -119,6 +119,12 @@ standard actions**, though (entered names, clusters and comments stay as typed).
 - **Performance**: gzip-compressed responses (page ~¼, JSON ~⅛ of the size) and a
   **VLAN cache** — port group VLANs are reused between refreshes (full re-read
   once a day) instead of one API call per port group
+- **Tiered refresh intervals** (Administration → Backup & configuration): like a
+  cron job, each area gets its own pace — **capacity** (VMs), **network** (port
+  groups), **storage** (datastores), e.g. 60/180/360 minutes; skipped areas keep
+  the state of the last run. The ⟳ button additionally offers admins **"refresh
+  everything / capacity only / network only / storage only" right now** (per-area
+  timestamps shown)
 - **SFTP backup** with rotation, **audit log** (JSONL, rotating), **`/healthz`**
   for monitoring (no sign-in: status, data age, cluster count)
 - **One INI** for all non-secret settings, secrets as `.pass` files; optional **Aria proxy**

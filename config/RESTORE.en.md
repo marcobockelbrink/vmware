@@ -21,6 +21,7 @@ The SFTP backups contain all runtime data of the dashboard as `tar.gz`:
 | `kapa_netcfg.json` | network filter (hide port groups by name/VLAN ID) | yes |
 | `kapa_import.json` | offline sources (manually imported clusters without vROps) | yes |
 | `kapa_history.json` | statistics history (daily snapshots for trends) | yes |
+| `kapa_abrufintervalle.json` | tiered refresh intervals per area | yes |
 | `kapa_storage_anfragen.json` | storage expansion requests (for the storage team) | yes |
 | `kapa.db` (+ `-wal`/`-shm`) | with `storage = sqlite`: all collections above in one DB | **yes** (instead of the JSONs) |
 | `kapa_log.jsonl` | audit log | yes (traceability) |

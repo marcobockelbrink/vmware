@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.22. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.23. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -66,7 +66,7 @@ flowchart TB
     end
 
     subgraph BG["Background threads (daemon)"]
-        T1["scheduler<br/>Aria refresh every 30 min"]
+        T1["scheduler<br/>tiered refreshes: capacity /<br/>network / storage at their own pace"]
         T2["maintenance<br/>TTL expiry, log rotation"]
         T3["backup_loop<br/>SFTP twice a day + rotation"]
         T4["reminder_loop<br/>hourly: nudge stalled<br/>requests"]
@@ -104,7 +104,7 @@ sequenceDiagram
     participant B as build_summary
     participant ST as state + cache
 
-    S->>C: do_refresh (all sources in turn)
+    S->>C: do_refresh (all sources in turn;<br/>only due areas — VMs/network/storage<br/>at their own interval, rest from raw cache)
     C->>V: clusters, hosts, VMs (+ metrics/properties, bulk)
     C->>V: host HBA WWPNs (storageAdapter:vmhbaN|port_WWN,<br/>candidate range in bulk)
     C->>V: datastores (storage, vSAN factor,<br/>NAA from properties OR metric keys "Devices|naa…")
@@ -232,7 +232,7 @@ hash). Cross-cutting engines live at the end of the script:
 All collections (reservations, roles, teams, selector, role labels, tokens,
 mail rules, prefs, announcement, auto-approval, sessions, visibility,
 storage settings, storage requests, network filter, offline sources,
-statistics history) go through a store abstraction:
+statistics history, refresh intervals) go through a store abstraction:
 **JSON files** (default, one file per collection) or **SQLite** (a single
 `kapa.db`, incremental reservation writes, automatic one-time migration).
 Writes are always atomic. Details and restore:

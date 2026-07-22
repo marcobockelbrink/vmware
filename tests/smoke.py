@@ -283,6 +283,31 @@ try:
           and ncfg.get("exclude_names") == "vlan2")
     req("PUT", "/api/netcfg", {"exclude_names": "", "exclude_vlans": ""})
 
+    print("== Gestaffelte Abruf-Intervalle ==")
+    st, rc, _ = req("PUT", "/api/refreshcfg",
+                    {"vms": 60, "network": 180, "storage": "999999"})
+    check("Intervalle speichern (Clamp auf 10080)",
+          st == 200 and rc["tiers"]["vms"] == 60
+          and rc["tiers"]["storage"] == 10080 and rc.get("default_min"))
+    st, rc2, _ = req("GET", "/api/refreshcfg")
+    check("Intervalle persistiert", rc2["tiers"]["network"] == 180)
+    st, bad, _ = req("POST", "/api/refresh", {"parts": ["quatsch"]})
+    check("Teil-Refresh: ungültige parts -> 400", st == 400)
+    st, ok2, _ = req("POST", "/api/refresh", {"parts": ["storage"]})
+    check("Teil-Refresh storage angenommen", st == 202)
+    t0 = time.time()
+    while time.time() - t0 < 15:
+        stt = req("GET", "/api/status")[1]
+        if not stt.get("refreshing"):
+            break
+        time.sleep(0.5)
+    check("Tier-Stände im Status", all((stt.get("tiers") or {}).get(t)
+                                       for t in ("vms", "network", "storage")))
+    dts = req("GET", "/api/v1/data")[1]["clusters"][0]
+    check("Daten nach Teil-Refresh vollständig",
+          dts["vmCount"] > 0 and dts["datastores"] and dts["portgroups"])
+    req("PUT", "/api/refreshcfg", {"vms": 0, "network": 0, "storage": 0})
+
     print("== Statistik-Historie ==")
     st, hist, _ = req("GET", "/api/history?days=730")
     hdays = sorted((hist or {}).get("days") or {})

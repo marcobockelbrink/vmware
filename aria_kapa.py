@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.22"
+VERSION = "2.23"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -947,6 +947,7 @@ def sftp_backup(args):
                          getattr(args, "netcfg_file", ""),
                          getattr(args, "import_file", ""),
                          getattr(args, "history_file", ""),
+                         getattr(args, "refreshcfg_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1208,10 +1209,21 @@ def strip_uplinks(clusters, hide=True):
     return clusters
 
 
+class _SkipTier(Exception):
+    """Intern: Teilbereich per Intervall übersprungen (kein Fehler)."""
+
+
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             tag_property="", vsan_factor=0.5, tanzu_mhz=2500, vlan_hint=None,
             min_lun_gb=0, exclude_names=None,
-            net_exclude_names=None, net_exclude_vlans=None):
+            net_exclude_names=None, net_exclude_vlans=None,
+            skip=None, prev=None):
+    """skip: Teilbereiche überspringen ("vms" | "network" | "storage") und
+    stattdessen die Rohdaten des letzten Laufs (prev, je Cluster) übernehmen —
+    Basis der gestaffelten Abruf-Intervalle. Cluster/Hosts/Tags (Skelett)
+    werden immer frisch gelesen. Rückgabe: (fertige Cluster, Rohdaten)."""
+    skip = set(skip or ())
+    prev = prev or {}
     # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
     # grob geschätzten Prozentwert über report().
     log = lambda m: print(m, file=sys.stderr)
@@ -1242,14 +1254,18 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     hosts = api.resources("HostSystem")
     report(15)
     log(f"Lese VMs ... ({len(hosts)} Hosts gefunden)")
-    vms = api.resources("VirtualMachine")
+    if "vms" in skip:
+        vms = []
+        log("VMs: übersprungen (Intervall) – Stand vom letzten Abruf")
+    else:
+        vms = api.resources("VirtualMachine")
+        log(f"{len(vms)} VMs gefunden")
     report(22)
-    log(f"{len(vms)} VMs gefunden")
 
     # Systeme mit dem Ausschluss-Tag (z. B. Kapa_Filter:Ja) aus der Auswertung
     # nehmen – best effort, bei Fehler wird nichts ausgeschlossen.
     exclude_vms = set()
-    if exclude_tag and ":" in exclude_tag:
+    if exclude_tag and ":" in exclude_tag and "vms" not in skip:
         cat, _, val = exclude_tag.partition(":")
         cat, val = cat.strip(), val.strip()
         if cat and val:
@@ -1320,19 +1336,22 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             log(f"WWPN-Diagnose übersprungen: {e}")
 
     report(50)
-    log("Lese VM-Metriken (vCPU, RAM) ...")
     # Disk je VM (für die Statistik „VMs werden größer"): der Schlüssel variiert
     # je vROps-Version -> Kandidaten im selben Bulk, erster Treffer gewinnt.
     VM_DISK_KEYS = ["config|hardware|disk_Space", "diskspace|provisioned_space",
                     "diskspace|provisionedSpace", "diskspace|used"]
-    vm_stats = api.latest_stats(vm_ids,
-        ["config|hardware|num_Cpu", "mem|guest_provisioned"] + VM_DISK_KEYS,
-        progress=lambda m: log(f"VM-Metriken: {m}"))
-    log("Lese VM-Eigenschaften (Cluster, PowerState) ...")
-    vm_props = api.properties(vm_ids,
-        ["summary|parentCluster", "summary|runtime|powerState",
-         "config|hardware|numCpu", "config|hardware|memoryKB"],
-        progress=lambda m: log(f"VM-Eigenschaften: {m}"))
+    if "vms" in skip:
+        vm_stats, vm_props = {}, {}
+    else:
+        log("Lese VM-Metriken (vCPU, RAM) ...")
+        vm_stats = api.latest_stats(vm_ids,
+            ["config|hardware|num_Cpu", "mem|guest_provisioned"] + VM_DISK_KEYS,
+            progress=lambda m: log(f"VM-Metriken: {m}"))
+        log("Lese VM-Eigenschaften (Cluster, PowerState) ...")
+        vm_props = api.properties(vm_ids,
+            ["summary|parentCluster", "summary|runtime|powerState",
+             "config|hardware|numCpu", "config|hardware|memoryKB"],
+            progress=lambda m: log(f"VM-Eigenschaften: {m}"))
 
     # Storage-Kapazität aus den Datastores (vSAN + angedockte FC-LUNs).
     # Best effort – schlägt es fehl, bleibt die Anzeige leer, der Rest läuft weiter.
@@ -1347,7 +1366,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                    "summary|diskName", "info|extent|diskName",
                    "config|vmfs|extent|diskName", "summary|canonicalName"]
     datastores, ds_stats, ds_props = [], {}, {}
+    if "storage" in skip:
+        log("Storage: übersprungen (Intervall) – Stand vom letzten Abruf")
     try:
+        if "storage" in skip:
+            raise _SkipTier()
         report(68)
         log("Lese Datastores (Storage-Kapazität) ...")
         datastores = api.resources("Datastore")
@@ -1389,6 +1412,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                             + (", ".join(sorted(hk)[:6]) or "keine gefunden"))
             except Exception as e:
                 log(f"NAA-Diagnose übersprungen: {e}")
+    except _SkipTier:
+        pass
     except Exception as e:
         log(f"Storage-Kapazität nicht verfügbar: {e}")
 
@@ -1520,10 +1545,14 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             "disk_gb": round(float(disk or 0), 1),
             "on": "on" in power.lower().replace(" ", ""),
         })
-    _dvm = [v for d in data.values() for v in d["vms"]]
-    _dn = sum(1 for v in _dvm if v.get("disk_gb"))
-    log(f"VM-Disk erkannt: {_dn}/{len(_dvm)} VMs mit Disk-Wert"
-        + ("" if _dn else " – Kandidaten-Schlüssel: " + ", ".join(VM_DISK_KEYS)))
+    if "vms" in skip:
+        for cl in data:
+            data[cl]["vms"] = (prev.get(cl) or {}).get("vms") or []
+    else:
+        _dvm = [v for d in data.values() for v in d["vms"]]
+        _dn = sum(1 for v in _dvm if v.get("disk_gb"))
+        log(f"VM-Disk erkannt: {_dn}/{len(_dvm)} VMs mit Disk-Wert"
+            + ("" if _dn else " – Kandidaten-Schlüssel: " + ", ".join(VM_DISK_KEYS)))
 
     # Datastore -> Cluster über die angedockten Hosts. Jeder Datastore (auch ein
     # von allen Hosts gesehenes FC-LUN oder der vSAN-Datastore) ist in vROps EINE
@@ -1591,6 +1620,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                       for l in d["storage"]["luns"] if l.get("naa")))
             + "/" + str(sum(len(d["storage"]["luns"]) for d in data.values())))
 
+    if "storage" in skip:
+        for cl in data:
+            data[cl]["storage"] = (prev.get(cl) or {}).get("storage") \
+                or {"cap_gb": 0.0, "used_gb": 0.0, "luns": []}
+
     # dvSwitches + Portgruppen je Cluster (Netzwerk-Reiter im Popup + VLAN-Suche).
     # Zuordnung wie beim Storage über die Hosts: dvSwitch -> HostSystem ->
     # summary|parentCluster. Ein dvSwitch kann sich über mehrere Cluster
@@ -1599,6 +1633,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # Fehler = leerer Bereich, der Rest läuft weiter.
     VLAN_IN_NAME = re.compile(r"vlan[\s_\-]?(\d{1,4})", re.I)
     try:
+        if "network" in skip:
+            for cl in data:
+                data[cl]["portgroups"] = (prev.get(cl) or {}).get("portgroups") or []
+            log("Netzwerk: übersprungen (Intervall) – Stand vom letzten Abruf")
+            raise _SkipTier()
         report(90)
         log("Lese dvSwitches und Portgruppen ...")
         dvs_list = api.resources("VmwareDistributedVirtualSwitch")
@@ -1702,6 +1741,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                or "keinem Cluster (Beziehungen prüfen)")
             + (f" · {n_pg} Portgruppen sichtbar" if n_pg else "")
             + f" · VLANs: {vlan_cached[0]} aus Cache, {len(pg_prop_cache)} per API")
+    except _SkipTier:
+        pass
     except Exception as e:
         log(f"Netzwerk-Daten (dvSwitch) nicht verfügbar: {e}")
 
@@ -1710,7 +1751,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
     # Resource-Kind und Stat-Keys unterscheiden sich je nach vROps-Version,
     # deshalb Kandidatenlisten und ein ausführliches Log zum Gegenprüfen.
     # Ohne Tanzu findet der Abruf schlicht nichts und ändert nichts.
-    NS_KINDS = ["Namespace", "SupervisorNamespace", "K8sNamespace",
+    if "vms" in skip:
+        for cl in data:
+            data[cl]["namespaces"] = (prev.get(cl) or {}).get("namespaces") or []
+    NS_KINDS = [] if "vms" in skip else [
+                "Namespace", "SupervisorNamespace", "K8sNamespace",
                 "vSphereNamespace"]
     # CPU-Reservierung in MHz (Kandidaten), RAM-Reservierung mit Einheit je Key
     NS_CPU_KEYS = ["config|cpuAllocation|reservation", "cpu|reservation",
@@ -1795,9 +1840,9 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         log(f"Tanzu-Namespaces nicht verfügbar: {e}")
 
     report(100)
-    return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz,
-                         min_lun_gb, exclude_names,
-                         net_exclude_names, net_exclude_vlans)
+    return (build_summary(data, cpu_factor, failover_hosts, tanzu_mhz,
+                          min_lun_gb, exclude_names,
+                          net_exclude_names, net_exclude_vlans), data)
 
 
 def _name_excluded(name, patterns):
@@ -3027,6 +3072,13 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="if(VIEW==='log')LOG_PAGE=0;render()">
   <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
   <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
+  <details class="colmenu" id="refreshMenu" style="display:none"><summary>▾</summary>
+    <div>
+      <label><a href="#" onclick="refreshData();this.closest('details').open=false;return false">Alles aktualisieren</a></label>
+      <label><a href="#" onclick="refreshData(['vms']);this.closest('details').open=false;return false">Nur Kapazität (VMs) <span id="tierVms" style="color:var(--muted)"></span></a></label>
+      <label><a href="#" onclick="refreshData(['network']);this.closest('details').open=false;return false">Nur Netzwerk <span id="tierNetwork" style="color:var(--muted)"></span></a></label>
+      <label><a href="#" onclick="refreshData(['storage']);this.closest('details').open=false;return false">Nur Storage <span id="tierStorage" style="color:var(--muted)"></span></a></label>
+    </div></details>
   <span id="refreshStatus" style="font-size:12px;color:var(--muted)"></span>
   <span id="timer" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
   <a class="btn" id="csvBtn" href="api/v1/reservations?format=csv"
@@ -3561,6 +3613,26 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div><!-- admGrpMail -->
 
 <div id="admGrpConf" style="display:none">
+<div class="sechead">Datenabruf-Intervalle (gestaffelt)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Wie ein Cronjob: jeder Teilbereich hat seinen eigenen Takt — so muss nicht
+  alles bei jedem Abruf gelesen werden. <b>Kapazität</b> (VMs, CPU/RAM/Disk,
+  Tanzu), <b>Netzwerk</b> (Portgruppen/VLANs) und <b>Storage</b>
+  (Datastores/LUNs). Cluster, Hosts und Tags laufen immer mit. Leer oder 0 =
+  Standard-Intervall. Der ⟳-Knopf oben kann jederzeit alles oder einen
+  einzelnen Bereich sofort aktualisieren.</div>
+<table class="kt" style="max-width:460px;margin-bottom:10px">
+  <tr><td>Kapazität (VMs)</td>
+      <td class="num"><input type="number" id="rcVms" min="0" max="10080" class="aanum" style="width:90px"> min</td></tr>
+  <tr><td>Netzwerk (Portgruppen)</td>
+      <td class="num"><input type="number" id="rcNetwork" min="0" max="10080" class="aanum" style="width:90px"> min</td></tr>
+  <tr><td>Storage (Datastores)</td>
+      <td class="num"><input type="number" id="rcStorage" min="0" max="10080" class="aanum" style="width:90px"> min</td></tr>
+</table>
+<button class="btn approve" onclick="saveRefreshCfg()">✓ Intervalle speichern</button>
+<span id="rcSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+<span id="rcDefault" style="color:var(--muted);font-size:12px;margin-left:8px"></span>
+
 <div id="backupSection" style="display:none">
   <div class="sechead">Backup</div>
   <div class="hint" style="color:var(--muted);margin-bottom:8px">
@@ -4489,7 +4561,7 @@ function setView(v) {
   } catch (e) {}
   if (v === "stor") loadStorage();
   if (v === "stat") loadHistory();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); loadImports(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); loadImports(); loadRefreshCfg(); }
   if (v === "log") loadLog();
   render();
 }
@@ -5024,6 +5096,31 @@ function saveNetCfg() {
                 setTimeout(() => { ok.textContent = ""; }, 2500); }
       pollStatus();
     })
+    .catch(e => notify("Speichern fehlgeschlagen" +
+                       (e && e.message ? " (" + e.message + ")" : "") + "."));
+}
+
+// ---- Abruf-Intervalle (Verwaltung -> Backup & Konfiguration) ----
+function loadRefreshCfg() {
+  fetch("api/refreshcfg").then(r => r.ok ? r.json() : null).then(d => {
+    if (!d) return;
+    [["rcVms","vms"],["rcNetwork","network"],["rcStorage","storage"]].forEach(([id, k]) => {
+      const el = document.getElementById(id);
+      if (el && document.activeElement !== el) el.value = d.tiers[k] || "";
+    });
+    const df = document.getElementById("rcDefault");
+    if (df) df.textContent = "(leer = Standard: " + d.default_min + " min)";
+  }).catch(() => {});
+}
+function saveRefreshCfg() {
+  const val = id => parseInt((document.getElementById(id) || {}).value) || 0;
+  fetch("api/refreshcfg", { method: "PUT", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ vms: val("rcVms"), network: val("rcNetwork"),
+                             storage: val("rcStorage") }) })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+    .then(() => { const ok = document.getElementById("rcSaved");
+      if (ok) { ok.textContent = "✓ gespeichert";
+                setTimeout(() => { ok.textContent = ""; }, 2500); } })
     .catch(e => notify("Speichern fehlgeschlagen" +
                        (e && e.message ? " (" + e.message + ")" : "") + "."));
 }
@@ -5850,6 +5947,7 @@ if (ME) {
 if (!CAN_REQUEST) document.getElementById("newReqBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("importBtn").style.display = "none";
 if (!IS_ADMIN) document.getElementById("refreshBtn").style.display = "none";
+if (IS_ADMIN && SERVE) document.getElementById("refreshMenu").style.display = "";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabAdm").style.display = "none";
 if (!IS_ADMIN || !SERVE) document.getElementById("tabLog").style.display = "none";
 if (HAS_BACKUP && SERVE) document.getElementById("backupSection").style.display = "";
@@ -5936,8 +6034,13 @@ if (!SERVE) document.getElementById("csvBtn").style.display = "none";  // API nu
 // ---- Live-Abruf & Auto-Update (nur im Serve-Modus) ----
 let nextRefresh = null;   // Zeitpunkt (ms) der nächsten automatischen Aktualisierung
 
-async function refreshData() {
-  try { await fetch("api/refresh", { method: "POST" }); pollStatus(); }
+async function refreshData(parts) {
+  try {
+    await fetch("api/refresh", { method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: parts ? JSON.stringify({ parts: parts }) : undefined });
+    pollStatus();
+  }
   catch (e) { document.getElementById("refreshStatus").textContent = "Server nicht erreichbar."; }
 }
 
@@ -5955,6 +6058,11 @@ async function pollStatus() {
   const st = document.getElementById("refreshStatus");
   document.getElementById("refreshBtn").disabled = !!s.refreshing;
   nextRefresh = (s.next != null) ? Date.now() + s.next * 1000 : null;
+  const tiers = s.tiers || {};
+  [["tierVms","vms"],["tierNetwork","network"],["tierStorage","storage"]].forEach(([id, k]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = tiers[k] ? "· " + tiers[k].slice(-5) : "";
+  });
   if (s.refreshing) st.textContent = "Lade Daten aus Aria … " + (s.progress || "");
   else if (s.error) st.textContent = "Fehler beim letzten Abruf: " + s.error;
   else st.textContent = "";
@@ -6023,6 +6131,18 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Gestaffelte Abruf-Intervalle
+  "Wie ein Cronjob: jeder Teilbereich hat seinen eigenen Takt — so muss nicht alles bei jedem Abruf gelesen werden. Kapazität (VMs, CPU/RAM/Disk, Tanzu), Netzwerk (Portgruppen/VLANs) und Storage (Datastores/LUNs). Cluster, Hosts und Tags laufen immer mit. Leer oder 0 = Standard-Intervall. Der ⟳-Knopf oben kann jederzeit alles oder einen einzelnen Bereich sofort aktualisieren.": "Like a cron job: each area has its own pace — so not everything has to be read on every refresh. Capacity (VMs, CPU/RAM/disk, Tanzu), Network (port groups/VLANs) and Storage (datastores/LUNs). Clusters, hosts and tags always run along. Empty or 0 = default interval. The ⟳ button above can refresh everything or a single area at any time.",
+  "Datenabruf-Intervalle (gestaffelt)": "Data refresh intervals (tiered)",
+  "Kapazität (VMs)": "Capacity (VMs)",
+  "Netzwerk (Portgruppen)": "Network (port groups)",
+  "Storage (Datastores)": "Storage (datastores)",
+  "✓ Intervalle speichern": "✓ Save intervals",
+  "Alles aktualisieren": "Refresh everything",
+  "Nur Kapazität (VMs)": "Capacity only (VMs)",
+  "Nur Netzwerk": "Network only",
+  "Nur Storage": "Storage only",
+  "Abruf-Intervalle geändert": "Refresh intervals changed",
   // Statistik (Trends)
   "Trends aus täglichen Snapshots der Datensammlung — z. B. ob VMs im Schnitt größer werden (RAM/Disk je VM). Die Historie wächst ab Einbau dieser Funktion; ältere Zeiträume füllen sich mit der Zeit.": "Trends from daily snapshots of the data collection — e.g. whether VMs are getting bigger on average (RAM/disk per VM). The history grows from the moment this feature was added; older ranges fill up over time.",
   "Statistik": "Statistics",
@@ -6514,6 +6634,7 @@ const I18N_RX = [
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
   [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
   [/^AD-Gruppe: (.+)$/, "AD group: $1"],
+  [/^\(leer = Standard: (\d+) min\)$/, "(empty = default: $1 min)"],
   [/^(\d+) Tage$/, "$1 days"],
   [/^(\d+) Datenpunkte · (.+)$/, "$1 data points · $2"],
   [/^(\d+) Datenpunkte?$/, "$1 data points"],
@@ -6859,7 +6980,8 @@ def serve(args, password):
                    "storagereq": args.storagereq_file,
                    "netcfg": args.netcfg_file,
                    "manual": args.import_file,
-                   "history": args.history_file}
+                   "history": args.history_file,
+                   "refreshcfg": args.refreshcfg_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
@@ -8287,12 +8409,52 @@ def serve(args, password):
     sources = getattr(args, "sources", []) or []
     vlan_full_ts = [0.0]   # Zeitpunkt des letzten VLAN-Voll-Abrufs
 
-    def do_refresh():
+    # ---- Gestaffelte Abruf-Intervalle („Cron-Klassen") ----------------------
+    # Drei Teilbereiche mit eigenem Takt: Kapazität (VMs/Tanzu), Netzwerk
+    # (Portgruppen), Storage (Datastores). Cluster/Hosts/Tags laufen immer mit.
+    # Intervalle in Minuten, 0 = Standard-Intervall (--interval). Rohdaten des
+    # letzten Laufs je Quelle bleiben im Speicher; übersprungene Bereiche
+    # übernehmen daraus (Neustart => erster Abruf wieder komplett).
+    TIERS = ("vms", "network", "storage")
+    refresh_lock = threading.Lock()
+
+    def _clean_refreshcfg(raw):
+        raw = raw if isinstance(raw, dict) else {}
+        out = {}
+        for t in TIERS:
+            try:
+                out[t] = max(0, min(int(float(raw.get(t) or 0)), 10080))
+            except (TypeError, ValueError):
+                out[t] = 0
+        return out
+
+    refresh_cfg = _clean_refreshcfg(store.load("refreshcfg", None))
+    tier_last = {t: 0.0 for t in TIERS}    # Epoche des letzten erfolgreichen Laufs
+    raw_cache = {}                          # {quelle: rohdaten je Cluster}
+
+    def tier_interval(t):
+        with refresh_lock:
+            m = refresh_cfg.get(t) or 0
+        return m * 60 if m > 0 else max(interval, 60)
+
+    def due_tiers():
+        now = time.time()
+        return {t for t in TIERS if now - tier_last[t] >= tier_interval(t)}
+
+    def do_refresh(parts=None):
+        # parts: None = fällige Teilbereiche (mind. einer erzwungen),
+        # Menge/Liste = genau diese Teilbereiche (manueller Teil-Abruf).
+        run = set(parts) & set(TIERS) if parts else due_tiers()
+        if not run:
+            run = set(TIERS)
+        skip_tiers = set(TIERS) - run
         state.update(refreshing=True, error=None, progress="0 %")
         t0 = time.time()
         n = len(sources)
         label = ", ".join(s["name"] or s["url"] for s in sources) or "Demo"
-        print(f"Aria-Abruf gestartet ({label}) ...", file=sys.stderr)
+        tier_note = ("alle Bereiche" if not skip_tiers else
+                     "nur " + ", ".join(sorted(run)))
+        print(f"Aria-Abruf gestartet ({label}) – {tier_note} ...", file=sys.stderr)
         # VLAN-Cache: bekannte Portgruppen-VLANs aus dem letzten Stand
         # wiederverwenden (spart einen API-Aufruf je Portgruppe); einmal am
         # Tag alles frisch lesen, falls sich ein VLAN geändert hat.
@@ -8326,7 +8488,10 @@ def serve(args, password):
                         api = AriaOps(s["url"], s["user"], s["password"],
                                       s["auth_source"], verify_tls=not s["insecure"],
                                       proxy=s["aria_proxy"])
-                        cl = collect(api, args.cpu_factor, progress=prog,
+                        # Ohne Rohdaten vom letzten Lauf (Start/Neustart)
+                        # wird die Quelle komplett gelesen.
+                        eff_skip = skip_tiers if tag in raw_cache else set()
+                        cl, raw = collect(api, args.cpu_factor, progress=prog,
                                      failover_hosts=args.failover_hosts,
                                      exclude_tag=args.exclude_tag,
                                      tag_property=args.tag_property,
@@ -8336,7 +8501,9 @@ def serve(args, password):
                                      min_lun_gb=storage_cfg.get("min_lun_gb", 0),
                                      exclude_names=storage_cfg.get("exclude_names") or [],
                                      net_exclude_names=net_cfg.get("exclude_names") or [],
-                                     net_exclude_vlans=net_cfg.get("exclude_vlans") or [])
+                                     net_exclude_vlans=net_cfg.get("exclude_vlans") or [],
+                                     skip=eff_skip, prev=raw_cache.get(tag))
+                        raw_cache[tag] = raw
                         for c in cl:
                             if s["name"]:
                                 c["source"] = s["name"]
@@ -8361,6 +8528,12 @@ def serve(args, password):
             record_history(clusters)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+            now = time.time()
+            for t in run:
+                tier_last[t] = now
+            state["tiers"] = {t: datetime.fromtimestamp(tier_last[t])
+                              .strftime("%d.%m.%Y %H:%M") if tier_last[t] else ""
+                              for t in TIERS}
             ensure_dir(args.cache)
             with open(args.cache, "w", encoding="utf-8") as f:
                 json.dump({"updated": state["updated"], "clusters": clusters},
@@ -8405,17 +8578,16 @@ def serve(args, password):
                 print(f"Sitzungs-Speicherung fehlgeschlagen: {e}", file=sys.stderr)
 
     def scheduler():
-        # Erster Start ohne Cache: sofort Daten holen
+        # Erster Start ohne Cache: sofort alles holen
         if not state["clusters"] and not state["refreshing"]:
             do_refresh()
+        # Heartbeat: alle 15 s prüfen, welche Teilbereiche fällig sind
+        # (gestaffelte Intervalle aus der Verwaltung; 0 = --interval).
         while interval > 0:
-            wait = (state["last"] or 0) + interval - time.time()
-            if wait <= 0:
-                if not state["refreshing"]:
-                    do_refresh()
-                time.sleep(1)
-            else:
-                time.sleep(min(wait, 10))
+            due = due_tiers()
+            if due and not state["refreshing"]:
+                do_refresh(due)
+            time.sleep(15)
 
     def check_reminders():
         """Offene Anträge, die zu lange auf die aktuelle Stufe warten, per Mail
@@ -8686,11 +8858,13 @@ def serve(args, password):
                 if not self._require():
                     return
                 nxt = None
-                if interval > 0 and state["last"]:
-                    nxt = max(0, int(state["last"] + interval - time.time()))
+                if interval > 0 and any(tier_last.values()):
+                    nxt = max(0, int(min(tier_last[t] + tier_interval(t)
+                                         for t in TIERS) - time.time()))
                 self._json({"refreshing": state["refreshing"],
                             "progress": state["progress"], "error": state["error"],
-                            "updated": state["updated"], "next": nxt})
+                            "updated": state["updated"], "next": nxt,
+                            "tiers": state.get("tiers") or {}})
             elif self.path == "/api/reservations":
                 s = self._require()
                 if not s:
@@ -8887,6 +9061,12 @@ def serve(args, password):
                 self._send(POWERCLI_PS1, "text/plain; charset=utf-8", headers={
                     "Content-Disposition":
                         'attachment; filename="kapa_export.ps1"'})
+            elif route == "/api/refreshcfg":
+                if not self._require("admin"):
+                    return
+                with refresh_lock:
+                    self._json({"tiers": dict(refresh_cfg),
+                                "default_min": max(1, interval // 60)})
             elif route == "/api/history":
                 # Statistik-Historie (Trends). Sichtbarkeit per Matrix-Feature
                 # „statistik" (Admin/Betrieb ohne Anmeldung sehen immer alles).
@@ -9091,9 +9271,21 @@ def serve(args, password):
             elif self.path == "/api/refresh":
                 if not self._require("admin"):
                     return
+                body = self._body() or {}
+                parts = body.get("parts")
+                if parts is not None:
+                    parts = [p for p in parts if p in TIERS] \
+                        if isinstance(parts, list) else None
+                    if not parts:
+                        self._json({"error": "parts: vms, network und/oder "
+                                    "storage erwartet"}, 400)
+                        return
                 if not state["refreshing"]:
-                    audit(self._session()["user"], "Datenabruf aus Aria gestartet")
-                    threading.Thread(target=do_refresh, daemon=True).start()
+                    audit(self._session()["user"], "Datenabruf aus Aria gestartet",
+                          "Bereiche: " + (", ".join(sorted(parts))
+                                          if parts else "alle"))
+                    threading.Thread(target=do_refresh, args=(parts,),
+                                     daemon=True).start()
                 self._json({"started": True}, 202)
             # ---- v1-API: Schreib-Endpunkte (Bearer-Token mit Schreibrecht) ----
             # Bewusst kompakte Spiegelungen der Session-Handler mit
@@ -9695,6 +9887,21 @@ def serve(args, password):
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"exclude_names": ", ".join(nx),
                             "exclude_vlans": ", ".join(vx)})
+            elif self.path == "/api/refreshcfg":
+                s = self._require("admin")
+                if not s:
+                    return
+                clean = _clean_refreshcfg(self._body() or {})
+                with refresh_lock:
+                    refresh_cfg.clear()
+                    refresh_cfg.update(clean)
+                    store.save("refreshcfg", refresh_cfg)
+                audit(s["user"], "Abruf-Intervalle geändert",
+                      " · ".join(f"{t}: " + (f"{clean[t]} min" if clean[t]
+                                             else "Standard")
+                                 for t in TIERS))
+                self._json({"tiers": dict(clean),
+                            "default_min": max(1, interval // 60)})
             elif self.path.startswith("/api/storage-request/"):
                 # erledigt/offen umschalten (Admin im UI)
                 s = self._require("admin")
@@ -10216,6 +10423,8 @@ def main():
     ap.add_argument("--import-file", default="kapa_import.json",
                     help="Datei: manuell importierte Offline-Quellen "
                          "(Cluster ohne vROps-Anbindung, per PowerCLI-JSON)")
+    ap.add_argument("--refreshcfg-file", default="kapa_abrufintervalle.json",
+                    help="Datei: gestaffelte Abruf-Intervalle je Teilbereich")
     ap.add_argument("--history-file", default="kapa_history.json",
                     help="Datei: Tages-Snapshots für die Statistik (Trends)")
     ap.add_argument("--history-days", type=int, default=730,
@@ -10269,6 +10478,7 @@ def main():
     args.netcfg_file = data_path(args.netcfg_file, base)
     args.import_file = data_path(args.import_file, base)
     args.history_file = data_path(args.history_file, base)
+    args.refreshcfg_file = data_path(args.refreshcfg_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

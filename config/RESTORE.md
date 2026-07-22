@@ -21,6 +21,7 @@ Die SFTP-Backups enthalten alle Laufzeitdaten des Dashboards als `tar.gz`:
 | `kapa_netcfg.json` | Netzwerk-Filter (Portgruppen nach Name/VLAN-ID ausblenden) | Ja |
 | `kapa_import.json` | Offline-Quellen (manuell importierte Cluster ohne vROps) | Ja |
 | `kapa_history.json` | Statistik-Historie (Tages-Snapshots für Trends) | Ja |
+| `kapa_abrufintervalle.json` | gestaffelte Abruf-Intervalle je Teilbereich | Ja |
 | `kapa_storage_anfragen.json` | Storage-Erweiterungs-Anfragen (fürs Storage-Team) | Ja |
 | `kapa.db` (+ `-wal`/`-shm`) | Bei `storage = sqlite`: alle obigen Sammlungen in einer DB | **Ja** (statt der JSONs) |
 | `kapa_log.jsonl` | Audit-Log | Ja (Nachvollziehbarkeit) |

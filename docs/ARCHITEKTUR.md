@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.22. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.23. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -66,7 +66,7 @@ flowchart TB
     end
 
     subgraph BG["Hintergrund-Threads (daemon)"]
-        T1["scheduler<br/>Aria-Abruf alle 30 min"]
+        T1["scheduler<br/>gestaffelte Abrufe: Kapazität /<br/>Netzwerk / Storage je eigenem Takt"]
         T2["maintenance<br/>Ablauf/TTL, Log-Rotation"]
         T3["backup_loop<br/>SFTP 2x täglich + Rotation"]
         T4["reminder_loop<br/>stündlich: liegengebliebene<br/>Anträge anmahnen"]
@@ -104,7 +104,7 @@ sequenceDiagram
     participant B as build_summary
     participant ST as state + Cache
 
-    S->>C: do_refresh (alle Quellen nacheinander)
+    S->>C: do_refresh (alle Quellen nacheinander;<br/>nur fällige Teilbereiche — VMs/Netzwerk/Storage<br/>je eigenem Intervall, Rest aus Rohdaten-Cache)
     C->>V: Cluster, Hosts, VMs (+ Metriken/Properties, Bulk)
     C->>V: Host-HBA-WWPNs (storageAdapter:vmhbaN|port_WWN,<br/>Kandidaten-Range im Bulk)
     C->>V: Datastores (Storage, vSAN-Faktor,<br/>NAA aus Properties ODER Metrik-Keys "Devices|naa…")
@@ -234,7 +234,8 @@ Skript-Ende:
 Alle Sammlungen (Reservierungen, Rollen, Teams, Selektor, Rollennamen,
 Tokens, Mail-Regeln, Prefs, Ankündigung, Auto-Freigabe, Sessions,
 Sichtbarkeit, Storage-Einstellungen, Storage-Anfragen, Netzwerk-Filter,
-Offline-Quellen, Statistik-Historie) laufen über eine Store-Abstraktion:
+Offline-Quellen, Statistik-Historie, Abruf-Intervalle) laufen über eine
+Store-Abstraktion:
 **JSON-Dateien** (Standard, je Sammlung eine Datei) oder **SQLite** (eine
 `kapa.db`, inkrementelle Reservierungs-Writes, automatische Einmal-Migration).
 Schreiben immer atomar. Details und Restore: [`../config/RESTORE.md`](../config/RESTORE.md).
