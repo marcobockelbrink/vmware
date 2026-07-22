@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.11. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.21. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -30,6 +30,7 @@ flowchart LR
     subgraph Extern["Umsysteme"]
         V1["vROps Quelle 1<br/>(RZ-Nord)"]
         V2["vROps Quelle n<br/>(RZ-Sued)"]
+        ISO["Isoliertes vCenter<br/>(keine Netzanbindung)"]
         AD["Active Directory<br/>ldaps://"]
         SMTP["SMTP-Server"]
         BK["SFTP-Backupziel"]
@@ -41,6 +42,7 @@ flowchart LR
     NG -->|HTTP lokal| APP
     APP <-->|Suite-API, OpsToken| V1
     APP <-->|Suite-API, OpsToken| V2
+    ISO -.->|PowerCLI-Export<br/>JSON, Admin-Upload| APP
     APP -->|Simple Bind + memberOf| AD
     APP -->|Mails DE-Vorlage| SMTP
     APP -->|tar.gz 2x täglich| BK
@@ -104,13 +106,16 @@ sequenceDiagram
 
     S->>C: do_refresh (alle Quellen nacheinander)
     C->>V: Cluster, Hosts, VMs (+ Metriken/Properties, Bulk)
-    C->>V: Datastores (Storage, vSAN-Faktor)
+    C->>V: Host-HBA-WWPNs (storageAdapter:vmhbaN|port_WWN,<br/>Kandidaten-Range im Bulk)
+    C->>V: Datastores (Storage, vSAN-Faktor,<br/>NAA aus Properties ODER Metrik-Keys "Devices|naa…")
     C->>V: Tags, Workload-Badge
     C->>V: dvSwitches → Portgruppen (VLAN-Cache,<br/>Voll-Abruf 1x täglich)
     C->>V: Tanzu-Namespaces (Reservierungen,<br/>Kandidaten-Keys, best effort)
     C->>B: Rohdaten je Cluster
     B->>B: N+1-Abzug, CPU-Faktor,<br/>Tanzu MHz→vCPU (aufgerundet)
+    B->>B: Filter anwenden: Mindest-LUN + Storage-Namensfilter,<br/>Netzwerk-Filter (Portgruppen-Name/VLAN-ID)
     B->>ST: Cluster-Liste (+ source-Badge)
+    Note over B,ST: Offline-Quellen (Import) laufen durch<br/>DIESELBE build_summary — gleiche Mathematik,<br/>angehängt mit imported=True
     Note over ST: Teilausfall-tolerant: fällt eine Quelle aus,<br/>liefern die übrigen weiter
 ```
 
@@ -147,10 +152,46 @@ Optional gibt eine **Auto-Freigabe** je Team angehakte Stufen automatisch
 frei, wenn der Ziel-Cluster nach Abzug des Antrags konfigurierte Schwellen
 (vCPU/RAM/größte LUN/Workload) einhält — geprüft bei Antragstellung und
 Stufenwechsel, konservativ (fehlende Daten blockieren), voll auditiert.
+**Import-Cluster (Offline-Quellen) klammert sie grundsätzlich aus** — deren
+Zahlen sind statisch, Anträge gehen dort immer an die Teams.
 Erst der Status **genehmigt** zählt gegen die freie Kapazität — zusammen mit
 den automatisch gelesenen **Tanzu-Namespace-Reservierungen**. Mails gehen je
 Ereignis nach der Matrix in der Verwaltung (Anlage/Ablehnung/Freigabe/„Team
 ist dran"/Erinnerung), gerendert über die **editierbare HTML-Vorlage**.
+Für Reviewer verlinkt die Genehmigungs-Ansicht ein **Reviewer-Handbuch**
+(eigene zweisprachige Doku-Seite unter `/reviewer-handbuch`).
+
+## Storage-Erweiterungen (Brücke zum Storage-Team)
+
+Freigebende können beim Genehmigen — oder Berechtigte ad-hoc in der
+Storage-Übersicht — eine **LUN-Vergrößerung oder neue LUN** anfragen
+(vSAN ausgenommen). Die Anfragen landen in einer eigenen Sammlung und werden
+vom Storage-Team **per API** abgeholt:
+
+```mermaid
+flowchart LR
+    A["Freigabe-Dialog<br/>+ Storage-Erweiterung"] --> Q[("storagereq<br/>offen/erledigt")]
+    B["Storage-Übersicht<br/>Erweitern je LUN"] --> Q
+    Q -->|GET /api/v1/storage-requests<br/>JSON + CSV| T["Storage-Team /<br/>Automatisierung"]
+    T -->|POST …/done<br/>Token-Schreibrecht Storage| Q
+```
+
+Jede Anfrage trägt zur Identifikation alles Nötige: **NAA** der LUN, die
+**ESXi-Hosts des Clusters samt FC-HBA-WWPNs** (fürs Zoning) und optional den
+Bezug zur Kapazitätsanfrage. Admin-Regeln in der Verwaltung: Mindest-LUN-Größe
+und Namensfilter (Anzeige), **Maximal-Größe je Anfrage** (Limit, server- und
+clientseitig geprüft).
+
+## Offline-Quellen (Cluster-Import ohne vROps)
+
+Bereiche ohne Netzanbindung exportiert ein Kollege mit dem mitgelieferten
+**PowerCLI-Skript** (Download in der Verwaltung → Import); das JSON wird
+unter einem **festen Quellnamen** hochgeladen. Die Rohdaten (Hosts, VMs,
+Datastores, Portgruppen mit VLAN-ID) laufen bei **jedem Abruf** durch dasselbe
+`build_summary` wie echte Quellen — identische Kapazitäts-Mathematik und
+Filter. Mehrere Quellen parallel; Re-Import ersetzt, Löschen entfernt die
+Cluster mit dem nächsten Abruf. Das Import-Datum steht als Tag am Cluster;
+`imported=True` markiert die Cluster intern (Auto-Freigabe-Ausschluss).
 
 ## Sicherheit in Kürze
 
@@ -170,9 +211,13 @@ Eine einzige HTML-Seite (im Skript als Template eingebettet, Daten per
 (Pfad oder Hash). Querschnittsfunktionen liegen als kleine Engines am
 Skript-Ende:
 
-- **i18n**: Deutsch ist Quelle; Browser ≠ deutsch → Wörterbuch (~400 Einträge)
+- **i18n**: Deutsch ist Quelle; Browser ≠ deutsch → Wörterbuch (~500 Einträge)
   + Regex-Muster, ein MutationObserver übersetzt Textknoten **und** Attribute
-  laufend. API-Werte/Statuslogik bleiben deutsch (v1-Vertrag).
+  laufend. Elemente mit Inline-Auszeichnung (`<b>`/`<code>` mitten im Satz)
+  werden als **ganzer Satz** übersetzt (i18nFlatten) — sonst zerfielen sie in
+  unübersetzbare Fragmente. Auch Standard-Audit-Aktionen erscheinen übersetzt;
+  gespeichert wird das Log weiter deutsch. API-Werte/Statuslogik bleiben
+  deutsch (v1-Vertrag).
 - **Theme**: CSS-Variablen, `data-theme="light"` am `<html>`, Kopf-Snippet
   gegen Flackern, Wahl in den Server-Prefs je Benutzer.
 - **Prefs**: Spalten, „Ankündigung gesehen", Theme — ein PUT ersetzt komplett,
@@ -183,7 +228,9 @@ Skript-Ende:
 ## Datenhaltung
 
 Alle Sammlungen (Reservierungen, Rollen, Teams, Selektor, Rollennamen,
-Tokens, Mail-Regeln, Prefs, Ankündigung) laufen über eine Store-Abstraktion:
+Tokens, Mail-Regeln, Prefs, Ankündigung, Auto-Freigabe, Sessions,
+Sichtbarkeit, Storage-Einstellungen, Storage-Anfragen, Netzwerk-Filter,
+Offline-Quellen) laufen über eine Store-Abstraktion:
 **JSON-Dateien** (Standard, je Sammlung eine Datei) oder **SQLite** (eine
 `kapa.db`, inkrementelle Reservierungs-Writes, automatische Einmal-Migration).
 Schreiben immer atomar. Details und Restore: [`../config/RESTORE.md`](../config/RESTORE.md).
@@ -219,3 +266,12 @@ Dasselbe Artefakt, Container-first — Auswahlhilfe in
 6. **Fail-fast-Konfiguration** — unbekannte INI-Schlüssel und verrutschte
    `[quelle:*]`-Einträge brechen den Start mit Hinweis ab, statt still zu
    falschen Defaults zu führen.
+7. **Instanzierte vROps-Schlüssel per Kandidaten-Range im Bulk** — NAA steckt
+   je nach Version in Metrik-Keys (`Devices|naa…`), WWPNs in Properties
+   (`storageAdapter:vmhbaN|port_WWN`). Statt einem Property-Abruf **je Host**
+   (bei > 1000 Hosts zu langsam) werden Kandidaten-Schlüssel im vorhandenen
+   Bulk-Aufruf mitgeholt; Diagnose-Zeilen im Log zeigen die echten Schlüssel.
+8. **Offline-Quellen als statische vROps-Äquivalente** — Import-JSON läuft
+   durch dieselbe `build_summary` statt eigener Rechenwege; ein einziges
+   `imported`-Flag steuert die Sonderbehandlung (Auto-Freigabe-Ausschluss).
+   Bezahlt mit bewusst statischen Daten (Import-Datum als Tag sichtbar).

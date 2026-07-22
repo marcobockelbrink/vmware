@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.11. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.21. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -30,6 +30,7 @@ flowchart LR
     subgraph External["Surrounding systems"]
         V1["vROps source 1<br/>(DC north)"]
         V2["vROps source n<br/>(DC south)"]
+        ISO["Isolated vCenter<br/>(no network access)"]
         AD["Active Directory<br/>ldaps://"]
         SMTP["SMTP server"]
         BK["SFTP backup target"]
@@ -41,6 +42,7 @@ flowchart LR
     NG -->|local HTTP| APP
     APP <-->|Suite API, OpsToken| V1
     APP <-->|Suite API, OpsToken| V2
+    ISO -.->|PowerCLI export<br/>JSON, admin upload| APP
     APP -->|simple bind + memberOf| AD
     APP -->|mails, template| SMTP
     APP -->|tar.gz twice a day| BK
@@ -104,13 +106,16 @@ sequenceDiagram
 
     S->>C: do_refresh (all sources in turn)
     C->>V: clusters, hosts, VMs (+ metrics/properties, bulk)
-    C->>V: datastores (storage, vSAN factor)
+    C->>V: host HBA WWPNs (storageAdapter:vmhbaN|port_WWN,<br/>candidate range in bulk)
+    C->>V: datastores (storage, vSAN factor,<br/>NAA from properties OR metric keys "Devices|naa…")
     C->>V: tags, workload badge
     C->>V: dvSwitches → port groups (VLAN cache,<br/>full re-read once a day)
     C->>V: Tanzu namespaces (reservations,<br/>candidate keys, best effort)
     C->>B: raw data per cluster
     B->>B: N+1 deduction, CPU factor,<br/>Tanzu MHz→vCPU (rounded up)
+    B->>B: apply filters: minimum LUN + storage name filter,<br/>network filter (port-group name/VLAN ID)
     B->>ST: cluster list (+ source badge)
+    Note over B,ST: offline sources (import) pass through<br/>the SAME build_summary — identical math,<br/>appended with imported=True
     Note over ST: partial-failure tolerant: if one source fails,<br/>the others keep delivering
 ```
 
@@ -147,10 +152,45 @@ Optionally an **auto-approval** approves per-team-checked stages
 automatically when the target cluster meets configured thresholds
 (vCPU/RAM/largest LUN/workload) after subtracting the request — evaluated on
 creation and stage changes, conservative (missing data blocks), fully
-audited. Only the **approved** status counts against free capacity — together with the
+audited. **Imported clusters (offline sources) are always excluded** — their
+numbers are static, so requests there always go to the teams.
+Only the **approved** status counts against free capacity — together with the
 automatically read **Tanzu namespace reservations**. Mails fire per event
 according to the matrix in the administration (created/rejected/approved/
 "team's turn"/reminder), rendered through the **editable HTML template**.
+For reviewers the approvals view links a **reviewer handbook** (its own
+bilingual doc page at `/reviewer-handbuch`).
+
+## Storage expansions (bridge to the storage team)
+
+Approvers can request a **LUN expansion or a new LUN** while approving — or
+authorized users ad-hoc in the storage overview (vSAN excluded). Requests land
+in their own collection and are fetched by the storage team **via the API**:
+
+```mermaid
+flowchart LR
+    A["approval dialog<br/>+ storage expansion"] --> Q[("storagereq<br/>open/done")]
+    B["storage overview<br/>expand per LUN"] --> Q
+    Q -->|GET /api/v1/storage-requests<br/>JSON + CSV| T["storage team /<br/>automation"]
+    T -->|POST …/done<br/>token write permission Storage| Q
+```
+
+Each request carries everything needed for identification: the LUN's **NAA**,
+the **cluster's ESXi hosts incl. FC-HBA WWPNs** (for zoning) and optionally
+the link to the capacity request. Admin rules in the administration: minimum
+LUN size and name filter (display), **maximum size per request** (limit,
+checked server- and client-side).
+
+## Offline sources (cluster import without vROps)
+
+Areas without network access are exported by a colleague using the bundled
+**PowerCLI script** (download in Administration → Import); the JSON is
+uploaded under a **fixed source name**. The raw data (hosts, VMs, datastores,
+port groups with VLAN ID) passes through the same `build_summary` as real
+sources on **every refresh** — identical capacity math and filters. Multiple
+sources in parallel; re-importing replaces, deleting removes the clusters
+with the next refresh. The import date is shown as a tag on the cluster;
+`imported=True` marks the clusters internally (auto-approval exclusion).
 
 ## Security at a glance
 
@@ -169,9 +209,13 @@ A single HTML page (embedded in the script as a template, data injected
 server-side via `__PLACEHOLDERS__`), views via a `render()` dispatch (path or
 hash). Cross-cutting engines live at the end of the script:
 
-- **i18n**: German is the source; browser ≠ German → dictionary (~400
+- **i18n**: German is the source; browser ≠ German → dictionary (~500
   entries) + regex patterns, a MutationObserver continuously translates text
-  nodes **and** attributes. API values/status logic stay German (v1 contract).
+  nodes **and** attributes. Elements with inline markup (`<b>`/`<code>` inside
+  a sentence) are translated as a **whole sentence** (i18nFlatten) — otherwise
+  they would break into untranslatable fragments. Standard audit actions are
+  shown translated, too; the log itself stays German on disk. API values/
+  status logic stay German (v1 contract).
 - **Theme**: CSS variables, `data-theme="light"` on `<html>`, head snippet
   against flashing, choice stored in the per-user server prefs.
 - **Prefs**: columns, "announcement seen", theme — one PUT replaces
@@ -182,7 +226,9 @@ hash). Cross-cutting engines live at the end of the script:
 ## Data storage
 
 All collections (reservations, roles, teams, selector, role labels, tokens,
-mail rules, prefs, announcement) go through a store abstraction:
+mail rules, prefs, announcement, auto-approval, sessions, visibility,
+storage settings, storage requests, network filter, offline sources) go
+through a store abstraction:
 **JSON files** (default, one file per collection) or **SQLite** (a single
 `kapa.db`, incremental reservation writes, automatic one-time migration).
 Writes are always atomic. Details and restore:
@@ -218,3 +264,15 @@ Same artifact, container-first — decision guide in
 6. **Fail-fast configuration** — unknown INI keys and misplaced `[quelle:*]`
    entries abort startup with a hint instead of silently running on wrong
    defaults.
+
+7. **Instantiated vROps keys via candidate ranges in bulk** — depending on the
+   version, the NAA lives in metric keys (`Devices|naa…`) and WWPNs in
+   properties (`storageAdapter:vmhbaN|port_WWN`). Instead of one property
+   fetch **per host** (too slow beyond ~1000 hosts), candidate keys are
+   fetched within the existing bulk call; diagnostic log lines reveal the
+   real keys.
+8. **Offline sources as static vROps equivalents** — import JSON passes
+   through the same `build_summary` instead of separate calculations; a
+   single `imported` flag drives the special handling (auto-approval
+   exclusion). Paid for with deliberately static data (import date visible
+   as a tag).
