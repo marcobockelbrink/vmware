@@ -239,6 +239,20 @@ try:
           left and not any("vsan" in l["name"].lower() for l in left))
     st, cfg, _ = req("GET", "/api/storagecfg")
     check("Namensfilter persistiert", cfg.get("exclude_names") == "vsan")
+    # Wildcards + Groß/Klein egal: GROSS geschriebene Muster mit * müssen greifen
+    req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0,
+                                   "exclude_names": "TEMPLATE*, *SERVICE*, ISO"})
+    t0 = time.time()
+    while time.time() - t0 < 12:
+        d3 = req("GET", "/api/v1/data")[1]
+        if not req("GET", "/api/status")[1].get("refreshing"):
+            break
+        time.sleep(0.5)
+    left3 = [l["name"].lower() for c in d3["clusters"]
+             for l in c.get("datastores", [])]
+    check("Namensfilter: Wildcards + Groß/Klein egal",
+          left3 and not any(("template" in n or "service" in n or "iso" in n)
+                            for n in left3))
     req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0,
                                    "exclude_names": ""})
 

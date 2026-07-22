@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.18.1"
+VERSION = "2.18.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1741,8 +1741,11 @@ def _name_excluded(name, patterns):
     import fnmatch
     n = str(name or "").lower()
     for p in patterns:
+        p = str(p or "").strip().lower()      # Muster ebenfalls klein -> case-egal
+        if not p:
+            continue
         if "*" in p or "?" in p:
-            if fnmatch.fnmatch(n, p):
+            if fnmatch.fnmatch(n, p):          # n & p klein -> fnmatchcase-neutral
                 return True
         elif p in n:
             return True
@@ -1863,6 +1866,16 @@ def sample_data():
                          "naa": f"naa.60060160a{ci}b{li:02d}00{random.randint(10**11, 10**12 - 1):x}",
                          "factor": 1.0, "raw_cap_gb": cap,
                          "cap_gb": cap, "used_gb": 0})
+        # Ein paar benannte Datastores, damit sich der Namensfilter demonstrieren
+        # lässt (z. B. „iso", „template*", „*service*").
+        for nm, typ, cap in [(f"iso-library-{ci}", "NFS", 500),
+                             (f"template-store-{ci}", "VMFS", 1000),
+                             (f"app-service-{ci}", "VMFS", 2000)]:
+            lun = {"name": nm, "type": typ, "factor": 1.0,
+                   "raw_cap_gb": cap, "cap_gb": cap, "used_gb": 0}
+            if typ != "NFS":
+                lun["naa"] = f"naa.60060160a{ci}f{cap:04x}{random.randint(10**9, 10**10 - 1):x}"
+            luns.append(lun)
         for l in luns:
             l["used_gb"] = round(l["cap_gb"] * random.uniform(0.35, 0.9))
         cap_gb = sum(l["cap_gb"] for l in luns)
