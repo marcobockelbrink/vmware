@@ -11,8 +11,8 @@ Wir bemühen uns um eine erste Rückmeldung innerhalb weniger Werktage.
 
 ## Automatische Sicherheitsprüfungen
 
-Jeder Push und Pull Request auf `main` sowie ein wöchentlicher Lauf prüfen den
-Code mit mehreren unabhängigen, quelloffenen Scannern; die Ergebnisse landen im
+Jeder Push auf **jeden Branch**, jeder Pull Request nach `main` sowie ein
+wöchentlicher Lauf prüfen den Code mit mehreren unabhängigen, quelloffenen Scannern; die Ergebnisse landen im
 Reiter **Security** dieses Repos:
 
 | Scanner | Zweck |
@@ -44,7 +44,7 @@ We aim to respond within a few business days.
 
 ## Automated security checks
 
-Every push and pull request to `main`, plus a weekly run, scan the code with
+Every push to any branch, every pull request to `main`, plus a weekly run, scan the code with
 several independent open-source scanners (CodeQL, Bandit, Semgrep, Trivy,
 OpenSSF Scorecard, Dependabot); results appear in the repository’s **Security**
 tab. The app is a **single Python script with no third-party dependencies**

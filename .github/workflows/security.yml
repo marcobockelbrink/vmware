@@ -5,8 +5,7 @@
 name: Security-Scan
 
 on:
-  push:
-    branches: [main]
+  push:            # jeder Branch (nicht nur main)
   pull_request:
     branches: [main]
   schedule:
