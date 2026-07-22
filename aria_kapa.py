@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.18.2"
+VERSION = "2.19"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1266,8 +1266,58 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         ["cpu|corecount_provisioned", "mem|host_provisioned"],
         progress=lambda m: log(f"Host-Metriken: {m}"))
     log("Lese Host-Zuordnung (Cluster) ...")
-    host_props = api.properties(host_ids, ["summary|parentCluster"],
+    # WWPN der FC-HBAs je Host (fürs Storage-Team zur System-Identifikation, falls
+    # dort die Hostnamen nicht gepflegt sind). Die Schlüssel variieren/instanzieren
+    # je vROps-Version -> mehrere Kandidaten im selben Bulk-Aufruf; der genaue
+    # Schlüssel lässt sich über die Diagnose-Zeile am echten vROps ablesen.
+    HOST_WWPN_KEYS = ["hardware|hostBusAdapter|portWorldWideName",
+                      "config|storageDevice|hostBusAdapter|portWorldWideName",
+                      "hardware|fibreChannelHba|portWorldWideName",
+                      "hardware|storageAdapter|wwpn", "hardware|wwpn",
+                      "config|network|fc|wwpn"]
+    host_props = api.properties(host_ids,
+        ["summary|parentCluster"] + HOST_WWPN_KEYS,
         progress=lambda m: log(f"Host-Eigenschaften: {m}"))
+    # Diagnose: WWPN-/HBA-Kandidaten eines Beispiel-Hosts sichtbar machen –
+    # sowohl Properties als auch Metrik-Schlüssel (wie bei der NAA-Erkennung).
+    if hosts:
+        try:
+            h0 = hosts[0]
+            hp0 = api.all_properties(h0["identifier"])
+            wrx = r"(?:[0-9a-fA-F]{2}:){7}[0-9a-fA-F]{2}"
+            hits = {k: v for k, v in hp0.items()
+                    if re.search(r"wwpn|wwnn|wwn|fibre|hba|hostbus|fc_|storageadapter",
+                                 k, re.I) or re.search(wrx, str(v))}
+            log(f"Host-Properties (Beispiel '{name_of(h0)}') – WWPN/HBA-Kandidaten: "
+                + (", ".join(f"{k}={str(v)[:50]}" for k, v in
+                             sorted(hits.items())[:8]) or "keine gefunden"))
+            sk = api.statkeys(h0["identifier"])
+            skh = [k for k in sk if re.search(r"wwpn|wwn|hba|fibre|storageadapter", k, re.I)]
+            log(f"Host-Metrik-Schlüssel (Beispiel '{name_of(h0)}', {len(sk)} gesamt) – "
+                "WWPN/HBA-Kandidaten: " + (", ".join(sorted(skh)[:8]) or "keine gefunden"))
+        except Exception as e:
+            log(f"WWPN-Diagnose übersprungen: {e}")
+
+    _WWPN_RX = re.compile(r"(?:[0-9a-fA-F]{2}:){7}[0-9a-fA-F]{2}")
+
+    def host_wwpns(props):
+        """WWPNs eines Hosts aus den Kandidaten-Properties ziehen (mehrere HBAs
+        möglich). Nimmt ein WWPN-Muster (aa:bb:...) je Wert, sonst den Rohwert."""
+        out, seen = [], set()
+        for k in HOST_WWPN_KEYS:
+            v = props.get(k)
+            if not v:
+                continue
+            for part in re.split(r"[,;\s]+", str(v)):
+                part = part.strip()
+                if not part:
+                    continue
+                m = _WWPN_RX.search(part)
+                w = m.group(0) if m else part
+                if w.lower() not in seen:
+                    seen.add(w.lower())
+                    out.append(w)
+        return out
 
     report(50)
     log("Lese VM-Metriken (vCPU, RAM) ...")
@@ -1440,6 +1490,7 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             "name": name_of(h),
             "cores": int(cores) if cores else 0,
             "ram_gb": round((ram_kb or 0) / 1024 / 1024, 1),
+            "wwpns": host_wwpns(host_props.get(rid) or {}),
         })
 
     for v in vms:
@@ -1848,7 +1899,10 @@ def sample_data():
         cl = f"Cluster-{ci:02d}"
         hosts = [{"name": f"esx{ci}{hi:02d}.firma.local",
                   "cores": random.choice([32, 48, 64]),
-                  "ram_gb": random.choice([512, 768, 1024])}
+                  "ram_gb": random.choice([512, 768, 1024]),
+                  # zwei FC-HBA-Ports je Host (wie in echt, redundant verkabelt)
+                  "wwpns": [f"20:00:00:25:b5:{ci:02x}:{hi:02x}:0{p}"
+                            for p in range(2)]}
                  for hi in range(1, random.randint(4, 7))]
         vms = [{"name": f"vm-{ci}{vi:03d}",
                 "vcpu": random.choice([2, 4, 4, 8, 8, 16]),
@@ -2009,13 +2063,15 @@ def openapi_spec(lang="de"):
                              "Storage expansions (for the storage team)"),
                 "description": T("Angefragte LUN-Vergrößerungen und neue LUNs, "
                                  "inkl. NAA-Kennung und der ESXi-Hosts des Clusters "
-                                 "(Feld hosts, fürs Zoning/Mapping). Standard: "
-                                 "offene; status=alle für alle. Als CSV mit "
-                                 "format=csv.",
+                                 "(Feld hosts = Liste aus {name, wwpns}: WWPNs der "
+                                 "FC-HBAs fürs Zoning/Mapping und zur System-"
+                                 "Identifikation). Standard: offene; status=alle "
+                                 "für alle. Als CSV mit format=csv.",
                                  "Requested LUN expansions and new LUNs, incl. NAA "
-                                 "and the cluster's ESXi hosts (field hosts, for "
-                                 "zoning/mapping). Default: open ones; status=alle "
-                                 "for all. As CSV with format=csv."),
+                                 "and the cluster's ESXi hosts (field hosts = list "
+                                 "of {name, wwpns}: FC-HBA WWPNs for zoning/mapping "
+                                 "and system identification). Default: open ones; "
+                                 "status=alle for all. As CSV with format=csv."),
                 "parameters": [
                     {"name": "status", "in": "query", "schema": {"type": "string",
                      "enum": ["offen", "erledigt", "alle"], "default": "offen"}},
@@ -7012,23 +7068,43 @@ def serve(args, password):
                 c.get("workload", "")])
         return buf.getvalue()
 
+    def _req_host_cols(r):
+        """(hosts, wwpns) für die CSV: Hosts mit ihren WWPNs gruppiert
+        ('esx101 (wwpn|wwpn)') plus eine flache, deduplizierte WWPN-Liste."""
+        hs = r.get("hosts") or []
+        names, flat, seen = [], [], set()
+        for h in hs:
+            if isinstance(h, dict):
+                ws = h.get("wwpns") or []
+                names.append((h.get("name") or "")
+                             + (f" ({'|'.join(ws)})" if ws else ""))
+                for wpn in ws:
+                    if wpn.lower() not in seen:
+                        seen.add(wpn.lower())
+                        flat.append(wpn)
+            else:
+                names.append(str(h))
+        return "; ".join(names), ", ".join(flat)
+
     def storagereq_csv(rows, lang="de"):
-        """Storage-Erweiterungen als CSV fürs Storage-Team (inkl. NAA)."""
+        """Storage-Erweiterungen als CSV fürs Storage-Team (inkl. NAA, Hosts,
+        WWPNs)."""
         import csv
         import io
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=";")
         if lang == "en":
-            w.writerow(["id", "cluster", "hosts", "kind", "lun", "naa",
+            w.writerow(["id", "cluster", "hosts", "wwpns", "kind", "lun", "naa",
                         "current_gb", "target_gb", "new_lun_gb", "comment",
                         "requested_by", "requested_on", "status", "reservation"])
         else:
-            w.writerow(["id", "cluster", "hosts", "typ", "lun", "naa",
+            w.writerow(["id", "cluster", "hosts", "wwpns", "typ", "lun", "naa",
                         "aktuell_gb", "ziel_gb", "neue_lun_gb", "kommentar",
                         "angefragt_von", "angefragt_am", "status", "reservierung"])
         for r in rows:
+            hosts_col, wwpns_col = _req_host_cols(r)
             w.writerow([r.get("id", ""), r.get("cluster", ""),
-                        ", ".join(r.get("hosts") or []), r.get("kind", ""),
+                        hosts_col, wwpns_col, r.get("kind", ""),
                         r.get("lun_name", ""), r.get("naa", ""),
                         r.get("current_gb", ""), r.get("target_gb", ""),
                         r.get("size_gb", ""), r.get("comment", ""),
@@ -7921,7 +7997,10 @@ def serve(args, password):
                     # App) bekommt sie immer; eine Session nur, wenn die Rolle
                     # Host-Sicht hat (Sichtbarkeits-Matrix).
                     if bool(tok) or (s and vis_for(s["role"]).get("hosts", True)):
-                        hmap = {c.get("name"): [h.get("name")
+                        # je Host Name + WWPNs der FC-HBAs (fürs Zoning und zur
+                        # System-Identifikation, falls Namen nicht gepflegt sind)
+                        hmap = {c.get("name"): [{"name": h.get("name"),
+                                                 "wwpns": h.get("wwpns") or []}
                                                 for h in (c.get("hosts") or [])]
                                 for c in state["clusters"]}
                         for r in rows:

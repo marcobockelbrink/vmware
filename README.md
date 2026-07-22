@@ -59,8 +59,9 @@ Cluster und Kommentare bleiben wie erfasst).
   zwischen VLAN-Suche und Reservierungen) — eine **LUN-Vergrößerung** oder eine
   **neue LUN** an; das Storage-Team ruft die offenen Anfragen **per API** ab
   (`/api/v1/storage-requests`, auch CSV **inkl. NAA und den ESXi-Hosts des
-  Clusters** – fürs Zoning/LUN-Mapping) und meldet die Umsetzung
-  mit einem Token-Schreibrecht „Storage" zurück. Konfigurierbar (Verwaltung →
+  Clusters mit den WWPNs ihrer FC-HBAs** – fürs Zoning/LUN-Mapping und zur
+  System-Identifikation, falls die Namen im SAN nicht gepflegt sind) und meldet
+  die Umsetzung mit einem Token-Schreibrecht „Storage" zurück. Konfigurierbar (Verwaltung →
   Storage): **Maximal-Größe** je Anfrage (Anfrage-Limit), Mindest-LUN-Größe
   und Namensfilter
 - Automatischer **Ablauf** nach `--res-ttl-days`; Warnung, wenn eine Anfrage die freie Kapazität übersteigt

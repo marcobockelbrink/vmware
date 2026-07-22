@@ -173,13 +173,16 @@ try:
     st, csv_s, _ = req("GET", "/api/v1/storage-requests?format=csv", raw=True)
     hdr = csv_s.decode().splitlines()[0].split(";")
     check("v1-CSV mit NAA-Spalte",
-          hdr[5] == "naa" and "naa.6006016012ab" in csv_s.decode())
-    check("v1-CSV mit Hosts-Spalte", hdr[2] == "hosts")
-    # JSON: Hosts des Clusters an der Anfrage
+          hdr[6] == "naa" and "naa.6006016012ab" in csv_s.decode())
+    check("v1-CSV mit Hosts+WWPN-Spalten",
+          hdr[2] == "hosts" and hdr[3] == "wwpns")
+    # JSON: Hosts des Clusters (Objekte mit Name + WWPNs) an der Anfrage
     st, sral, _ = req("GET", "/api/v1/storage-requests?status=alle")
-    check("Storage-Anfrage enthält Cluster-Hosts",
+    h0 = (sral["requests"][0].get("hosts") or [{}])[0]
+    check("Storage-Anfrage enthält Cluster-Hosts + WWPNs",
           isinstance(sral["requests"][0].get("hosts"), list)
-          and len(sral["requests"][0]["hosts"]) >= 1)
+          and h0.get("name") and isinstance(h0.get("wwpns"), list)
+          and len(h0["wwpns"]) >= 1)
     # Token-Schreibrecht Storage -> /done
     sid = sreq["id"]
     req("PUT", f"/api/tokens/{tid}", {"write_res": True, "write_approve": True,

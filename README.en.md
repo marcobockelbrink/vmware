@@ -58,7 +58,8 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   or in the new **storage overview** (menu between VLAN search and reservations)
   — a **LUN expansion** or a **new LUN**; the storage team fetches the open
   requests **via the API** (`/api/v1/storage-requests`, also CSV **incl. NAA and
-  the cluster's ESXi hosts** – for zoning/LUN mapping) and reports completion
+  the cluster's ESXi hosts with their FC-HBA WWPNs** – for zoning/LUN mapping and
+  system identification when SAN names aren't maintained) and reports completion
   with a token "Storage" write permission. Configurable
   (Administration → Storage): **maximum size** per request (request limit),
   minimum LUN size and name filter
