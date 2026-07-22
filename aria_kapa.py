@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.20"
+VERSION = "2.20.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -4837,7 +4837,7 @@ function saveNetCfg() {
   const vx = (document.getElementById("netExclVlans") || {}).value || "";
   fetch("api/netcfg", { method: "PUT", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ exclude_names: nx, exclude_vlans: vx }) })
-    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
     .then(d => {
       const nx2 = document.getElementById("netExclNames");
       if (nx2) nx2.value = d.exclude_names || "";
@@ -4848,7 +4848,8 @@ function saveNetCfg() {
                 setTimeout(() => { ok.textContent = ""; }, 2500); }
       pollStatus();
     })
-    .catch(() => notify("Speichern fehlgeschlagen."));
+    .catch(e => notify("Speichern fehlgeschlagen" +
+                       (e && e.message ? " (" + e.message + ")" : "") + "."));
 }
 
 // ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
@@ -6127,6 +6128,7 @@ const I18N_RX = [
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
   [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
   [/^AD-Gruppe: (.+)$/, "AD group: $1"],
+  [/^Speichern fehlgeschlagen \(HTTP (\d+)\)\.$/, "Saving failed (HTTP $1)."],
   [/^Gruppe „(.+)“ nicht im AD gefunden \(unter (.+)\)\.$/, "Group „$1“ not found in AD (under $2)."],
   [/^Keine Verbindung zum AD \((.+)\): (.+)$/, "No connection to AD ($1): $2"],
   [/^aktuell ([\d.,]+) GB$/, "current $1 GB"],
@@ -9541,6 +9543,7 @@ def main():
     args.visibility_file = data_path(args.visibility_file, base)
     args.storagecfg_file = data_path(args.storagecfg_file, base)
     args.storagereq_file = data_path(args.storagereq_file, base)
+    args.netcfg_file = data_path(args.netcfg_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))
