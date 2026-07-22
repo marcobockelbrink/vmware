@@ -19,7 +19,9 @@ Aria Operations data into a web dashboard. The UI language follows the browser:
 German browsers get German, everything else English — including the login page,
 the **API docs/OpenAPI spec** and the **CSV export** (headers/status values via
 `Accept-Language` or `?lang=de|en`). The JSON API field names and status values
-(v1 contract), the audit log and the stored data stay German.
+(v1 contract) and the stored data stay German. The audit log is stored in
+German as the canonical record; in the English view the UI **does translate the
+standard actions**, though (entered names, clusters and comments stay as typed).
 
 **Capacity & reporting**
 - **Multiple named vROps sources** (optional): 1–3 (or more) Aria Operations systems, each with or without a proxy, merged into one overview; every cluster carries a source badge (requires unique cluster names). The **single source** from `[kapa]` can be named too via `source-name`
@@ -158,7 +160,8 @@ diagrams** (system context, data flows, workflow, deployment) lives in
   no longer appear in the active reservation list. **Visibility as with
   reservations**: requesters see their own team's, reviewers/admins/auditors
   see all.
-- **Audit log** (tab "Log", admins only) with a **from/to date filter** and
+- **Audit log** (tab "Log", admins only) with a **from/to date filter**
+  (clicking the field opens a **calendar** in the browser language) and
   **pagination** (100 entries per page): records sign-ins (including failed
   ones), requests, approvals/rejections, cancellations, imports, role changes
   and backups to `data/kapa_log.jsonl`. The file **rotates automatically** at

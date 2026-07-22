@@ -19,7 +19,10 @@ das die Aria-Operations-Daten als Web-Dashboard aufbereitet. Die
 Browsersprache bekommt Englisch — inklusive Login, **API-Doku/OpenAPI-Spec**
 und **CSV-Export** (Spaltennamen/Statuswerte per `Accept-Language` bzw.
 `?lang=de|en`). Stabil deutsch bleiben die JSON-API-Felder und -Statuswerte
-(v1-Vertrag), das Audit-Log und die gespeicherten Daten.
+(v1-Vertrag) und die gespeicherten Daten. Das Audit-Log wird als kanonische
+Aufzeichnung deutsch gespeichert; in der englischen Ansicht zeigt die
+Oberfläche die **Standard-Aktionen jedoch übersetzt** (eingetragene Namen,
+Cluster und Kommentare bleiben wie erfasst).
 
 **Kapazität & Auswertung**
 - **Mehrere benannte vROps-Quellen** (optional): 1–3 (oder mehr) Aria-Operations-Systeme, je mit/ohne Proxy, gemischt zu einer Übersicht; jeder Cluster trägt ein Quellen-Badge (Voraussetzung: eindeutige Cluster-Namen). Auch die **einzelne Quelle** aus `[kapa]` lässt sich per `source-name` benennen
@@ -166,7 +169,8 @@ mit Schaubildern** (Systemkontext, Datenflüsse, Workflow, Deployment) steht in
   **Sichtbarkeit wie bei den Reservierungen**: Anforderer sehen die des eigenen
   Teams, Reviewer/Admin/Auditor alle.
 - **Audit-Log** (Tab „Log" bzw. `/log`, nur Admins) mit **Von/Bis-Datumsfilter**
-  und **Seitenblätterung** (100 Einträge je Seite): protokolliert
+  (Klick aufs Feld öffnet einen **Kalender** in der Browsersprache) und
+  **Seitenblätterung** (100 Einträge je Seite): protokolliert
   Anmeldungen (auch fehlgeschlagene), Anträge, Genehmigungen/Ablehnungen,
   Stornos, Importe, Rollenänderungen und Backups nach `data/kapa_log.jsonl`.
   Die Datei **rotiert automatisch** ab 10 MB (`.1` … `.3`), und die Ansicht
