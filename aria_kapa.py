@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.19"
+VERSION = "2.19.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -1266,47 +1266,25 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         ["cpu|corecount_provisioned", "mem|host_provisioned"],
         progress=lambda m: log(f"Host-Metriken: {m}"))
     log("Lese Host-Zuordnung (Cluster) ...")
-    # WWPN der FC-HBAs je Host (fürs Storage-Team zur System-Identifikation, falls
-    # dort die Hostnamen nicht gepflegt sind). Die Schlüssel variieren/instanzieren
-    # je vROps-Version -> mehrere Kandidaten im selben Bulk-Aufruf; der genaue
-    # Schlüssel lässt sich über die Diagnose-Zeile am echten vROps ablesen.
-    HOST_WWPN_KEYS = ["hardware|hostBusAdapter|portWorldWideName",
-                      "config|storageDevice|hostBusAdapter|portWorldWideName",
-                      "hardware|fibreChannelHba|portWorldWideName",
-                      "hardware|storageAdapter|wwpn", "hardware|wwpn",
-                      "config|network|fc|wwpn"]
-    host_props = api.properties(host_ids,
-        ["summary|parentCluster"] + HOST_WWPN_KEYS,
+    host_props = api.properties(host_ids, ["summary|parentCluster"],
         progress=lambda m: log(f"Host-Eigenschaften: {m}"))
-    # Diagnose: WWPN-/HBA-Kandidaten eines Beispiel-Hosts sichtbar machen –
-    # sowohl Properties als auch Metrik-Schlüssel (wie bei der NAA-Erkennung).
-    if hosts:
-        try:
-            h0 = hosts[0]
-            hp0 = api.all_properties(h0["identifier"])
-            wrx = r"(?:[0-9a-fA-F]{2}:){7}[0-9a-fA-F]{2}"
-            hits = {k: v for k, v in hp0.items()
-                    if re.search(r"wwpn|wwnn|wwn|fibre|hba|hostbus|fc_|storageadapter",
-                                 k, re.I) or re.search(wrx, str(v))}
-            log(f"Host-Properties (Beispiel '{name_of(h0)}') – WWPN/HBA-Kandidaten: "
-                + (", ".join(f"{k}={str(v)[:50]}" for k, v in
-                             sorted(hits.items())[:8]) or "keine gefunden"))
-            sk = api.statkeys(h0["identifier"])
-            skh = [k for k in sk if re.search(r"wwpn|wwn|hba|fibre|storageadapter", k, re.I)]
-            log(f"Host-Metrik-Schlüssel (Beispiel '{name_of(h0)}', {len(sk)} gesamt) – "
-                "WWPN/HBA-Kandidaten: " + (", ".join(sorted(skh)[:8]) or "keine gefunden"))
-        except Exception as e:
-            log(f"WWPN-Diagnose übersprungen: {e}")
 
-    _WWPN_RX = re.compile(r"(?:[0-9a-fA-F]{2}:){7}[0-9a-fA-F]{2}")
+    # WWPN der FC-HBAs je Host (fürs Storage-Team zur System-Identifikation, falls
+    # dort die Hostnamen nicht gepflegt sind). In vROps liegt der Wert als Property
+    # „Port WWN" unter der Gruppe „Storage Adapter" – je HBA eine eigene, anders
+    # benannte Instanz (vmhba1, vmhba64, …). Feste Schlüssel greifen daher nicht;
+    # stattdessen werden ALLE Host-Properties gelesen und die „Port WWN"-Werte
+    # eingesammelt (ein GET je Host, Ergebnis gecacht).
+    _PORTWWN_KEY_RX = re.compile(r"port\s*wwn|wwpn|world[\s_]*wide[\s_]*(?:port)?[\s_]*name",
+                                 re.I)
+    _WWPN_RX = re.compile(r"(?:[0-9a-fA-F]{2}[:\-]){7}[0-9a-fA-F]{2}"
+                          r"|\b0x[0-9a-fA-F]{16}\b|\b[0-9a-fA-F]{16}\b")
+    _host_wwpn_cache = {}
 
-    def host_wwpns(props):
-        """WWPNs eines Hosts aus den Kandidaten-Properties ziehen (mehrere HBAs
-        möglich). Nimmt ein WWPN-Muster (aa:bb:...) je Wert, sonst den Rohwert."""
+    def _extract_wwpns(props):
         out, seen = [], set()
-        for k in HOST_WWPN_KEYS:
-            v = props.get(k)
-            if not v:
+        for k, v in props.items():
+            if not v or not _PORTWWN_KEY_RX.search(str(k)):
                 continue
             for part in re.split(r"[,;\s]+", str(v)):
                 part = part.strip()
@@ -1318,6 +1296,34 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
                     seen.add(w.lower())
                     out.append(w)
         return out
+
+    def host_wwpns(hid):
+        """WWPNs eines Hosts: alle Properties lesen und „Port WWN"-Werte ziehen."""
+        if hid in _host_wwpn_cache:
+            return _host_wwpn_cache[hid]
+        try:
+            wp = _extract_wwpns(api.all_properties(hid))
+        except Exception:
+            wp = []
+        _host_wwpn_cache[hid] = wp
+        return wp
+
+    # Diagnose: „Port WWN"/Storage-Adapter-Properties eines Beispiel-Hosts zeigen –
+    # zum Abgleich des exakten Schlüssels am echten vROps.
+    if hosts:
+        try:
+            h0 = hosts[0]
+            hp0 = api.all_properties(h0["identifier"])
+            _host_wwpn_cache[h0["identifier"]] = _extract_wwpns(hp0)
+            hits = {k: v for k, v in hp0.items()
+                    if re.search(r"port\s*wwn|wwpn|wwnn|storage\s*adapter|hba|fibre",
+                                 str(k), re.I)}
+            log(f"Host-Properties (Beispiel '{name_of(h0)}') – Storage-Adapter/"
+                "Port-WWN-Kandidaten: "
+                + (", ".join(f"{k}={str(v)[:40]}" for k, v in
+                             sorted(hits.items())[:10]) or "keine gefunden"))
+        except Exception as e:
+            log(f"WWPN-Diagnose übersprungen: {e}")
 
     report(50)
     log("Lese VM-Metriken (vCPU, RAM) ...")
@@ -1490,8 +1496,11 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             "name": name_of(h),
             "cores": int(cores) if cores else 0,
             "ram_gb": round((ram_kb or 0) / 1024 / 1024, 1),
-            "wwpns": host_wwpns(host_props.get(rid) or {}),
+            "wwpns": host_wwpns(rid),
         })
+    _hw = [hh for d in data.values() for hh in d["hosts"]]
+    _hww = sum(1 for hh in _hw if hh.get("wwpns"))
+    log(f"WWPN erkannt: {_hww}/{len(_hw)} Hosts mit FC-HBA-Port-WWN")
 
     for v in vms:
         rid = v["identifier"]
