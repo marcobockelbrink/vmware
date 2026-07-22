@@ -18,6 +18,10 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
+    # Secret in eine env-Variable heben – nur env (nicht secrets) ist in
+    # step-`if`-Ausdrücken erlaubt.
+    env:
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -51,7 +55,7 @@ jobs:
       # SMTP_HOST/SMTP_USER/SMTP_PASS/SMTP_TO im Repo hinterlegt sind
       # (Settings -> Secrets and variables -> Actions).
       - name: Bericht per E-Mail (optional)
-        if: ${{ secrets.SMTP_HOST != '' }}
+        if: ${{ env.SMTP_HOST != '' }}
         uses: dawidd6/action-send-mail@4226df7daafa6fc901a43789c49bf7ab309066e7 # v3
         with:
           server_address: ${{ secrets.SMTP_HOST }}
