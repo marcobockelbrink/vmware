@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.21. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.22. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -115,6 +115,7 @@ sequenceDiagram
     B->>B: N+1 deduction, CPU factor,<br/>Tanzu MHz→vCPU (rounded up)
     B->>B: apply filters: minimum LUN + storage name filter,<br/>network filter (port-group name/VLAN ID)
     B->>ST: cluster list (+ source badge)
+    ST->>ST: daily snapshot per cluster into the<br/>statistics history (trends, 2 years)
     Note over B,ST: offline sources (import) pass through<br/>the SAME build_summary — identical math,<br/>appended with imported=True
     Note over ST: partial-failure tolerant: if one source fails,<br/>the others keep delivering
 ```
@@ -222,13 +223,16 @@ hash). Cross-cutting engines live at the end of the script:
   everything, hence `prefsBody()` always builds the full state.
 - **Deep links**: `#cluster=Name` opens the detail card, the hash is set on
   opening.
+- **Statistics**: trend charts as **self-drawn SVGs** (no CDN) from the
+  daily history — avg RAM/vCPU/disk per VM, VM count, utilizations, size-class
+  comparison; visibility via the matrix feature "statistik".
 
 ## Data storage
 
 All collections (reservations, roles, teams, selector, role labels, tokens,
 mail rules, prefs, announcement, auto-approval, sessions, visibility,
-storage settings, storage requests, network filter, offline sources) go
-through a store abstraction:
+storage settings, storage requests, network filter, offline sources,
+statistics history) go through a store abstraction:
 **JSON files** (default, one file per collection) or **SQLite** (a single
 `kapa.db`, incremental reservation writes, automatic one-time migration).
 Writes are always atomic. Details and restore:

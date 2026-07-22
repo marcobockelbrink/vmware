@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.21"
+VERSION = "2.22"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -44,14 +44,14 @@ NOTIFY_ROLE_EVENTS = {
 # Sichtbarkeits-Matrix: WAS eine Rolle sieht (Admin sieht immer alles).
 # Bewusst nur Sichtbarkeit, keine Rechte — der Workflow bleibt hart verdrahtet.
 VIS_FEATURES = ("workload", "hosts", "vms", "network", "storage", "tags",
-                "decided_by")
+                "decided_by", "statistik")
 DEFAULT_VISIBILITY = {
     "anforderer": {"workload": False, "hosts": False, "vms": False,
                    "network": True, "storage": True, "tags": True,
-                   "decided_by": False},
+                   "decided_by": False, "statistik": True},
     "reviewer":   {"workload": True, "hosts": False, "vms": False,
                    "network": True, "storage": True, "tags": True,
-                   "decided_by": True},
+                   "decided_by": True, "statistik": True},
     "auditor":    {f: True for f in VIS_FEATURES},
 }
 
@@ -946,6 +946,7 @@ def sftp_backup(args):
                          getattr(args, "storagereq_file", ""),
                          getattr(args, "netcfg_file", ""),
                          getattr(args, "import_file", ""),
+                         getattr(args, "history_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1320,8 +1321,12 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
 
     report(50)
     log("Lese VM-Metriken (vCPU, RAM) ...")
+    # Disk je VM (für die Statistik „VMs werden größer"): der Schlüssel variiert
+    # je vROps-Version -> Kandidaten im selben Bulk, erster Treffer gewinnt.
+    VM_DISK_KEYS = ["config|hardware|disk_Space", "diskspace|provisioned_space",
+                    "diskspace|provisionedSpace", "diskspace|used"]
     vm_stats = api.latest_stats(vm_ids,
-        ["config|hardware|num_Cpu", "mem|guest_provisioned"],
+        ["config|hardware|num_Cpu", "mem|guest_provisioned"] + VM_DISK_KEYS,
         progress=lambda m: log(f"VM-Metriken: {m}"))
     log("Lese VM-Eigenschaften (Cluster, PowerState) ...")
     vm_props = api.properties(vm_ids,
@@ -1507,12 +1512,18 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
         vcpu = st.get("config|hardware|num_Cpu") or p.get("config|hardware|numCpu")
         ram_kb = st.get("mem|guest_provisioned") or p.get("config|hardware|memoryKB")
         power = str(p.get("summary|runtime|powerState", "?"))
+        disk = next((st[k] for k in VM_DISK_KEYS if st.get(k)), 0)
         data[cl]["vms"].append({
             "name": name_of(v),
             "vcpu": int(float(vcpu)) if vcpu else 0,
             "ram_gb": round(float(ram_kb or 0) / 1024 / 1024, 1),
+            "disk_gb": round(float(disk or 0), 1),
             "on": "on" in power.lower().replace(" ", ""),
         })
+    _dvm = [v for d in data.values() for v in d["vms"]]
+    _dn = sum(1 for v in _dvm if v.get("disk_gb"))
+    log(f"VM-Disk erkannt: {_dn}/{len(_dvm)} VMs mit Disk-Wert"
+        + ("" if _dn else " – Kandidaten-Schlüssel: " + ", ".join(VM_DISK_KEYS)))
 
     # Datastore -> Cluster über die angedockten Hosts. Jeder Datastore (auch ein
     # von allen Hosts gesehenes FC-LUN oder der vSAN-Datastore) ist in vROps EINE
@@ -1943,6 +1954,12 @@ def sample_data():
                 "ram_gb": random.choice([8, 16, 16, 32, 64]),
                 "on": random.random() > 0.1}
                for vi in range(1, random.randint(40, 120))]
+        # Disk deterministisch aus RAM/vCPU ableiten — bewusst KEIN random:
+        # ein zusätzlicher Zufallszug würde die geseedete Demo-Sequenz (seed 42)
+        # verschieben und damit alle nachfolgenden Demo-Werte ändern.
+        for v in vms:
+            v["disk_gb"] = {8: 120, 16: 250, 32: 500, 64: 900}.get(
+                v["ram_gb"], 150) + v["vcpu"] * 15
         # Beispiel-LUNs: ein großer vSAN-Datastore (Spiegelung -> 50 % nutzbar)
         # plus mehrere FC-LUNs (VMFS, brutto = nutzbar)
         raw = random.choice([40000, 80000])
@@ -3075,6 +3092,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="tabRes" onclick="setView('res')">Reservierungen</span>
   <span class="tab" id="tabApp" onclick="setView('app')">Genehmigungen</span>
   <span class="tab" id="tabArch" onclick="setView('arch')">Archiv</span>
+  <span class="tab" id="tabStat" onclick="setView('stat')">Statistik</span>
   <span class="tab" id="tabAdm" onclick="setView('adm')">Verwaltung</span>
   <span class="tab" id="tabLog" onclick="setView('log')">Log</span>
 </div>
@@ -3167,6 +3185,26 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="arbody"></tbody>
 </table>
 </div>
+</div>
+<div id="statView" style="display:none">
+<div class="hint" style="color:var(--muted);margin:4px 0 10px">
+  Trends aus täglichen Snapshots der Datensammlung — z. B. ob VMs im Schnitt
+  <b>größer</b> werden (RAM/Disk je VM). Die Historie wächst ab Einbau dieser
+  Funktion; ältere Zeiträume füllen sich mit der Zeit.</div>
+<div class="toolbar" style="margin-bottom:12px;flex-wrap:wrap">
+  <label style="font-size:12px;color:var(--muted)">Zeitraum
+    <select id="statRange" class="filterbox" style="margin-left:4px" onchange="renderStats()">
+      <option value="30">30 Tage</option><option value="90">90 Tage</option>
+      <option value="180">180 Tage</option><option value="365" selected>1 Jahr</option>
+      <option value="730">2 Jahre</option></select></label>
+  <label style="font-size:12px;color:var(--muted)">Cluster
+    <select id="statCluster" class="filterbox" style="margin-left:4px;max-width:260px" onchange="renderStats()">
+      <option value="">alle</option></select></label>
+  <a class="btn" id="statCsvBtn" href="api/history?days=730&format=csv"
+     download="kapa-statistik.csv" title="Historie als CSV (Semikolon, für Excel)">CSV exportieren</a>
+  <span id="statInfo" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+</div>
+<div id="statCharts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px"></div>
 </div>
 <div id="storView" style="display:none">
 <div class="hint" style="color:var(--muted);margin:4px 0 10px">
@@ -4418,21 +4456,23 @@ let VIEW = (location.pathname.endsWith("/storage") || location.hash === "#storag
          : (location.pathname.endsWith("/reservierungen") || location.hash === "#reservierungen") ? "res"
          : (location.pathname.endsWith("/genehmigungen") || location.hash === "#genehmigungen") ? "app"
          : (location.pathname.endsWith("/archiv") || location.hash === "#archiv") ? "arch"
+         : (location.pathname.endsWith("/statistik") || location.hash === "#statistik") ? "stat"
          : (location.pathname.endsWith("/verwaltung") || location.hash === "#verwaltung") ? "adm"
          : (location.pathname.endsWith("/log") || location.hash === "#log") ? "log"
          : "kapa";
 if ((VIEW === "adm" || VIEW === "log") && !IS_ADMIN) VIEW = "kapa";
+if (VIEW === "stat" && (VIS.statistik === false || !SERVE)) VIEW = "kapa";
 
 function setView(v) {
   VIEW = v;
-  const tabs = { kapa: "tabKapa", vlan: "tabVlan", stor: "tabStor", res: "tabRes", app: "tabApp", arch: "tabArch", adm: "tabAdm", log: "tabLog" };
-  const views = { kapa: "kapaView", vlan: "vlanView", stor: "storView", res: "resView", app: "appView", arch: "archView", adm: "admView", log: "logView" };
+  const tabs = { kapa: "tabKapa", vlan: "tabVlan", stor: "tabStor", res: "tabRes", app: "tabApp", arch: "tabArch", stat: "tabStat", adm: "tabAdm", log: "tabLog" };
+  const views = { kapa: "kapaView", vlan: "vlanView", stor: "storView", res: "resView", app: "appView", arch: "archView", stat: "statView", adm: "admView", log: "logView" };
   for (const k in tabs) {
     document.getElementById(tabs[k]).classList.toggle("active", v === k);
     document.getElementById(views[k]).style.display = v === k ? "" : "none";
   }
   // Verwaltung hat eine eigene Filterbox im Tab „Benutzer und Rollen"
-  document.getElementById("filter").style.display = (v === "vlan" || v === "stor" || v === "res" || v === "arch" || v === "adm") ? "none" : "";
+  document.getElementById("filter").style.display = (v === "vlan" || v === "stor" || v === "res" || v === "arch" || v === "stat" || v === "adm") ? "none" : "";
   document.getElementById("filter").placeholder =
     v === "kapa" ? "Cluster filtern …"
     : v === "log" ? "Log filtern …" : "Reservierungen filtern …";
@@ -4444,10 +4484,11 @@ function setView(v) {
     history.replaceState(null, "",
       keep ? location.pathname + keep
       : v === "res" ? "#reservierungen" : v === "app" ? "#genehmigungen"
-      : v === "arch" ? "#archiv" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
+      : v === "arch" ? "#archiv" : v === "stat" ? "#statistik" : v === "adm" ? "#verwaltung" : v === "log" ? "#log"
       : v === "vlan" ? "#vlan-suche" : v === "stor" ? "#storage" : location.pathname);
   } catch (e) {}
   if (v === "stor") loadStorage();
+  if (v === "stat") loadHistory();
   if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); loadImports(); }
   if (v === "log") loadLog();
   render();
@@ -4893,7 +4934,7 @@ let VIS_CFG = null;
 const VIS_LABELS = { workload: "Workload %", hosts: "Host-Liste",
   vms: "VM-Liste", network: "Netzwerk & VLAN-Suche",
   storage: "Storage-Drilldown (LUNs)", tags: "vSphere-Tags",
-  decided_by: "Entschieden von" };
+  decided_by: "Entschieden von", statistik: "Statistik (Trends)" };
 function loadVisibility() {
   fetch("api/visibility").then(r => r.ok ? r.json() : null).then(d => {
     if (d && d.visibility) { VIS_CFG = d; if (VIEW === "adm") renderVisibility(); }
@@ -4985,6 +5026,119 @@ function saveNetCfg() {
     })
     .catch(e => notify("Speichern fehlgeschlagen" +
                        (e && e.message ? " (" + e.message + ")" : "") + "."));
+}
+
+// ---- Statistik: Trends aus der Tages-Historie (selbst gezeichnete SVGs) ----
+let HISTORY = null;   // {tag: {cluster: {n,on,vcpu,ram,disk,nd,ramU,ramC,stU,stC,hr,src}}}
+function loadHistory() {
+  fetch("api/history?days=730").then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => { HISTORY = d.days || {}; fillStatClusters(); renderStats(); })
+    .catch(() => { const b = document.getElementById("statCharts");
+      if (b) b.innerHTML = `<div class="hint" style="color:var(--muted)">Noch keine Statistik-Daten (erster Snapshot entsteht mit dem nächsten Datenabruf).</div>`; });
+}
+function fillStatClusters() {
+  const sel = document.getElementById("statCluster");
+  if (!sel || !HISTORY) return;
+  const names = new Set();
+  Object.values(HISTORY).forEach(day => Object.keys(day).forEach(n => names.add(n)));
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">alle</option>` + [...names].sort().map(n =>
+    `<option value="${esc(n)}"${n === cur ? " selected" : ""}>${esc(n)}</option>`).join("");
+}
+function statSeries(days, cluster) {
+  // je Tag über die gewählten Cluster aggregieren
+  return days.map(d => {
+    const day = HISTORY[d];
+    let n = 0, on = 0, vcpu = 0, ram = 0, disk = 0, nd = 0,
+        ramU = 0, ramC = 0, stU = 0, stC = 0, hr = [0,0,0,0,0,0];
+    Object.keys(day).forEach(cl => {
+      if (cluster && cl !== cluster) return;
+      const e = day[cl];
+      n += e.n || 0; on += e.on || 0; vcpu += e.vcpu || 0; ram += e.ram || 0;
+      disk += e.disk || 0; nd += e.nd || 0;
+      ramU += e.ramU || 0; ramC += e.ramC || 0; stU += e.stU || 0; stC += e.stC || 0;
+      (e.hr || []).forEach((x, i) => { if (i < hr.length) hr[i] += x; });
+    });
+    return { d: d, n: n, on: on, vcpu: vcpu, ram: ram, disk: disk, nd: nd,
+             ramU: ramU, ramC: ramC, stU: stU, stC: stC, hr: hr };
+  });
+}
+function chartCard(title, pts, unit, dec) {
+  // pts: [{d, y}] — eine Linie, Fläche darunter, min/max-Achse, letzter Wert groß
+  const vals = pts.map(p => p.y).filter(v => v !== null && isFinite(v));
+  if (!vals.length) return "";
+  const w = 400, h = 170, padL = 8, padR = 8, padT = 30, padB = 22;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi === lo) { hi += 1; lo = Math.max(0, lo - 1); }
+  const span = hi - lo;
+  lo = Math.max(0, lo - span * 0.1); hi += span * 0.1;
+  const X = i => padL + (w - padL - padR) * (pts.length < 2 ? 0.5 : i / (pts.length - 1));
+  const Y = v => padT + (h - padT - padB) * (1 - (v - lo) / (hi - lo));
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join("");
+  const area = line + `L${X(pts.length - 1).toFixed(1)},${h - padB}L${X(0).toFixed(1)},${h - padB}Z`;
+  const f = v => v.toLocaleString("de-DE", { maximumFractionDigits: dec });
+  const last = pts[pts.length - 1], first = pts[0];
+  const delta = last.y - first.y;
+  const dTxt = (delta >= 0 ? "+" : "") + f(delta) + (unit ? " " + unit : "");
+  const dCol = delta > 0 ? "var(--warn)" : "var(--ok)";
+  return `<div class="resbox" style="padding:12px 14px">
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <b style="font-size:13px">${esc(title)}</b>
+      <span style="margin-left:auto;font-size:18px;font-weight:700">${f(last.y)}${unit ? " " + esc(unit) : ""}</span>
+      <span style="font-size:11px;color:${dCol}" title="Veränderung im Zeitraum">${esc(dTxt)}</span>
+    </div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block" preserveAspectRatio="none">
+      <path d="${area}" fill="var(--accent)" opacity="0.12"></path>
+      <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"></path>
+      <text x="${padL}" y="${h - 6}" font-size="10" fill="var(--muted)">${esc(fmtDate(first.d))}</text>
+      <text x="${w - padR}" y="${h - 6}" font-size="10" fill="var(--muted)" text-anchor="end">${esc(fmtDate(last.d))}</text>
+      <text x="${padL}" y="${padT - 16}" font-size="10" fill="var(--muted)">max ${f(hi)}</text>
+    </svg></div>`;
+}
+function histoCard(first, last) {
+  const labels = ["≤4", "≤8", "≤16", "≤32", "≤64", ">64"];
+  const mx = Math.max(1, ...first.hr, ...last.hr);
+  const bars = labels.map((lb, i) => {
+    const h1 = Math.round((first.hr[i] || 0) / mx * 90);
+    const h2 = Math.round((last.hr[i] || 0) / mx * 90);
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1">
+      <div style="display:flex;align-items:flex-end;gap:3px;height:96px">
+        <div title="früher: ${first.hr[i] || 0}" style="width:14px;height:${h1}px;background:var(--muted);opacity:.45;border-radius:3px 3px 0 0"></div>
+        <div title="heute: ${last.hr[i] || 0}" style="width:14px;height:${h2}px;background:var(--accent);border-radius:3px 3px 0 0"></div>
+      </div>
+      <span style="font-size:10px;color:var(--muted)">${lb}</span></div>`;
+  }).join("");
+  return `<div class="resbox" style="padding:12px 14px">
+    <div style="font-size:13px"><b>VM-Größenklassen nach RAM (GB)</b>
+      <span style="font-size:11px;color:var(--muted);margin-left:8px">grau = ${esc(fmtDate(first.d))} · farbig = ${esc(fmtDate(last.d))}</span></div>
+    <div style="display:flex;gap:6px;margin-top:10px">${bars}</div></div>`;
+}
+function renderStats() {
+  const box = document.getElementById("statCharts");
+  if (!box || !HISTORY) return;
+  const rangeDays = parseInt(document.getElementById("statRange").value) || 365;
+  const cluster = document.getElementById("statCluster").value || "";
+  const cutoff = new Date(Date.now() - rangeDays * 86400000).toISOString().slice(0, 10);
+  const days = Object.keys(HISTORY).filter(d => d >= cutoff).sort();
+  const info = document.getElementById("statInfo");
+  if (days.length < 2) {
+    box.innerHTML = `<div class="hint" style="color:var(--muted)">Noch zu wenig Historie im gewählten Zeitraum (mindestens 2 Tage nötig). Die Daten wachsen mit jedem Tagesabruf.</div>`;
+    if (info) info.textContent = days.length + (days.length === 1 ? " Datenpunkt" : " Datenpunkte");
+    return;
+  }
+  const S = statSeries(days, cluster);
+  if (info) info.textContent = days.length + " Datenpunkte · " + (cluster || "alle Cluster");
+  const pick = (fn, dec) => S.map(e => ({ d: e.d, y: fn(e) })).filter(p => p.y !== null && isFinite(p.y));
+  const cards = [
+    chartCard("Ø RAM je VM", pick(e => e.n ? e.ram / e.n : null), "GB", 1),
+    chartCard("Ø vCPU je VM", pick(e => e.n ? e.vcpu / e.n : null), "", 1),
+    chartCard("Ø Disk je VM", pick(e => e.nd ? e.disk / e.nd : null), "GB", 0),
+    chartCard("VM-Anzahl", pick(e => e.n), "", 0),
+    chartCard("RAM-Auslastung", pick(e => e.ramC ? e.ramU / e.ramC * 100 : null), "%", 1),
+    chartCard("Storage-Auslastung", pick(e => e.stC ? e.stU / e.stC * 100 : null), "%", 1),
+  ].filter(Boolean);
+  cards.push(histoCard(S[0], S[S.length - 1]));
+  box.innerHTML = cards.join("");
 }
 
 // ---- Offline-Quellen (Verwaltung -> Import) ----
@@ -5704,6 +5858,7 @@ if (!VIS.decided_by) {
   if (th) th.remove();   // Rolle sieht nicht, wer entschieden hat (Matrix)
 }
 if (!VIS.network) document.getElementById("tabVlan").style.display = "none";
+if (VIS.statistik === false || !SERVE) document.getElementById("tabStat").style.display = "none";
 if (!VIS.storage) document.getElementById("tabStor").style.display = "none";
 
 // ---- Sortierbare Tabellen (Klick auf die Spaltenüberschrift) ----
@@ -5868,6 +6023,24 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Statistik (Trends)
+  "Trends aus täglichen Snapshots der Datensammlung — z. B. ob VMs im Schnitt größer werden (RAM/Disk je VM). Die Historie wächst ab Einbau dieser Funktion; ältere Zeiträume füllen sich mit der Zeit.": "Trends from daily snapshots of the data collection — e.g. whether VMs are getting bigger on average (RAM/disk per VM). The history grows from the moment this feature was added; older ranges fill up over time.",
+  "Statistik": "Statistics",
+  "Statistik (Trends)": "Statistics (trends)",
+  "Zeitraum": "Time range",
+  "1 Jahr": "1 year",
+  "2 Jahre": "2 years",
+  "Ø RAM je VM": "Avg RAM per VM",
+  "Ø vCPU je VM": "Avg vCPU per VM",
+  "Ø Disk je VM": "Avg disk per VM",
+  "VM-Anzahl": "VM count",
+  "VM-Größenklassen nach RAM (GB)": "VM size classes by RAM (GB)",
+  "Veränderung im Zeitraum": "Change over the period",
+  "alle Cluster": "all clusters",
+  "Historie als CSV (Semikolon, für Excel)": "History as CSV (semicolon, for Excel)",
+  "Noch zu wenig Historie im gewählten Zeitraum (mindestens 2 Tage nötig). Die Daten wachsen mit jedem Tagesabruf.": "Not enough history in the selected range yet (at least 2 days needed). The data grows with every daily refresh.",
+  "Noch keine Statistik-Daten (erster Snapshot entsteht mit dem nächsten Datenabruf).": "No statistics data yet (the first snapshot is created with the next data refresh).",
+  "Statistik ist für diese Rolle ausgeblendet": "Statistics are hidden for this role",
   // Offline-Quellen / Cluster-Import (Verwaltung -> Import)
   "Für Bereiche ohne Netzanbindung an ein vROps: Ein Kollege führt das PowerCLI-Skript gegen das isolierte vCenter aus und lädt das erzeugte JSON hier mit einem Quellnamen hoch. Die Cluster erscheinen dann wie eine eigene vROps-Quelle — inklusive Kapazitätsanfragen, VLAN-Suche und Storage-Übersicht. Die Daten sind statisch (Stand = Import-Datum, als Tag am Cluster sichtbar); die Auto-Freigabe klammert diese Cluster bewusst aus. Ein erneuter Import unter demselben Namen ersetzt die Quelle.": "For areas without network access to a vROps: a colleague runs the PowerCLI script against the isolated vCenter and uploads the resulting JSON here under a source name. The clusters then appear like a separate vROps source — including capacity requests, VLAN search and storage overview. The data is static (as of the import date, visible as a tag on the cluster); auto-approval deliberately excludes these clusters. Re-importing under the same name replaces the source.",
   "Aufruf: .\\kapa_export.ps1 -Server vcenter.insel.local": "Run: .\\kapa_export.ps1 -Server vcenter.island.local",
@@ -6341,6 +6514,12 @@ const I18N_RX = [
   [/^nach ([\d.,]+) s: (.+)$/, "after $1 s: $2"],
   [/^Storage-Erweiterung – (.+)$/, "Storage expansion – $1"],
   [/^AD-Gruppe: (.+)$/, "AD group: $1"],
+  [/^(\d+) Tage$/, "$1 days"],
+  [/^(\d+) Datenpunkte · (.+)$/, "$1 data points · $2"],
+  [/^(\d+) Datenpunkte?$/, "$1 data points"],
+  [/^grau = (.+) · farbig = (.+)$/, "grey = $1 · colored = $2"],
+  [/^früher: (\d+)$/, "before: $1"],
+  [/^heute: (\d+)$/, "today: $1"],
   [/^Quelle „(.+)“ samt ihrer Cluster aus der Übersicht entfernen\? Bestehende Kapazitätsanfragen auf diese Cluster bleiben erhalten\.$/,
    "Remove source „$1“ and its clusters from the overview? Existing capacity requests for these clusters are kept."],
   [/^Cluster „(.+)“: keine Hosts im Import$/, "Cluster „$1“: no hosts in the import"],
@@ -6679,7 +6858,8 @@ def serve(args, password):
                    "storagecfg": args.storagecfg_file,
                    "storagereq": args.storagereq_file,
                    "netcfg": args.netcfg_file,
-                   "manual": args.import_file}
+                   "manual": args.import_file,
+                   "history": args.history_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
@@ -7829,6 +8009,86 @@ def serve(args, password):
             result.extend(cl)
         return result
 
+    # ---- Statistik-Historie: ein kompakter Tages-Snapshot je Cluster ---------
+    # Nach jedem erfolgreichen Abruf; Mehrfach-Abrufe am selben Tag überschreiben
+    # den Tageswert. Grundlage für die Trend-Ansicht („VMs werden größer").
+    history_lock = threading.Lock()
+    history = store.load("history", None)
+    history = history if isinstance(history, dict) else {}
+
+    _RAM_BUCKETS = (4, 8, 16, 32, 64)   # GB; letzter Topf = darüber
+
+    def _cluster_snapshot(c):
+        vms = c.get("vms") or []
+        buckets = [0] * (len(_RAM_BUCKETS) + 1)
+        for v in vms:
+            r = float(v.get("ram_gb") or 0)
+            for i, lim in enumerate(_RAM_BUCKETS):
+                if r <= lim:
+                    buckets[i] += 1
+                    break
+            else:
+                buckets[-1] += 1
+        withdisk = [v for v in vms if v.get("disk_gb")]
+        return {"src": c.get("source") or "",
+                "n": len(vms),
+                "on": sum(1 for v in vms if v.get("on")),
+                "vcpu": sum(int(v.get("vcpu") or 0) for v in vms),
+                "ram": round(sum(float(v.get("ram_gb") or 0) for v in vms), 1),
+                "disk": round(sum(float(v.get("disk_gb") or 0)
+                                  for v in withdisk), 1),
+                "nd": len(withdisk),
+                "ramU": c.get("ramUsed") or 0, "ramC": c.get("ramCap") or 0,
+                "stU": c.get("storageUsed") or 0, "stC": c.get("storageCap") or 0,
+                "vcU": c.get("vcpuUsed") or 0, "vcC": c.get("vcpuCap") or 0,
+                "hr": buckets}
+
+    def record_history(clusters):
+        """Tages-Snapshot schreiben + alte Einträge nach --history-days kappen."""
+        today = datetime.now().date().isoformat()
+        snap = {c["name"]: _cluster_snapshot(c) for c in clusters if c.get("name")}
+        if not snap:
+            return
+        with history_lock:
+            history[today] = snap
+            if args.history_days > 0:
+                cutoff = (datetime.now().date()
+                          - timedelta(days=args.history_days)).isoformat()
+                for d in [d for d in history if d < cutoff]:
+                    del history[d]
+            store.save("history", history)
+
+    def demo_backfill_history(clusters):
+        """--sample: synthetische Historie (12 Monate, wachsender Trend), damit
+        die Statistik sofort etwas zeigt. Nur wenn noch (fast) keine Daten da."""
+        with history_lock:
+            if len(history) >= 5:
+                return
+        import random
+        base = {c["name"]: _cluster_snapshot(c) for c in clusters if c.get("name")}
+        rnd = random.Random(42)              # deterministisch je Lauf
+        with history_lock:
+            for age in range(365, 0, -7):    # Wochenpunkte rückwärts
+                day = (datetime.now().date() - timedelta(days=age)).isoformat()
+                f = 1.0 - 0.38 * (age / 365.0)          # früher: weniger/kleiner
+                fd = 1.0 - 0.5 * (age / 365.0)          # Disk wächst stärker
+                snap = {}
+                for name, b in base.items():
+                    jitter = 1 + rnd.uniform(-0.03, 0.03)
+                    n = max(1, int(b["n"] * f * jitter))
+                    snap[name] = dict(b,
+                        n=n, on=max(1, int(b["on"] * f * jitter)),
+                        vcpu=int(b["vcpu"] * f * jitter),
+                        ram=round(b["ram"] * f * f * jitter, 1),      # Ø wächst
+                        disk=round(b["disk"] * fd * f * jitter, 1),
+                        nd=n,
+                        ramU=round(float(b["ramU"]) * f * jitter, 1),
+                        stU=round(float(b["stU"]) * fd * jitter, 1),
+                        vcU=int(b["vcU"] * f * jitter),
+                        hr=[int(x * f * jitter) for x in b["hr"]])
+                history[day] = snap
+            store.save("history", history)
+
     storage_reqs = store.load("storagereq", None)
     storage_reqs = storage_reqs if isinstance(storage_reqs, list) else []
 
@@ -8096,6 +8356,9 @@ def serve(args, password):
                       f"{len({c['source'] for c in manual})} Import(en)",
                       file=sys.stderr)
             strip_uplinks(clusters, not args.show_uplink_portgroups)
+            if args.sample:
+                demo_backfill_history(clusters)
+            record_history(clusters)
             state["clusters"] = clusters
             state["updated"] = datetime.now().strftime("%d.%m.%Y %H:%M")
             ensure_dir(args.cache)
@@ -8383,7 +8646,8 @@ def serve(args, password):
             route = parsed.path
             query = urllib.parse.parse_qs(parsed.query)
             if route in ("/", "/index.html", "/reservierungen",
-                         "/genehmigungen", "/archiv", "/verwaltung", "/log"):
+                         "/genehmigungen", "/archiv", "/statistik",
+                         "/verwaltung", "/log"):
                 s = self._session()
                 if auth_enabled and not s:
                     self._send(LOGIN_TEMPLATE.replace("__VERSION__", VERSION)
@@ -8623,6 +8887,46 @@ def serve(args, password):
                 self._send(POWERCLI_PS1, "text/plain; charset=utf-8", headers={
                     "Content-Disposition":
                         'attachment; filename="kapa_export.ps1"'})
+            elif route == "/api/history":
+                # Statistik-Historie (Trends). Sichtbarkeit per Matrix-Feature
+                # „statistik" (Admin/Betrieb ohne Anmeldung sehen immer alles).
+                s = self._require()
+                if not s:
+                    return
+                if not vis_for(s["role"]).get("statistik", True):
+                    self._json({"error": "Statistik ist für diese Rolle "
+                                "ausgeblendet"}, 403)
+                    return
+                try:
+                    days = max(1, min(int(query.get("days", ["365"])[0]), 3660))
+                except ValueError:
+                    days = 365
+                cutoff = (datetime.now().date()
+                          - timedelta(days=days)).isoformat()
+                with history_lock:
+                    sel = {d: v for d, v in history.items() if d >= cutoff}
+                if query.get("format", [""])[0] == "csv":
+                    import csv as _csv
+                    import io as _io
+                    buf = _io.StringIO()
+                    w = _csv.writer(buf, delimiter=";")
+                    w.writerow(["datum", "cluster", "quelle", "vms", "vms_an",
+                                "vcpu_summe", "ram_gb_summe", "disk_gb_summe",
+                                "vms_mit_disk", "ram_belegt", "ram_kap",
+                                "storage_belegt", "storage_kap",
+                                "vcpu_belegt", "vcpu_kap"])
+                    for d in sorted(sel):
+                        for cl, e in sorted(sel[d].items()):
+                            w.writerow([d, cl, e.get("src", ""), e.get("n", 0),
+                                        e.get("on", 0), e.get("vcpu", 0),
+                                        e.get("ram", 0), e.get("disk", 0),
+                                        e.get("nd", 0), e.get("ramU", 0),
+                                        e.get("ramC", 0), e.get("stU", 0),
+                                        e.get("stC", 0), e.get("vcU", 0),
+                                        e.get("vcC", 0)])
+                    self._send(buf.getvalue(), "text/csv; charset=utf-8")
+                else:
+                    self._json({"days": sel})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -9912,6 +10216,11 @@ def main():
     ap.add_argument("--import-file", default="kapa_import.json",
                     help="Datei: manuell importierte Offline-Quellen "
                          "(Cluster ohne vROps-Anbindung, per PowerCLI-JSON)")
+    ap.add_argument("--history-file", default="kapa_history.json",
+                    help="Datei: Tages-Snapshots für die Statistik (Trends)")
+    ap.add_argument("--history-days", type=int, default=730,
+                    help="Aufbewahrung der Statistik-Historie in Tagen "
+                         "(Standard 730 = 2 Jahre; 0 = unbegrenzt)")
     ap.add_argument("--visibility-file", default="kapa_sichtbarkeit.json",
                     help="Datei mit der Sichtbarkeits-Matrix je Rolle "
                          "(Pflege über die Verwaltung)")
@@ -9959,6 +10268,7 @@ def main():
     args.storagereq_file = data_path(args.storagereq_file, base)
     args.netcfg_file = data_path(args.netcfg_file, base)
     args.import_file = data_path(args.import_file, base)
+    args.history_file = data_path(args.history_file, base)
     # Kapa-ID: Präfix säubern (IDs stehen in URLs) und Länge begrenzen
     args.id_prefix = re.sub(r"[^A-Za-z0-9_-]", "", args.id_prefix or "")[:20]
     args.id_length = min(40, max(4, args.id_length))

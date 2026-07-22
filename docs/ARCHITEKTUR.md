@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.21. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.22. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -115,6 +115,7 @@ sequenceDiagram
     B->>B: N+1-Abzug, CPU-Faktor,<br/>Tanzu MHz→vCPU (aufgerundet)
     B->>B: Filter anwenden: Mindest-LUN + Storage-Namensfilter,<br/>Netzwerk-Filter (Portgruppen-Name/VLAN-ID)
     B->>ST: Cluster-Liste (+ source-Badge)
+    ST->>ST: Tages-Snapshot je Cluster in die<br/>Statistik-Historie (Trends, 2 Jahre)
     Note over B,ST: Offline-Quellen (Import) laufen durch<br/>DIESELBE build_summary — gleiche Mathematik,<br/>angehängt mit imported=True
     Note over ST: Teilausfall-tolerant: fällt eine Quelle aus,<br/>liefern die übrigen weiter
 ```
@@ -224,13 +225,16 @@ Skript-Ende:
   darum baut `prefsBody()` immer den Vollzustand.
 - **Deep-Links**: `#cluster=Name` öffnet die Detailkarte, Hash wird beim
   Öffnen gesetzt.
+- **Statistik**: Trend-Charts als **selbst gezeichnete SVGs** (kein CDN) aus
+  der Tages-Historie — Ø RAM/vCPU/Disk je VM, VM-Anzahl, Auslastungen,
+  Größenklassen-Vergleich; Sichtbarkeit über das Matrix-Feature „statistik".
 
 ## Datenhaltung
 
 Alle Sammlungen (Reservierungen, Rollen, Teams, Selektor, Rollennamen,
 Tokens, Mail-Regeln, Prefs, Ankündigung, Auto-Freigabe, Sessions,
 Sichtbarkeit, Storage-Einstellungen, Storage-Anfragen, Netzwerk-Filter,
-Offline-Quellen) laufen über eine Store-Abstraktion:
+Offline-Quellen, Statistik-Historie) laufen über eine Store-Abstraktion:
 **JSON-Dateien** (Standard, je Sammlung eine Datei) oder **SQLite** (eine
 `kapa.db`, inkrementelle Reservierungs-Writes, automatische Einmal-Migration).
 Schreiben immer atomar. Details und Restore: [`../config/RESTORE.md`](../config/RESTORE.md).

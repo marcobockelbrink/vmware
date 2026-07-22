@@ -54,6 +54,12 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   "approved (auto)", every evaluation incl. numbers in the audit log; never blocks,
   never rejects
 - **Archive** for rejected/cancelled requests (own menu item, permanent, same team visibility)
+- **Statistics (trends)**: its own tab fed by daily snapshots of the data
+  collection — avg RAM/vCPU/**disk per VM**, VM count, RAM/storage utilization
+  as time-series charts (self-drawn SVGs, no CDN) plus **VM size classes** in a
+  before/after comparison. Answers "are our VMs getting bigger?" with data.
+  Range & cluster selectable, **CSV export**; history kept 2 years
+  (`--history-days`), visibility per role via the matrix
 - **Storage expansions** (dynamically enabled): approvers request — on approval
   or in the new **storage overview** (menu between VLAN search and reservations)
   — a **LUN expansion** or a **new LUN**; the storage team fetches the open
@@ -207,6 +213,12 @@ and status: `requested`, `in review (n/3)`, `approved`, `rejected` and
 approval and the button for the team currently up:
 
 ![Approvals](docs/screenshot-genehmigungen.png)
+
+**Statistics** — trends from daily snapshots: avg RAM/vCPU/disk per VM,
+VM count and utilizations as time series, plus the VM size classes in a
+before/after comparison:
+
+![Statistics](docs/screenshot-statistik.png)
 
 **Administration** (admins only) — users **and AD groups** with role and team,
 freely renamable role labels and the approval teams in their review order;

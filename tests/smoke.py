@@ -283,6 +283,22 @@ try:
           and ncfg.get("exclude_names") == "vlan2")
     req("PUT", "/api/netcfg", {"exclude_names": "", "exclude_vlans": ""})
 
+    print("== Statistik-Historie ==")
+    st, hist, _ = req("GET", "/api/history?days=730")
+    hdays = sorted((hist or {}).get("days") or {})
+    check("Historie mit Demo-Backfill + heutigem Snapshot",
+          st == 200 and len(hdays) >= 50
+          and hdays[-1] == time.strftime("%Y-%m-%d"))
+    if hdays:
+        f = hist["days"][hdays[0]]; l = hist["days"][hdays[-1]]
+        cl0 = sorted(f)[0]
+        avg = lambda e: e["ram"] / max(1, e["n"])
+        check("Trend: Ø RAM je VM wächst (Demo)",
+              avg(l.get(cl0, f[cl0])) > avg(f[cl0]))
+    st, hcsv, _ = req("GET", "/api/history?days=30&format=csv", raw=True)
+    check("Historie-CSV", st == 200
+          and hcsv.decode().splitlines()[0].startswith("datum;cluster;"))
+
     print("== Offline-Quellen (Cluster-Import) ==")
     imp = [{"name": "Insel-01",
             "hosts": [{"name": "esx-i1", "cores": 32, "ram_gb": 512},
@@ -558,6 +574,21 @@ try:
         rev3 = data_for(REV_TOK)
         check("Matrix-Reset: Standard greift wieder",
               "portgroups" in rev3[0] and "hosts" not in rev3[0])
+        # Matrix-Feature "statistik": Standard sichtbar, abschaltbar -> 403
+        def hist_status(tok):
+            r = urllib.request.Request(B2 + "/api/history?days=30",
+                headers={"Cookie": "kapa_session=" + tok})
+            try:
+                with urllib.request.urlopen(r, timeout=10) as resp:
+                    return resp.status
+            except urllib.error.HTTPError as e:
+                return e.code
+        ok_default = hist_status(REV_TOK)
+        put_vis({"reviewer": {"statistik": False}})
+        blocked = hist_status(REV_TOK)
+        put_vis({})
+        check("Matrix: Statistik für Reviewer abschaltbar (200 -> 403)",
+              ok_default == 200 and blocked == 403)
     finally:
         proc2.terminate()
         try:

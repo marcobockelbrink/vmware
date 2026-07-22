@@ -54,6 +54,12 @@ Cluster und Kommentare bleiben wie erfasst).
   Stufe 2+3 automatisch) — Freigebender „Auto-Freigabe", Badge „genehmigt (auto)",
   jede Prüfung samt Zahlen im Audit-Log; blockiert nie, lehnt nie ab
 - **Archiv** für abgelehnte/stornierte Anfragen (eigener Menüpunkt, dauerhaft, gleiche Team-Sichtbarkeit)
+- **Statistik (Trends)**: eigener Tab mit täglichen Snapshots der Datensammlung —
+  Ø RAM/vCPU/**Disk je VM**, VM-Anzahl, RAM-/Storage-Auslastung als Verlaufskurven
+  (selbst gezeichnete SVGs, kein CDN) plus **VM-Größenklassen** im Vorher/Nachher-
+  Vergleich. Beantwortet „werden unsere VMs immer größer?" mit Daten. Zeitraum &
+  Cluster wählbar, **CSV-Export**; Historie 2 Jahre (`--history-days`), Sichtbarkeit
+  je Rolle über die Matrix steuerbar
 - **Storage-Erweiterungen** (dynamisch aktivierbar): Freigebende fragen beim
   Genehmigen — oder alle Berechtigten in der neuen **Storage-Übersicht** (Menü
   zwischen VLAN-Suche und Reservierungen) — eine **LUN-Vergrößerung** oder eine
@@ -216,6 +222,12 @@ zurück:
 mehrstufigen Freigabe und der Schaltfläche für das jeweils zuständige Team:
 
 ![Genehmigungen](docs/screenshot-genehmigungen.png)
+
+**Statistik** — Trends aus täglichen Snapshots: Ø RAM/vCPU/Disk je VM,
+VM-Anzahl und Auslastungen als Verlaufskurven, dazu die VM-Größenklassen im
+Vorher/Nachher-Vergleich:
+
+![Statistik](docs/screenshot-statistik.png)
 
 **Verwaltung** (nur Admins) — Benutzer **und AD-Gruppen** mit Rolle und Team,
 frei wählbare Rollen-Bezeichnungen und die Genehmigungs-Teams in ihrer
