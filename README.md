@@ -385,7 +385,9 @@ Detailkarte eines Clusters; Export/Import als JSON.
 - **Genehmigungsübersicht** (Tab „Genehmigungen"): zeigt je Antrag die freie
   Kapazität des Ziel-Clusters (⚠ wenn er nicht mehr hineinpasst), den
   Fortschritt und – für das gerade zuständige Team bzw. Admins – die
-  Freigabe-/Ablehnen-Schaltflächen.
+  Freigabe-/Ablehnen-Schaltflächen. Oben verlinkt ein **Reviewer-Handbuch**
+  (eigene, zweisprachige Doku-Seite unter `/reviewer-handbuch`, auch im
+  „? Hilfe"-Popup) die wichtigsten Abläufe für Prüfer – später erweiterbar.
 - **Ablehnungen** bleiben 31 Tage (ab Ablehnung) als Historie sichtbar
   (Status „abgelehnt"; im Mouseover steht, in welcher Stufe abgelehnt wurde).
 - **Storno**: Anfragen lassen sich nicht löschen, sondern **stornieren**. Das

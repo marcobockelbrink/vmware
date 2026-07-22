@@ -365,7 +365,10 @@ detail card; export/import as JSON.
     (enforced server-side).
 - **Approval overview** (tab "Approvals"): shows per request the free capacity
   of the target cluster (⚠ if it no longer fits), the progress and — for the
-  team currently up, and admins — the approve/reject buttons.
+  team currently up, and admins — the approve/reject buttons. At the top a
+  **reviewer handbook** (its own bilingual doc page at `/reviewer-handbuch`,
+  also in the "? Help" popup) links the key workflows for reviewers — extendable
+  later.
 - **Rejections** stay visible for 31 days (from rejection) as history
   (status "rejected"; the mouseover shows at which stage).
 - **Cancellation**: requests cannot be deleted, only **cancelled**. Allowed

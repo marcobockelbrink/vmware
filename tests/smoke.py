@@ -285,6 +285,12 @@ try:
           and "Capacity Planning" in spec_en["info"]["title"])
     st, docs, _ = req("GET", "/api/v1/docs", raw=True)
     check("API-Doku-Seite", st == 200 and b"openapi.json" in docs)
+    st, rvd, _ = req("GET", "/reviewer-handbuch", raw=True)
+    st2, rve, _ = req("GET", "/reviewer-handbuch", raw=True,
+                      headers={"Accept-Language": "en-US"})
+    check("Reviewer-Handbuch DE/EN",
+          st == 200 and "Reviewer-Handbuch".encode() in rvd
+          and st2 == 200 and b"Reviewer handbook" in rve)
 
     print("== Mail-Regeln / Vorlage / Ankündigung / Prefs ==")
     st, n, _ = req("PUT", "/api/notify",

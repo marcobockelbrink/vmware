@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.17.1"
+VERSION = "2.18"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2434,6 +2434,176 @@ if (!IS_DE) {
 </html>
 """
 
+
+def reviewer_doc_html(lang="de", version="", role_label="Reviewer"):
+    """Selbst-enthaltenes, offline lauffähiges Reviewer-Handbuch (kein CDN),
+    zweisprachig (serverseitig nach ?lang=/Accept-Language gerendert), theme-
+    treu. Bewusst als eigene Seite (wie die API-Doku) angelegt, damit sie sich
+    später leicht ausbauen lässt. Inhalt beschreibt die Reviewer-Sicht/-Rechte."""
+    de = lang != "en"
+    def L(d, e):
+        return d if de else e
+    rl = _html_escape(role_label or ("Reviewer" if not de else "Reviewer"))
+    title = L("Reviewer-Handbuch", "Reviewer handbook")
+    # Abschnitte als (Überschrift, HTML-Inhalt); leicht erweiterbar.
+    sections = [
+        (L("Deine Rolle", "Your role"),
+         L("Als <b>{r}</b> prüfst du Kapazitätsanfragen und gibst sie frei oder "
+           "lehnst sie ab. Du gehörst zu einem <b>Team</b> in der Prüfreihenfolge; "
+           "handeln kannst du immer dann, wenn <b>dein Team an der Reihe</b> ist. "
+           "Anträge stellen oder verwalten gehört nicht zu deiner Rolle.",
+           "As a <b>{r}</b> you review capacity requests and approve or reject "
+           "them. You belong to a <b>team</b> in the approval order; you can act "
+           "whenever <b>your team is up</b>. Creating requests or administration "
+           "is not part of your role.").replace("{r}", rl)),
+        (L("Wo du arbeitest", "Where you work"),
+         L("Deine Arbeitsfläche ist der Tab <b>„Genehmigungen“</b>. Dort siehst du "
+           "je Antrag den Ziel-Cluster, die angefragten Ressourcen (vCPU, RAM, "
+           "Storage), den Fortschritt und – wenn dein Team dran ist – die Knöpfe "
+           "<b>Freigeben</b> und <b>Ablehnen</b>.",
+           "Your workspace is the <b>“Approvals”</b> tab. For each request you see "
+           "the target cluster, the requested resources (vCPU, RAM, storage), the "
+           "progress and – when your team is up – the <b>Approve</b> and "
+           "<b>Reject</b> buttons.")),
+        (L("Der mehrstufige Prüfprozess", "The multi-stage review process"),
+         L("Sind mehrere Teams konfiguriert, durchläuft ein Antrag sie "
+           "<b>nacheinander</b>. Der Status wandert von <i>beantragt</i> → "
+           "<i>in Prüfung</i> (sobald das erste Team freigegeben hat) → "
+           "<i>genehmigt</i> (erst wenn <b>alle</b> Teams zugestimmt haben). Erst "
+           "dann zählt der Antrag gegen die Kapazität. Ein <b>Mouseover</b> auf "
+           "„in Prüfung“ zeigt, welche Teams (mit Person und Datum) schon "
+           "freigegeben haben und wer als Nächstes dran ist. Freigeben kannst du "
+           "nur in deiner Stufe; ablehnen kann jedes Team in seiner Stufe.",
+           "If several teams are configured, a request passes through them "
+           "<b>one after another</b>. The status moves from <i>requested</i> → "
+           "<i>in review</i> (once the first team has approved) → <i>approved</i> "
+           "(only when <b>all</b> teams have agreed). Only then does it count "
+           "against capacity. A <b>mouseover</b> on “in review” shows which teams "
+           "(with person and date) have already approved and who is next. You can "
+           "approve only in your stage; any team can reject in its stage.")),
+        (L("Freigeben & Ablehnen", "Approve & reject"),
+         L("Beim Freigeben oder Ablehnen kannst du einen <b>Kommentar</b> "
+           "hinterlassen (z. B. den Grund einer Ablehnung) – er steht im "
+           "Audit-Log und in den Benachrichtigungen. Eine <b>Ablehnung</b> beendet "
+           "den Antrag; er bleibt 31 Tage als Historie sichtbar (im Mouseover "
+           "steht, in welcher Stufe abgelehnt wurde).",
+           "When approving or rejecting you can leave a <b>comment</b> (e.g. the "
+           "reason for a rejection) – it appears in the audit log and in the "
+           "notifications. A <b>rejection</b> ends the request; it stays visible "
+           "as history for 31 days (the mouseover shows in which stage it was "
+           "rejected).")),
+        (L("Passt es noch in den Cluster?", "Does it still fit the cluster?"),
+         L("Die Übersicht zeigt je Antrag die <b>freie Kapazität</b> des "
+           "Ziel-Clusters. Ein <b>⚠</b> warnt, wenn der Antrag rechnerisch nicht "
+           "mehr hineinpasst – dann lohnt eine Rückfrage, bevor du freigibst. Die "
+           "Freigabe wird dadurch nicht technisch blockiert; die Entscheidung "
+           "bleibt bei dir.",
+           "The overview shows the <b>free capacity</b> of the target cluster for "
+           "each request. A <b>⚠</b> warns when the request no longer fits "
+           "numerically – worth a query before you approve. Approval is not "
+           "technically blocked by it; the decision stays with you.")),
+        (L("Automatische Freigabe", "Automatic approval"),
+         L("Administratoren können Stufen so einstellen, dass sie bei genügend "
+           "freier Kapazität <b>automatisch</b> freigegeben werden (Freigebender: "
+           "„Auto-Freigabe“). Greift eine Schwelle nicht oder fehlen Daten, landet "
+           "der Antrag ganz normal bei deinem Team – die Auto-Freigabe lehnt nie "
+           "ab und übergeht dich nicht.",
+           "Administrators can set stages to be approved <b>automatically</b> when "
+           "there is enough free capacity (approver: “Auto-approval”). If a "
+           "threshold is not met or data is missing, the request comes to your "
+           "team as usual – auto-approval never rejects and never overrides you.")),
+        (L("Storage-Erweiterung anfragen", "Requesting a storage expansion"),
+         L("Ist die Storage-Funktion aktiv, kannst du beim Freigeben zusätzlich "
+           "eine <b>LUN-Vergrößerung oder eine neue LUN</b> anfragen (Knopf "
+           "„+ Storage-Erweiterung“ im Freigabe-Dialog). Die Anfrage geht an das "
+           "Storage-Team; der Cluster ist bereits vorbelegt.",
+           "If the storage feature is active, you can additionally request a "
+           "<b>LUN expansion or a new LUN</b> while approving (“+ Storage "
+           "expansion” button in the approval dialog). The request goes to the "
+           "storage team; the cluster is pre-filled.")),
+        (L("Benachrichtigungen", "Notifications"),
+         L("Ist ein SMTP-Server eingerichtet, wird deine <b>Team-Adresse</b> "
+           "angeschrieben, sobald dein Team an der Reihe ist. Wartet ein Antrag zu "
+           "lange, verschickt das System eine <b>Erinnerung</b>. Beides steuern "
+           "Administratoren.",
+           "If an SMTP server is configured, your <b>team address</b> is notified "
+           "as soon as your team is up. If a request waits too long, the system "
+           "sends a <b>reminder</b>. Both are managed by administrators.")),
+        (L("Was du (standardmäßig) nicht siehst", "What you don’t see (by default)"),
+         L("Verwaltung und Log bleiben Administratoren vorbehalten. <b>Host- und "
+           "VM-Listen</b> in der Cluster-Detailansicht sind für Reviewer "
+           "standardmäßig ausgeblendet; über die <b>Sichtbarkeits-Matrix</b> "
+           "können Administratoren das je Rolle anpassen. Die reinen Zählwerte "
+           "(Anzahl Hosts/VMs) bleiben sichtbar.",
+           "Administration and log stay with administrators. <b>Host and VM "
+           "lists</b> in the cluster detail view are hidden for reviewers by "
+           "default; administrators can adjust this per role via the <b>visibility "
+           "matrix</b>. The plain counts (number of hosts/VMs) stay visible.")),
+        (L("Stornieren statt löschen", "Cancel instead of delete"),
+         L("Anfragen werden nicht gelöscht, sondern <b>storniert</b> (durch Admin, "
+           "die anfragende Person oder jemanden aus demselben Team). Eine "
+           "stornierte Anfrage bleibt als Historie erhalten und zählt nicht mehr "
+           "gegen die Kapazität.",
+           "Requests are not deleted but <b>cancelled</b> (by an admin, the "
+           "requesting person or someone from the same team). A cancelled request "
+           "remains as history and no longer counts against capacity.")),
+    ]
+    body = "\n".join(
+        f'<div class="sec"><h2>{h}</h2><p>{c}</p></div>' for h, c in sections)
+    sub = L("Kurzanleitung für die Rolle „%s“ · v%s" % (rl, _html_escape(version)),
+            "Quick guide for the “%s” role · v%s" % (rl, _html_escape(version)))
+    foot = L("Diese Seite lässt sich erweitern – Rückfragen und Wünsche gern an "
+             "die Administration. Self-contained, offline nutzbar.",
+             "This page can be extended – questions and suggestions welcome to "
+             "the administration. Self-contained, usable offline.")
+    lang_attr = "de" if de else "en"
+    return ("""<!DOCTYPE html>
+<html lang="%s">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try { var _t = new URLSearchParams(location.search).get("theme")
+  || localStorage.getItem("kapa_theme");
+  if (!_t && window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) _t = "light";
+  if (_t === "light") document.documentElement.setAttribute("data-theme", "light");
+} catch (e) {}</script>
+<title>%s</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0;
+          --muted:#94a3b8; --accent:#38bdf8; }
+  html[data-theme="light"] { --bg:#eef2f7; --card:#ffffff; --line:#d4dbe5;
+          --text:#1e293b; --muted:#5b6b7f; --accent:#0369a1; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text);
+         font:15px/1.6 "Segoe UI",system-ui,sans-serif; margin:0; padding:28px; }
+  .wrap { max-width:820px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 2px; }
+  .sub { color:var(--muted); margin-bottom:22px; }
+  a { color:var(--accent); }
+  .sec { background:var(--card); border:1px solid var(--line); border-radius:12px;
+         padding:14px 18px; margin-bottom:14px; }
+  .sec h2 { font-size:16px; margin:0 0 6px; }
+  .sec p { margin:0; color:var(--text); }
+  .sec b { color:var(--text); }
+  .foot { color:var(--muted); font-size:13px; margin-top:20px; }
+  .back { display:inline-block; margin-bottom:18px; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="./">%s</a>
+  <h1>%s</h1>
+  <div class="sub">%s</div>
+  %s
+  <div class="foot">%s</div>
+</div>
+</body>
+</html>
+""" % (lang_attr, title,
+       L("← Zurück zum Dashboard", "← Back to the dashboard"),
+       title, sub, body, foot))
+
+
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -2620,7 +2790,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span style="color:var(--muted);font-size:12px;margin-left:8px">Stand: <span id="stand">__DATE__</span></span>
 </div>
 <div id="infoCalc" style="display:none">Quelle: VMware Aria Operations · CPU-Überprovisionierung: Faktor __FACTOR__ (physische Cores) · RAM 1:1 · alle VMs inkl. powered-off · „frei" berücksichtigt genehmigte Reservierungen__FAILNOTE__</div>
-<div id="infoHelp" style="display:none">Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__</div>
+<div id="infoHelp" style="display:none">Klick auf den Clusternamen zeigt Details und Reservierungen. __RESNOTE__<div style="margin-top:12px">📖 <a href="reviewer-handbuch" target="_blank" rel="noopener">Reviewer-Handbuch öffnen</a></div></div>
 <div class="modal-bg" id="infoBg" onclick="if(event.target===this)closeInfo()">
   <div class="modal">
     <h2 id="infoTitle"></h2>
@@ -2760,7 +2930,11 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div>
 </div>
 <div id="appView" style="display:none">
-<div style="text-align:right;margin-bottom:8px"><span id="colctl_atable"></span></div>
+<div style="display:flex;align-items:center;margin-bottom:8px;font-size:13px">
+  <span>📖 <a href="reviewer-handbuch" target="_blank" rel="noopener">Reviewer-Handbuch</a>
+    <span style="color:var(--muted)">– wie Prüfen &amp; Freigeben funktioniert</span></span>
+  <span id="colctl_atable" style="margin-left:auto"></span>
+</div>
 <div class="tablewrap">
 <table class="kt" id="atable">
   <thead><tr><th>ID</th><th>Anfrage / Projekt</th><th>Cluster</th><th>Change</th><th class="num">vCPU</th>
@@ -5369,6 +5543,9 @@ const I18N = {
   "optional, z. B. Change/Grund": "optional, e.g. change/reason",
   "(keine erweiterbare LUN)": "(no expandable LUN)",
   "Storage-Erweiterung angefragt": "Storage expansion requested",
+  "Reviewer-Handbuch": "Reviewer handbook",
+  "– wie Prüfen & Freigeben funktioniert": "– how reviewing & approving works",
+  "Reviewer-Handbuch öffnen": "Open reviewer handbook",
   "Storage-Anfrage löschen": "Delete storage request",
   "Storage-Erweiterung gelöscht": "Storage expansion deleted",
   "Diese Storage-Anfrage wirklich löschen? Das lässt sich nicht rückgängig machen.":
@@ -7684,6 +7861,13 @@ def serve(args, password):
                            "application/json; charset=utf-8")
             elif route in ("/api/v1/docs", "/api/v1/docs/"):
                 self._send(API_DOCS_HTML.replace("__VERSION__", VERSION),
+                           "text/html; charset=utf-8")
+            elif route in ("/reviewer-handbuch", "/reviewer-handbuch/",
+                           "/reviewer-handbook"):
+                # Reviewer-Handbuch (eigene, zweisprachige Doku-Seite, im UI
+                # verlinkt; später erweiterbar).
+                self._send(reviewer_doc_html(self._lang(), VERSION,
+                                             role_names.get("reviewer") or "Reviewer"),
                            "text/html; charset=utf-8")
             elif route == "/healthz":
                 # Monitoring-Endpunkt: bewusst OHNE Authentifizierung, dafür
