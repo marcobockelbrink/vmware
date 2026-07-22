@@ -3,6 +3,11 @@
 > 🇩🇪 [Deutsche Fassung: README.md](README.md) — the German README is the
 > primary document; this translation follows each release.
 
+[![CodeQL](https://github.com/marcobockelbrink/vmware/actions/workflows/codeql.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/codeql.yml)
+[![Security-Scan](https://github.com/marcobockelbrink/vmware/actions/workflows/security.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/marcobockelbrink/vmware/badge)](https://securityscorecards.dev/viewer/?uri=github.com/marcobockelbrink/vmware)
+[![Docker-Image (GHCR)](https://github.com/marcobockelbrink/vmware/actions/workflows/docker.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/docker.yml)
+
 Per-cluster capacity reporting from VMware Aria Operations with a browser-based
 dashboard and a reservation workflow for upcoming capacity requests.
 

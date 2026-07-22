@@ -1,0 +1,40 @@
+# CodeQL – GitHubs eigener statischer Sicherheits-Scanner (SAST).
+# Analysiert den Python-Code auf bekannte Schwachstellenmuster (Injection,
+# unsichere Deserialisierung, Path-Traversal u. v. m.) und meldet Funde als
+# Alerts im Reiter "Security" des Repos. Kostenlos für öffentliche Repos.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 3 * * 1"   # wöchentlich montags 03:27 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL-Analyse (Python)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # Alerts in den Security-Tab schreiben
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CodeQL initialisieren
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # keine Abhängigkeiten/Build nötig (nur Standardbibliothek)
+          build-mode: none
+          queries: security-and-quality
+
+      - name: CodeQL analysieren
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

@@ -1,0 +1,41 @@
+# OpenSSF Scorecard – bewertet die Sicherheits-"Hygiene" des Repos
+# (verzweigte Schutzregeln, gepinnte Abhängigkeiten, Token-Rechte, aktive
+# Wartung u. a.) und liefert eine Punktzahl (0–10) plus einen Badge für die
+# README. Ergebnisse landen ebenfalls im Security-Tab. Kostenlos/Open Source.
+name: OpenSSF Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "27 5 * * 1"   # wöchentlich montags 05:27 UTC
+  push:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard-Analyse
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # Alerts in den Security-Tab
+      id-token: write          # veröffentlichte Ergebnisse (Badge)
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scorecard ausführen
+        uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true   # ermöglicht den öffentlichen Badge
+
+      - name: Ergebnis hochladen
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard

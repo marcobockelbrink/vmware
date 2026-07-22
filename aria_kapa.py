@@ -109,7 +109,7 @@ class AriaOps:
     def _open(self, req, timeout=120):
         if self.opener is not None:
             return self.opener.open(req, timeout=timeout)
-        return urllib.request.urlopen(req, context=self.ctx, timeout=timeout)
+        return urllib.request.urlopen(req, context=self.ctx, timeout=timeout)  # nosec B310 – URL stammt aus der Admin-Konfiguration (vROps, https), nicht aus Nutzereingaben
 
     def _request(self, method, path, body=None, params=None):
         url = self.base + path
@@ -902,9 +902,9 @@ def _ssh_cmd(args, prog):
 
 
 def _ssh_run(cmd, env, timeout=180):
-    import subprocess
+    import subprocess  # nosec B404 – Aufruf ist geprüft (Liste, kein shell)
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)  # nosec B603 – Argumentliste, kein shell=True; Ziel/Programm aus der Admin-Konfiguration
     except FileNotFoundError:
         prog = cmd[0]
         if prog == "sshpass":
@@ -10540,7 +10540,8 @@ def main():
     ap.add_argument("--serve", action="store_true",
                     help="Als lokaler Webserver laufen (Live-Abruf per Knopf, Disk-Cache)")
     ap.add_argument("--port", type=int_or(8080), default=8080, help="Port für --serve (Standard: 8080)")
-    ap.add_argument("--bind", default="0.0.0.0", help="Bind-Adresse für --serve")
+    ap.add_argument("--bind", default="0.0.0.0",  # nosec B104 – im Container gewollt; hinter nginx/Proxy lokal binden (127.0.0.1)
+                    help="Bind-Adresse für --serve")
     ap.add_argument("--data-dir", default="data",
                     help="Basisordner für alle Laufzeitdaten (Cache, Reservierungen, "
                          "Rollen, Teams, Log, Tokens). Standard: data/ neben dem "

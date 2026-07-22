@@ -2,6 +2,11 @@
 
 > 🇬🇧 [English version: README.en.md](README.en.md)
 
+[![CodeQL](https://github.com/marcobockelbrink/vmware/actions/workflows/codeql.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/codeql.yml)
+[![Security-Scan](https://github.com/marcobockelbrink/vmware/actions/workflows/security.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/marcobockelbrink/vmware/badge)](https://securityscorecards.dev/viewer/?uri=github.com/marcobockelbrink/vmware)
+[![Docker-Image (GHCR)](https://github.com/marcobockelbrink/vmware/actions/workflows/docker.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/docker.yml)
+
 Kapazitätsauswertung pro Cluster aus VMware Aria Operations mit browserbasiertem
 Dashboard und Reservierungsfunktion für künftige Kapazitätsanfragen.
 

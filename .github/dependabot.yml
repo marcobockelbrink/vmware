@@ -1,0 +1,22 @@
+# Dependabot hält die in den Workflows verwendeten GitHub-Actions aktuell
+# (Sicherheits- und Versions-Updates als automatische Pull Requests). Das
+# Anwendungs-Skript selbst nutzt nur die Python-Standardbibliothek – es gibt
+# also keine pip-/npm-Abhängigkeiten zu überwachen.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies", "ci"]
+
+  # Basis-Image des Containers auf neue Sicherheits-Patches prüfen.
+  - package-ecosystem: docker
+    directory: "/deploy/docker"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "docker"
+    labels: ["dependencies", "docker"]

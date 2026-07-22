@@ -1,0 +1,91 @@
+# Zusätzliche Open-Source-Sicherheitsscanner. Alle melden ihre Funde als SARIF
+# in den "Security"-Reiter des Repos (dort einsehbar/nachverfolgbar). Die
+# Scanner brechen den Lauf bewusst NICHT ab (report-only) – Funde erscheinen als
+# Alerts, blockieren aber keine Releases. Alles kostenlos/Open Source.
+name: Security-Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 4 * * 1"   # wöchentlich montags 04:27 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  # Bandit – Python-spezifischer Security-Linter (subprocess, eval, schwache
+  # Krypto, unsichere Temp-Dateien, …).
+  bandit:
+    name: Bandit (Python-Security)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "bandit[sarif]"
+      - name: Bandit ausführen
+        # B311 (random) nur fuer Demo-Daten, B110 (try/except/pass) bewusst;
+        # sicherheitskritische Zufallswerte nutzen das secrets-Modul.
+        run: bandit -r aria_kapa.py --skip B311,B110 -f sarif -o bandit.sarif || true
+      - name: Ergebnis hochladen
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+
+  # Semgrep – breite, gepflegte Security-Regelsätze (OWASP, Secrets, Python).
+  semgrep:
+    name: Semgrep (SAST)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install semgrep
+      - name: Semgrep ausführen
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/security-audit \
+            --config p/secrets \
+            --sarif --output semgrep.sarif || true
+      - name: Ergebnis hochladen
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # Trivy – scannt Dateisystem und Dockerfile auf Schwachstellen, Fehl-
+  # konfigurationen und versehentlich eingecheckte Secrets.
+  trivy:
+    name: Trivy (Repo + Dockerfile)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy-Dateisystem-Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+      - name: Ergebnis hochladen
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
