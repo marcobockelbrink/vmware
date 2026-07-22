@@ -132,6 +132,10 @@ diagrams** (system context, data flows, workflow, deployment) lives in
   contain the IP subnets, a partial input (e.g. `10.2.30` or `VLAN205`)
   immediately shows **which cluster** a network is attached to. Results as a
   sortable table of port group / VLAN / cluster.
+  - **Network filter** (Administration → Network): hides port groups by
+    **name** (partial match/wildcards, like the storage name filter) and/or
+    **VLAN ID** (single IDs and ranges, e.g. `99, 3900-3999`) everywhere —
+    VLAN search, cluster detail and data package.
 - **Filter field** for clusters and reservations (also matches change number,
   requester, team, status and ID)
 - **Cluster selector**: quick filters above the capacity list. With multiple

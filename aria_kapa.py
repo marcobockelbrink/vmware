@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.19.3"
+VERSION = "2.20"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -944,6 +944,7 @@ def sftp_backup(args):
                          getattr(args, "visibility_file", ""),
                          getattr(args, "storagecfg_file", ""),
                          getattr(args, "storagereq_file", ""),
+                         getattr(args, "netcfg_file", ""),
                          db, db + "-wal", db + "-shm")
              if p and os.path.exists(p)]
     if not files:
@@ -1207,7 +1208,8 @@ def strip_uplinks(clusters, hide=True):
 
 def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
             tag_property="", vsan_factor=0.5, tanzu_mhz=2500, vlan_hint=None,
-            min_lun_gb=0, exclude_names=None):
+            min_lun_gb=0, exclude_names=None,
+            net_exclude_names=None, net_exclude_vlans=None):
     # Detail-Log geht ins stderr (journal); die Oberfläche bekommt nur einen
     # grob geschätzten Prozentwert über report().
     log = lambda m: print(m, file=sys.stderr)
@@ -1782,7 +1784,8 @@ def collect(api, cpu_factor, progress=None, failover_hosts=1, exclude_tag="",
 
     report(100)
     return build_summary(data, cpu_factor, failover_hosts, tanzu_mhz,
-                         min_lun_gb, exclude_names)
+                         min_lun_gb, exclude_names,
+                         net_exclude_names, net_exclude_vlans)
 
 
 def _name_excluded(name, patterns):
@@ -1802,8 +1805,32 @@ def _name_excluded(name, patterns):
     return False
 
 
+def _vlan_excluded(vlan, tokens):
+    """VLAN-ID-Filter für Portgruppen: tokens sind einzelne IDs ("205") oder
+    Bereiche ("100-110"). Trifft nur Portgruppen mit EINZELNER VLAN-ID –
+    Trunk-Bereiche (z. B. "0-4094") bleiben unberührt (die blendet ohnehin
+    schon die Uplink-Erkennung aus)."""
+    s = str(vlan or "").strip()
+    if not s.isdigit():
+        return False
+    v = int(s)
+    for t in tokens:
+        t = str(t or "").strip()
+        if not t:
+            continue
+        if "-" in t:
+            a, _, b = t.partition("-")
+            if a.strip().isdigit() and b.strip().isdigit() \
+                    and int(a) <= v <= int(b):
+                return True
+        elif t.isdigit() and int(t) == v:
+            return True
+    return False
+
+
 def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
-                  min_lun_gb=0, exclude_names=None):
+                  min_lun_gb=0, exclude_names=None,
+                  net_exclude_names=None, net_exclude_vlans=None):
     """data: {cluster: {hosts:[{cores,ram_gb}], vms:[{vcpu,ram_gb,on}]}}
 
     Pro Cluster werden die größten `failover_hosts` Hosts als Ausfallreserve
@@ -1877,7 +1904,14 @@ def build_summary(data, cpu_factor, failover_hosts=1, tanzu_mhz=2500,
             "vmCount": len(d["vms"]),
             "vmOff": sum(1 for v in d["vms"] if not v["on"]),
             "tags": list(d.get("tags") or []),
-            "portgroups": list(d.get("portgroups") or []),
+            # Netzwerk-Filter (Verwaltung -> Netzwerk): Portgruppen nach Name
+            # bzw. VLAN-ID ausblenden — wirkt überall (Cluster-Detail,
+            # VLAN-Suche, Datenpaket).
+            "portgroups": [p for p in (d.get("portgroups") or [])
+                           if not _name_excluded(p.get("name") or "",
+                                                 net_exclude_names or [])
+                           and not _vlan_excluded(p.get("vlan"),
+                                                  net_exclude_vlans or [])],
             "workload": d.get("workload"),
             "source": d.get("source"),
             "namespaces": ns_list,
@@ -3066,6 +3100,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Freigabe</span>
   <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
   <span class="tab" id="atabStorCfg" onclick="setAdmTab('storcfg')">Storage</span>
+  <span class="tab" id="atabNet" onclick="setAdmTab('net')">Netzwerk</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
 </div>
@@ -3245,6 +3280,36 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <button class="btn approve" onclick="saveStorageCfg()">✓ Speichern &amp; anwenden</button>
 <span id="storMinSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div><!-- admGrpStorCfg -->
+
+<div id="admGrpNet" style="display:none">
+<div class="sechead">Netzwerk-Filter (Portgruppen ausblenden)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Portgruppen, die hier zutreffen, werden <b>komplett</b> ausgeblendet —
+  in der VLAN-Suche, im Netzwerk-Reiter der Cluster-Details und im
+  Datenpaket. Die Änderung löst gleich einen neuen Datenabruf aus.</div>
+<div class="sechead">Namensfilter</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Portgruppen, deren <b>Name</b> einen dieser Begriffe enthält. Mehrere durch
+  Komma trennen, Groß-/Kleinschreibung egal — <code>*</code>/<code>?</code>
+  gehen als Platzhalter (<code>*-uplink</code>, <code>PG-Test-?</code>).
+  Leer = kein Filter.</div>
+<div style="margin-bottom:16px">
+  <input id="netExclNames" class="filterbox" style="width:100%;max-width:520px"
+    placeholder="z. B. heartbeat, *-replikation, PG-Test-*">
+</div>
+<div class="sechead">VLAN-ID-Filter</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Portgruppen mit diesen <b>VLAN-IDs</b>. Einzelne IDs und Bereiche, durch
+  Komma getrennt — z. B. <code>99, 205, 3900-3999</code>. Wirkt nur auf
+  Portgruppen mit einer einzelnen VLAN-ID (Trunk-Bereiche blendet bereits
+  die Uplink-Erkennung aus). Leer = kein Filter.</div>
+<div style="margin-bottom:16px">
+  <input id="netExclVlans" class="filterbox" style="width:100%;max-width:520px"
+    placeholder="z. B. 99, 205, 3900-3999">
+</div>
+<button class="btn approve" onclick="saveNetCfg()">✓ Speichern &amp; anwenden</button>
+<span id="netCfgSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
+</div><!-- admGrpNet -->
 
 <div id="admGrpTok" style="display:none">
 <div class="sechead">API-Tokens für externe Anwendungen (Endpunkte unter /api/v1/; Schreibrechte je Token per Klick)</div>
@@ -4248,7 +4313,7 @@ function setView(v) {
       : v === "vlan" ? "#vlan-suche" : v === "stor" ? "#storage" : location.pathname);
   } catch (e) {}
   if (v === "stor") loadStorage();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); }
   if (v === "log") loadLog();
   render();
 }
@@ -4757,6 +4822,35 @@ function loadStorageCfg() {
   }).catch(() => {});
 }
 
+// ---- Netzwerk-Filter pflegen (Verwaltung -> Netzwerk) ----
+function loadNetCfg() {
+  fetch("api/netcfg").then(r => r.ok ? r.json() : null).then(d => {
+    if (!d) return;
+    const nx = document.getElementById("netExclNames");
+    if (nx && document.activeElement !== nx) nx.value = d.exclude_names || "";
+    const vx = document.getElementById("netExclVlans");
+    if (vx && document.activeElement !== vx) vx.value = d.exclude_vlans || "";
+  }).catch(() => {});
+}
+function saveNetCfg() {
+  const nx = (document.getElementById("netExclNames") || {}).value || "";
+  const vx = (document.getElementById("netExclVlans") || {}).value || "";
+  fetch("api/netcfg", { method: "PUT", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ exclude_names: nx, exclude_vlans: vx }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      const nx2 = document.getElementById("netExclNames");
+      if (nx2) nx2.value = d.exclude_names || "";
+      const vx2 = document.getElementById("netExclVlans");
+      if (vx2) vx2.value = d.exclude_vlans || "";
+      const ok = document.getElementById("netCfgSaved");
+      if (ok) { ok.textContent = "✓ gespeichert";
+                setTimeout(() => { ok.textContent = ""; }, 2500); }
+      pollStatus();
+    })
+    .catch(() => notify("Speichern fehlgeschlagen."));
+}
+
 // ---- Auto-Freigabe pflegen (Verwaltung -> Auto-Freigabe) ----
 let AA_CFG = null;
 function loadAutoApprove() {
@@ -4831,10 +4925,10 @@ function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
                  ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
-                 storcfg: "atabStorCfg", tok: "atabTok", conf: "atabConf" };
+                 storcfg: "atabStorCfg", net: "atabNet", tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
                  ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
-                 storcfg: "admGrpStorCfg", tok: "admGrpTok", conf: "admGrpConf" };
+                 storcfg: "admGrpStorCfg", net: "admGrpNet", tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
     const gr = document.getElementById(grps[k]); if (gr) gr.style.display = k === t ? "" : "none";
@@ -5585,6 +5679,16 @@ window.addEventListener("hashchange", openClusterHash);
 // ============================================================================
 const LANG = ((navigator.language || "de").toLowerCase().startsWith("de")) ? "de" : "en";
 const I18N = {
+  // Netzwerk-Filter (Verwaltung -> Netzwerk)
+  "Portgruppen, die hier zutreffen, werden komplett ausgeblendet — in der VLAN-Suche, im Netzwerk-Reiter der Cluster-Details und im Datenpaket. Die Änderung löst gleich einen neuen Datenabruf aus.": "Port groups that match here are hidden completely — in the VLAN search, in the network tab of the cluster details and in the data package. The change immediately triggers a new data collection.",
+  "Portgruppen, deren Name einen dieser Begriffe enthält. Mehrere durch Komma trennen, Groß-/Kleinschreibung egal — */? gehen als Platzhalter (*-uplink, PG-Test-?). Leer = kein Filter.": "Port groups whose name contains one of these terms. Separate several by comma, case-insensitive — */? work as wildcards (*-uplink, PG-Test-?). Empty = no filter.",
+  "Portgruppen mit diesen VLAN-IDs. Einzelne IDs und Bereiche, durch Komma getrennt — z. B. 99, 205, 3900-3999. Wirkt nur auf Portgruppen mit einer einzelnen VLAN-ID (Trunk-Bereiche blendet bereits die Uplink-Erkennung aus). Leer = kein Filter.": "Port groups with these VLAN IDs. Single IDs and ranges, separated by comma — e.g. 99, 205, 3900-3999. Applies only to port groups with a single VLAN ID (trunk ranges are already hidden by the uplink detection). Empty = no filter.",
+  "Netzwerk-Filter (Portgruppen ausblenden)": "Network filter (hide port groups)",
+  "VLAN-ID-Filter": "VLAN ID filter",
+  "✓ gespeichert": "✓ saved",
+  "Netzwerk-Filter geändert": "Network filter changed",
+  "z. B. heartbeat, *-replikation, PG-Test-*": "e.g. heartbeat, *-replication, PG-Test-*",
+  "z. B. 99, 205, 3900-3999": "e.g. 99, 205, 3900-3999",
   // Audit-Log: Standard-Aktionen (Aktion-Spalte)
   "Aria-Abruf beendet": "Fetch from Aria finished",
   "Aria-Abruf fehlgeschlagen": "Fetch from Aria failed",
@@ -6355,7 +6459,8 @@ def serve(args, password):
                    "sessions": args.sessions_file,
                    "visibility": args.visibility_file,
                    "storagecfg": args.storagecfg_file,
-                   "storagereq": args.storagereq_file}
+                   "storagereq": args.storagereq_file,
+                   "netcfg": args.netcfg_file}
     if args.storage == "sqlite":
         store = SqliteStore(args.db_file)
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
@@ -7345,8 +7450,13 @@ def serve(args, password):
     storage_lock = threading.Lock()
 
     def _clean_excl(raw):
-        # kommagetrennte Namensmuster -> saubere, kleingeschriebene Liste
-        parts = re.split(r"[,\n;]+", str(raw or ""))
+        # kommagetrennte Namensmuster -> saubere, kleingeschriebene Liste.
+        # raw kann ein String (UI-Eingabe) ODER eine Liste sein (gespeicherte
+        # Datei nach Neustart) — sonst würde str(liste) zu Müll-Mustern.
+        if isinstance(raw, (list, tuple)):
+            parts = [str(p) for p in raw]
+        else:
+            parts = re.split(r"[,\n;]+", str(raw or ""))
         return [p.strip().lower() for p in parts if p.strip()][:30]
 
     def load_storagecfg():
@@ -7361,6 +7471,36 @@ def serve(args, password):
                 "exclude_names": _clean_excl(raw.get("exclude_names"))}
 
     storage_cfg = load_storagecfg()
+
+    # ---- Netzwerk-Filter (Portgruppen nach Name/VLAN-ID ausblenden) ----
+    net_lock = threading.Lock()
+
+    def _clean_vlans(raw):
+        """Kommagetrennte VLAN-IDs/Bereiche -> saubere Token-Liste
+        (nur Ziffern bzw. "a-b", max. 50). raw: String oder Liste."""
+        if isinstance(raw, (list, tuple)):
+            parts = [str(p) for p in raw]
+        else:
+            parts = re.split(r"[,\n;]+", str(raw or ""))
+        out = []
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            if p.isdigit():
+                out.append(p)
+            elif "-" in p:
+                a, _, b = p.partition("-")
+                if a.strip().isdigit() and b.strip().isdigit():
+                    out.append(f"{int(a)}-{int(b)}")
+        return out[:50]
+
+    def load_netcfg():
+        raw = store.load("netcfg", None) or {}
+        return {"exclude_names": _clean_excl(raw.get("exclude_names")),
+                "exclude_vlans": _clean_vlans(raw.get("exclude_vlans"))}
+
+    net_cfg = load_netcfg()
     storage_reqs = store.load("storagereq", None)
     storage_reqs = storage_reqs if isinstance(storage_reqs, list) else []
 
@@ -7579,7 +7719,9 @@ def serve(args, password):
                                          args.failover_hosts,
                                          args.tanzu_mhz_per_vcpu,
                                          storage_cfg.get("min_lun_gb", 0),
-                                         storage_cfg.get("exclude_names") or [])
+                                         storage_cfg.get("exclude_names") or [],
+                                         net_cfg.get("exclude_names") or [],
+                                         net_cfg.get("exclude_vlans") or [])
             else:
                 clusters, errors = [], []
                 for i, s in enumerate(sources):
@@ -7600,7 +7742,9 @@ def serve(args, password):
                                      tanzu_mhz=args.tanzu_mhz_per_vcpu,
                                      vlan_hint=vlan_hint,
                                      min_lun_gb=storage_cfg.get("min_lun_gb", 0),
-                                     exclude_names=storage_cfg.get("exclude_names") or [])
+                                     exclude_names=storage_cfg.get("exclude_names") or [],
+                                     net_exclude_names=net_cfg.get("exclude_names") or [],
+                                     net_exclude_vlans=net_cfg.get("exclude_vlans") or [])
                         for c in cl:
                             if s["name"]:
                                 c["source"] = s["name"]
@@ -8112,6 +8256,14 @@ def serve(args, password):
                                 "max_lun_gb": storage_cfg.get("max_lun_gb", 0),
                                 "exclude_names": ", ".join(
                                     storage_cfg.get("exclude_names") or [])})
+            elif route == "/api/netcfg":
+                if not self._require("admin"):
+                    return
+                with net_lock:
+                    self._json({"exclude_names": ", ".join(
+                                    net_cfg.get("exclude_names") or []),
+                                "exclude_vlans": ", ".join(
+                                    net_cfg.get("exclude_vlans") or [])})
             elif route == "/api/config":
                 if not self._require("admin"):
                     return
@@ -8824,6 +8976,27 @@ def serve(args, password):
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"enabled": on, "min_lun_gb": mn, "max_lun_gb": mx,
                             "exclude_names": ", ".join(excl)})
+            elif self.path == "/api/netcfg":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body() or {}
+                nx = _clean_excl(body.get("exclude_names"))
+                vx = _clean_vlans(body.get("exclude_vlans"))
+                with net_lock:
+                    changed = (nx != (net_cfg.get("exclude_names") or [])
+                               or vx != (net_cfg.get("exclude_vlans") or []))
+                    net_cfg["exclude_names"] = nx
+                    net_cfg["exclude_vlans"] = vx
+                    store.save("netcfg", net_cfg)
+                audit(s["user"], "Netzwerk-Filter geändert",
+                      (f"Namensfilter: {', '.join(nx)}" if nx else "kein Namensfilter")
+                      + (f"; VLAN-IDs: {', '.join(vx)}" if vx else "; keine VLAN-IDs"))
+                # Filter wirkt in der Datensammlung -> gleich neu abrufen
+                if changed and not state["refreshing"]:
+                    threading.Thread(target=do_refresh, daemon=True).start()
+                self._json({"exclude_names": ", ".join(nx),
+                            "exclude_vlans": ", ".join(vx)})
             elif self.path.startswith("/api/storage-request/"):
                 # erledigt/offen umschalten (Admin im UI)
                 s = self._require("admin")
@@ -9320,6 +9493,9 @@ def main():
     ap.add_argument("--storagereq-file", default="kapa_storage_anfragen.json",
                     help="Datei mit den Storage-Erweiterungs-Anfragen "
                          "(fürs Storage-Team, per API abrufbar)")
+    ap.add_argument("--netcfg-file", default="kapa_netcfg.json",
+                    help="Datei: Netzwerk-Filter (Portgruppen nach Name/"
+                         "VLAN-ID ausblenden)")
     ap.add_argument("--visibility-file", default="kapa_sichtbarkeit.json",
                     help="Datei mit der Sichtbarkeits-Matrix je Rolle "
                          "(Pflege über die Verwaltung)")

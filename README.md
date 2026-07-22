@@ -136,6 +136,10 @@ mit Schaubildern** (Systemkontext, Datenflüsse, Workflow, Deployment) steht in
   Portgruppen-Namen die IP-Netze enthalten, findet man über eine Teil-Eingabe
   (z. B. `10.2.30` oder `VLAN205`) sofort, **an welchem Cluster** ein Netz hängt.
   Ergebnis als sortierbare Tabelle Portgruppe / VLAN / Cluster.
+  - **Netzwerk-Filter** (Verwaltung → Netzwerk): blendet Portgruppen nach
+    **Name** (Teiltreffer/Wildcards, wie beim Storage-Namensfilter) und/oder
+    **VLAN-ID** (einzelne IDs und Bereiche, z. B. `99, 3900-3999`) überall aus —
+    VLAN-Suche, Cluster-Detail und Datenpaket.
 - **Filterfeld** für Cluster bzw. Reservierungen (findet auch Change-Nummer,
   Anforderer, Team, Status und ID)
 - **Cluster-Selektor**: Über der Kapazitätsliste blenden sich Schnellfilter

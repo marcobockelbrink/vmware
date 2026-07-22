@@ -259,6 +259,30 @@ try:
     req("PUT", "/api/storagecfg", {"enabled": False, "min_lun_gb": 0,
                                    "exclude_names": ""})
 
+    print("== Netzwerk-Filter (Portgruppen) ==")
+    # Demo: Cluster-01 hat VLANs 100-105, Cluster-02 hat 200-205. VLAN-Bereich
+    # + Namensfilter (Namen enthalten "VLAN2xx") -> beide Cluster pg-frei.
+    req("PUT", "/api/netcfg", {"exclude_names": "vlan2",
+                               "exclude_vlans": "100-199"})
+    t0 = time.time()
+    while time.time() - t0 < 12:
+        dn = req("GET", "/api/v1/data")[1]
+        if not req("GET", "/api/status")[1].get("refreshing"):
+            break
+        time.sleep(0.5)
+    by_cl = {c["name"]: c.get("portgroups") or [] for c in dn["clusters"]}
+    check("VLAN-Bereich filtert Cluster-01-Portgruppen",
+          len(by_cl.get("Cluster-01") or []) == 0)
+    check("Namensfilter filtert Cluster-02-Portgruppen",
+          len(by_cl.get("Cluster-02") or []) == 0)
+    check("Cluster-03-Portgruppen bleiben",
+          len(by_cl.get("Cluster-03") or []) >= 1)
+    st, ncfg, _ = req("GET", "/api/netcfg")
+    check("Netzwerk-Filter persistiert",
+          ncfg.get("exclude_vlans") == "100-199"
+          and ncfg.get("exclude_names") == "vlan2")
+    req("PUT", "/api/netcfg", {"exclude_names": "", "exclude_vlans": ""})
+
     print("== AD-Gruppen-Check ==")
     # Regression: AD-Gruppen (case-sensitiv gespeichert) müssen löschbar sein
     req("POST", "/api/roles", {"user": "Kapa-Admins", "role": "admin", "kind": "group"})
