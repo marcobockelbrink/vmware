@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.24.1"
+VERSION = "2.24.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2502,7 +2502,7 @@ const tokEl = document.getElementById("tok");
 try { tokEl.value = localStorage.getItem("kapa_api_token") || ""; } catch (e) {}
 tokEl.addEventListener("input", () => { try { localStorage.setItem("kapa_api_token", tokEl.value); } catch (e) {} });
 
-function esc(s){ return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
 // Browsersprache nicht Deutsch -> englische Beschriftung. Die Endpunkt-Texte
 // kommen bereits lokalisiert aus openapi.json (Accept-Language, serverseitig).
@@ -7709,6 +7709,23 @@ def serve(args, password):
                      "genehmigt": "approved", "abgelehnt": "rejected",
                      "storniert": "cancelled"}
 
+    _CSV_NUM_RX = re.compile(r"[+-]?\d+([.,]\d+)?$")
+
+    def _csv_safe(v):
+        """CSV-/Formel-Injection abwehren: Excel & Co. führen Zellen aus, die
+        mit = + - @ (oder Tab/CR) beginnen, als Formel aus. Solche Werte mit
+        einem führenden Apostroph als Text neutralisieren. Reine Zahlen (auch
+        negativ, z. B. „-22" freie Kapazität) sind unkritisch und bleiben, damit
+        Excel weiter damit rechnen kann."""
+        sv = "" if v is None else str(v)
+        if sv[:1] in ("=", "+", "-", "@", "\t", "\r") \
+                and not _CSV_NUM_RX.match(sv):
+            return "'" + sv
+        return sv
+
+    def _wrow(w, cells):
+        w.writerow([_csv_safe(c) for c in cells])
+
     def res_csv(rows, lang="de"):
         import csv
         import io
@@ -7730,7 +7747,7 @@ def serve(args, password):
             status = res_status(r)
             if lang == "en":
                 status = CSV_STATUS_EN.get(status, status)
-            w.writerow([r.get("id", ""), r.get("name", ""), r.get("change", ""),
+            _wrow(w, [r.get("id", ""), r.get("name", ""), r.get("change", ""),
                         r.get("cluster", ""), r.get("vcpu", 0),
                         r.get("ram_gb", 0), r.get("storage_gb", 0),
                         r.get("von", ""),
@@ -7777,7 +7794,7 @@ def serve(args, password):
             rc, rr, rs = rv.get(c.get("name") or "", [0, 0.0, 0.0])
             tz_c = int(c.get("tanzuVcpu") or 0)
             tz_r = float(c.get("tanzuRamGb") or 0)
-            w.writerow([
+            _wrow(w, [
                 c.get("name", ""), c.get("source") or "",
                 c.get("hostCount", 0), c.get("vmCount", 0), c.get("cores", 0),
                 c.get("vcpuCap", 0), c.get("vcpuUsed", 0), c.get("vcpuFree", 0),
@@ -7826,7 +7843,7 @@ def serve(args, password):
                         "angefragt_von", "angefragt_am", "status", "reservierung"])
         for r in rows:
             hosts_col, wwpns_col = _req_host_cols(r)
-            w.writerow([r.get("id", ""), r.get("cluster", ""),
+            _wrow(w, [r.get("id", ""), r.get("cluster", ""),
                         hosts_col, wwpns_col, r.get("kind", ""),
                         r.get("lun_name", ""), r.get("naa", ""),
                         r.get("current_gb", ""), r.get("target_gb", ""),
@@ -9205,13 +9222,13 @@ def serve(args, password):
                                 "vcpu_belegt", "vcpu_kap"])
                     for d in sorted(sel):
                         for cl, e in sorted(sel[d].items()):
-                            w.writerow([d, cl, e.get("src", ""), e.get("n", 0),
-                                        e.get("on", 0), e.get("vcpu", 0),
-                                        e.get("ram", 0), e.get("disk", 0),
-                                        e.get("nd", 0), e.get("ramU", 0),
-                                        e.get("ramC", 0), e.get("stU", 0),
-                                        e.get("stC", 0), e.get("vcU", 0),
-                                        e.get("vcC", 0)])
+                            _wrow(w, [d, cl, e.get("src", ""), e.get("n", 0),
+                                      e.get("on", 0), e.get("vcpu", 0),
+                                      e.get("ram", 0), e.get("disk", 0),
+                                      e.get("nd", 0), e.get("ramU", 0),
+                                      e.get("ramC", 0), e.get("stU", 0),
+                                      e.get("stC", 0), e.get("vcU", 0),
+                                      e.get("vcC", 0)])
                     self._send(buf.getvalue(), "text/csv; charset=utf-8")
                 else:
                     self._json({"days": sel})
@@ -9810,7 +9827,7 @@ def serve(args, password):
                     existing = {r.get("id") for r in reservations}
                     known_cl = {c.get("name") for c in state.get("clusters") or []}
                     unknown_cl = set()
-                    for ln, row in enumerate(rows[1:], start=2):
+                    for ln, row in enumerate(rows[1:5001], start=2):
                         if not any(x.strip() for x in row):
                             continue
                         get = lambda f: (row[colmap[f]].strip()
@@ -9848,7 +9865,8 @@ def serve(args, password):
                                                     .isoformat()}
                             imported.append(entry)
                             existing.add(rid)
-                        except (ValueError, IndexError) as e:
+                        except (ValueError, IndexError, TypeError,
+                                OverflowError, KeyError) as e:
                             errors.append(f"Zeile {ln}: {e}")
                     if not imported and errors:
                         self._json({"error": "Keine Zeile importierbar – "
