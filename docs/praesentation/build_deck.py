@@ -131,8 +131,9 @@ text(s, 0.9, 4.55, 10.8, 1.0,
         "abhängigkeitsfreien Werkzeug.", 19, MUTED, False)]], line_spacing=1.15)
 rect(s, 0.92, 5.75, 6.4, 0.02, fill=LINE)
 text(s, 0.9, 5.95, 11.8, 0.8,
-     [[("Eine Python-Datei · keine Fremd-Abhängigkeiten · zweisprachig DE/EN · "
-        "läuft auf jedem RHEL-Host · über 100 Releases", 13.5, MUTED, False)]],
+     [[("Von einer KI (Claude · Anthropic) geschrieben", 13.5, ACCENT, True),
+       ("  ·  eine Python-Datei ohne Fremd-Abhängigkeiten · zweisprachig DE/EN "
+        "· läuft auf jedem RHEL-Host", 13.5, MUTED, False)]],
      line_spacing=1.15)
 footer(s, 1)
 
@@ -208,9 +209,9 @@ footer(s, 7)
 # ---------------- Folie 8: Das Projekt in Zahlen ----------------
 s = slide()
 head(s, "ENTWICKLUNG", "Das Projekt in Zahlen")
-text(s, 0.6, 1.9, 12, 0.5,
-     [[("Von der ersten Zeile bis heute — in rund zwei Wochen aktiver "
-        "Entwicklung.", 14.5, MUTED, False)]])
+text(s, 0.6, 1.9, 12.1, 0.5,
+     [[("In rund zwei Wochen entstanden — ", 14.5, MUTED, False),
+       ("vollständig mit einer KI (Claude) geschrieben.", 14.5, ACCENT, True)]])
 stats = [
     ("105", "Releases"), ("167", "Commits"),
     ("11.114", "Zeilen Code · 1 Datei"), ("0", "Fremd-Abhängigkeiten"),
@@ -242,9 +243,9 @@ cols = [
     ("Reichweite", [
         "Zweisprachig DE/EN, offline- und proxy-fähig",
         "Lesende API für Grafana, CMDB & Co."]),
-    ("Pflege & Reife", [
-        "Aktiv weiterentwickelt — über 100 Releases",
-        "Reviewer-Handbuch, Architektur-Doku, Smoke-Tests inklusive"]),
+    ("Entwicklung & Reife", [
+        "Mit einer KI (Claude · Anthropic) entwickelt — hohes Tempo, konsequente Tests",
+        "Über 100 Releases, Reviewer-Handbuch, Architektur-Doku inklusive"]),
 ]
 positions = [(0.6, 2.35), (6.9, 2.35), (0.6, 4.55), (6.9, 4.55)]
 for (title, items), (x, y) in zip(cols, positions):
