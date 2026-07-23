@@ -183,26 +183,26 @@ head(s, "MEHR FUNKTIONEN", "Und da steckt noch mehr drin")
 montage = [
     ("07_vlan.png",       "VLAN-/Netzwerk-Suche",
      "Portgruppen & VLANs clusterübergreifend finden"),
-    ("08_verwaltung.png", "Rollen, AD-Gruppen & Sichtbarkeit",
+    ("08_verwaltung.png", "Rollen, AD & Sichtbarkeit",
      "feingranular steuerbar, quellenbezogen filterbar"),
     ("09_apidocs.png",    "Eingebaute REST-API",
      "für Grafana, CMDB & Automatisierung"),
 ]
 cx = 0.6
 for img, cap_t, cap_s in montage:
-    rect(s, cx, 1.75, 3.8, 3.45, fill=CARD, line=LINE, line_w=1.0,
+    rect(s, cx, 1.7, 3.8, 3.4, fill=CARD, line=LINE, line_w=1.0,
          shape=MSO_SHAPE.ROUNDED_RECTANGLE)
-    picture(s, os.path.join(SHOTS, img), cx + 0.12, 1.87, 3.56, 3.21)
-    text(s, cx + 0.05, 5.34, 3.75, 0.4, [[(cap_t, 14, WHITE, True)]])
-    text(s, cx + 0.05, 5.72, 3.75, 0.7, [[(cap_s, 11.5, MUTED, False)]],
-         line_spacing=1.02)
+    picture(s, os.path.join(SHOTS, img), cx + 0.12, 1.82, 3.56, 3.16)
+    # Titel + Untertitel als EIN fließender Block (kein Überlappen bei Umbruch)
+    text(s, cx + 0.05, 5.26, 3.72, 1.05,
+         [[(cap_t, 14, WHITE, True)], [(cap_s, 11.5, MUTED, False)]],
+         space_after=3, line_spacing=1.02)
     cx += 4.16
-text(s, 0.6, 6.72, 12.1, 0.5,
-     [[("Außerdem: ", 12.5, ACCENT, True),
-       ("Hell-/Dunkel-Modus · SFTP-Backup · Mail-Benachrichtigungen & "
-        "Erinnerungen · CSV-Import/Export · Auto-Freigabe · Reviewer-Handbuch · "
-        "Ankündigungen · konfigurierbare Zeitzone · seitenweises Blättern",
-        12.5, MUTED, False)]], line_spacing=1.05)
+text(s, 0.6, 6.6, 12.15, 0.5,
+     [[("Außerdem: ", 12, ACCENT, True),
+       ("Hell-/Dunkel-Modus · SFTP-Backup · Mail & Erinnerungen · "
+        "CSV-Export · Auto-Freigabe · Reviewer-Handbuch · Zeitzone · Blättern",
+        12, MUTED, False)]], line_spacing=1.05)
 footer(s, 7)
 
 # ---------------- Folie 8: Das Projekt in Zahlen ----------------
