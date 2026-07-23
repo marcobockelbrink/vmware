@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.27.1"
+VERSION = "2.27.2"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -5374,16 +5374,21 @@ function importOffline(ev) {
   const st = document.getElementById("impStatus");
   f.text().then(t => {
     const d = JSON.parse(t);
-    const clusters = Array.isArray(d) ? d : (d && d.clusters);
-    if (!Array.isArray(clusters)) { notify("Ungültige Datei: es fehlt die clusters-Liste."); return; }
+    let clusters = Array.isArray(d) ? d : (d && d.clusters);
+    // PowerShells ConvertTo-Json macht aus einem einzelnen Cluster ein Objekt.
+    if (clusters && !Array.isArray(clusters)) clusters = [clusters];
+    if (!Array.isArray(clusters) || !clusters.length) { notify("Ungültige Datei: es fehlt die clusters-Liste."); return; }
     if (st) st.textContent = "importiere …";
     fetch("api/import", { method: "POST", headers: {"Content-Type":"application/json"},
         body: JSON.stringify({ source: src, clusters: clusters }) })
       .then(r => r.json().then(j => ({ ok: r.ok, j: j })))
       .then(x => {
         if (!x.ok) { if (st) st.textContent = ""; return notify(x.j.error || "Import fehlgeschlagen."); }
-        if (st) { st.textContent = "✓ importiert – Daten werden neu berechnet";
+        const skip = (x.j.skipped || []);
+        if (st) { st.textContent = "✓ importiert (" + x.j.clusters + " Cluster) – Daten werden neu berechnet";
                   setTimeout(() => { st.textContent = ""; }, 5000); }
+        if (skip.length) notify("Hinweis: " + skip.length + " Cluster ohne Hosts wurden übersprungen: "
+                                + skip.join(", ") + ".\n(Ein Cluster ohne ESXi-Hosts hat keine planbare Kapazität.)");
         loadImports(); pollStatus();
       })
       .catch(() => { if (st) st.textContent = ""; notify("Import fehlgeschlagen (Netzwerk/Server)."); });
@@ -8315,33 +8320,48 @@ def serve(args, password):
         except (TypeError, ValueError):
             return lo
 
+    def _as_list(x):
+        """PowerShells ConvertTo-Json entpackt 1-elementige Arrays zu einem
+        einzelnen Objekt (aus [ {...} ] wird { ... }). Wir nehmen ein einzelnes
+        Objekt daher genauso an wie eine Liste – sonst schlüge der Import bei
+        Clustern mit genau einem Host/VM/Datastore/Portgruppe fehl."""
+        if isinstance(x, dict):
+            return [x]
+        if isinstance(x, (list, tuple)):
+            return list(x)
+        return []
+
     def clean_import_clusters(raw):
-        """Import-JSON prüfen/normalisieren. Gibt (clusters, fehler) zurück."""
-        if not isinstance(raw, list) or not raw:
-            return None, "clusters: Liste mit mindestens einem Cluster erwartet"
+        """Import-JSON prüfen/normalisieren. Gibt (clusters, fehler, skipped)
+        zurück. Einzelne Cluster ohne Hosts werden übersprungen (nicht der ganze
+        Import abgebrochen); toleriert PowerShells 1-Element-Array-Entpackung."""
+        raw = _as_list(raw)
+        if not raw:
+            return None, "clusters: Liste mit mindestens einem Cluster erwartet", []
         oneline = lambda v, n: " ".join(str(v or "").split())[:n]
-        out = []
+        out, skipped = [], []
         for c in raw[:100]:
             if not isinstance(c, dict):
                 continue
             name = oneline(c.get("name"), 120)
             if not name:
-                return None, "Cluster ohne Namen im Import"
+                continue                       # namenlose Einträge still überspringen
             hosts = [{"name": oneline(h.get("name"), 200),
                       "cores": _num(h.get("cores"), int),
                       "ram_gb": round(_num(h.get("ram_gb")), 1)}
-                     for h in (c.get("hosts") or [])[:500]
+                     for h in _as_list(c.get("hosts"))[:500]
                      if isinstance(h, dict)]
             if not hosts:
-                return None, f"Cluster „{name}“: keine Hosts im Import"
+                skipped.append(name)           # ohne Hosts keine Kapazität
+                continue
             vms = [{"name": oneline(v.get("name"), 200),
                     "vcpu": _num(v.get("vcpu"), int),
                     "ram_gb": round(_num(v.get("ram_gb")), 1),
                     "on": bool(v.get("on"))}
-                   for v in (c.get("vms") or [])[:20000]
+                   for v in _as_list(c.get("vms"))[:20000]
                    if isinstance(v, dict)]
             luns = []
-            for d in (c.get("datastores") or c.get("luns") or [])[:500]:
+            for d in _as_list(c.get("datastores") or c.get("luns"))[:500]:
                 if not isinstance(d, dict):
                     continue
                 nm = oneline(d.get("name"), 200)
@@ -8357,13 +8377,16 @@ def serve(args, password):
                              "used_gb": round(used * f, 1)})
             pgs = [{"name": oneline(p.get("name"), 200),
                     "vlan": oneline(p.get("vlan"), 20)}
-                   for p in (c.get("portgroups") or [])[:2000]
+                   for p in _as_list(c.get("portgroups"))[:2000]
                    if isinstance(p, dict) and p.get("name")]
             out.append({"name": name, "hosts": hosts, "vms": vms,
                         "luns": luns, "portgroups": pgs})
         if not out:
-            return None, "kein verwertbarer Cluster im Import"
-        return out, ""
+            msg = ("kein Cluster mit Hosts im Import (ohne Hosts: %s)"
+                   % ", ".join(skipped[:10])) if skipped \
+                  else "kein verwertbarer Cluster im Import"
+            return None, msg, skipped
+        return out, "", skipped
 
     def import_clusters_summary():
         """Alle Offline-Quellen als fertige Cluster-Dicts (wie von collect())."""
@@ -9966,7 +9989,7 @@ def serve(args, password):
                 raw = body.get("clusters")
                 if raw is None and isinstance(body.get("data"), dict):
                     raw = body["data"].get("clusters")
-                cleaned, err = clean_import_clusters(raw)
+                cleaned, err, skipped = clean_import_clusters(raw)
                 if err:
                     self._json({"error": err}, 400)
                     return
@@ -9981,11 +10004,13 @@ def serve(args, password):
                       f"{src}: {len(cleaned)} Cluster, "
                       f"{sum(len(c['hosts']) for c in cleaned)} Hosts, "
                       f"{sum(len(c['vms']) for c in cleaned)} VMs"
+                      + (f" · übersprungen (ohne Hosts): {', '.join(skipped)}"
+                         if skipped else "")
                       + (" – ersetzt" if replaced else ""))
                 if not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
                 self._json({"ok": True, "source": src,
-                            "clusters": len(cleaned)}, 201)
+                            "clusters": len(cleaned), "skipped": skipped}, 201)
             elif self.path == "/api/import/reservations":
                 # Kapa-Anfragen aus einer Excel-CSV übernehmen (XLS-Ablösung).
                 # Alle Zeilen kommen als GENEHMIGT an (Freigebender „Import"),

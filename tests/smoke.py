@@ -321,6 +321,34 @@ try:
           st == 400 and "Zeitzone" in (tzbad.get("error") or ""))
     req("PUT", "/api/refreshcfg", {"vms": 0, "network": 0, "storage": 0, "tz": ""})
 
+    print("== Offline-Import (PowerCLI-JSON, robust gegen ConvertTo-Json) ==")
+    # 1-Host-/1-Element-Cluster: PowerShell entpackt zu Objekten statt Listen.
+    st, imp1, _ = req("POST", "/api/import", {"source": "Smoke-Solo", "clusters": [
+        {"name": "CL-SOLO", "hosts": {"name": "esxX", "cores": 48, "ram_gb": 512},
+         "vms": {"name": "v9", "vcpu": 4, "ram_gb": 16, "on": True},
+         "datastores": {"name": "ds1", "type": "VMFS", "cap_gb": 1000, "used_gb": 400},
+         "portgroups": {"name": "PG1", "vlan": "100"}}]})
+    check("Import: 1-Host als Objekt (Unwrap) importiert statt Crash",
+          st == 201 and imp1.get("clusters") == 1 and not imp1.get("skipped"))
+    # Gemischt: guter Cluster importiert, Cluster ohne Hosts wird übersprungen.
+    st, imp2, _ = req("POST", "/api/import", {"source": "Smoke-Mix", "clusters": [
+        {"name": "CL-GOOD", "hosts": [{"name": "e1", "cores": 32, "ram_gb": 256}]},
+        {"name": "CL-EMPTY", "hosts": []}]})
+    check("Import: leerer Cluster übersprungen, guter importiert",
+          st == 201 and imp2.get("clusters") == 1 and imp2.get("skipped") == ["CL-EMPTY"])
+    # Einzelnes Cluster-Objekt statt Liste (Top-Level-Unwrap) wird toleriert.
+    st, imp3, _ = req("POST", "/api/import", {"source": "Smoke-One", "clusters":
+        {"name": "CL-ONE", "hosts": [{"name": "e1", "cores": 16, "ram_gb": 128}]}})
+    check("Import: einzelnes Cluster-Objekt (Top-Level-Unwrap) toleriert",
+          st == 201 and imp3.get("clusters") == 1)
+    # Nur leere Cluster -> klare Fehlermeldung mit Namen.
+    st, imp4, _ = req("POST", "/api/import",
+                      {"source": "Smoke-Leer", "clusters": [{"name": "CL-X", "hosts": []}]})
+    check("Import: nur hostlose Cluster -> 400 mit Cluster-Namen",
+          st == 400 and "CL-X" in (imp4.get("error") or ""))
+    for s in ("Smoke-Solo", "Smoke-Mix", "Smoke-One"):
+        req("DELETE", "/api/import/" + s)
+
     print("== Statistik-Historie ==")
     st, hist, _ = req("GET", "/api/history?days=730")
     hdays = sorted((hist or {}).get("days") or {})
