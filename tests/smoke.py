@@ -597,6 +597,15 @@ try:
         check("Session überlebt Neustart (Cookie gilt weiter)",
               "Kapazitätsübersicht pro Cluster" in page_ad
               and "Anmeldung mit Active-Directory-Konto" not in page_ad)
+        # Generischer Seiten-Blätterer: EIN Mechanismus für alle großen Listen.
+        pagers = ['id="pager_ktable"', 'id="pager_vtable"', 'id="pager_stortable"',
+                  'id="pager_rtable"', 'id="pager_atable"', 'id="pager_artable"',
+                  'id="pager_ltable"']
+        check("Blätter-Leiste an allen sieben Listen vorhanden",
+              all(p in page_ad for p in pagers))
+        check("Seitengrößen 100/200/300 im Client konfiguriert",
+              "const PAGE_SIZES = [100, 200, 300]" in page_ad
+              and "function paginate(" in page_ad)
         r = urllib.request.Request(B2 + "/",
             headers={"Cookie": "kapa_session=falsches-token"})
         with urllib.request.urlopen(r, timeout=10) as resp:

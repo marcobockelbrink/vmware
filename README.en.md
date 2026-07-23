@@ -38,6 +38,7 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   automatically count against free capacity (like approved reservations);
   per-cluster drill-down, `tanzu-mhz-per-vcpu` for the MHz→vCPU conversion
 - **Cluster selector**: vROps source filter + up to 3 cascading tag filters; **filter/search fields**, **sortable tables**
+- **Pagination** on all large lists (capacity, VLAN search, storage, reservations, approvals, archive, log): one shared bar with **100 / 200 / 300 entries per page** — a single mechanism for every table
 - **Show/hide columns** in all data tables ("⚙ Columns", stored per user)
 - **Light/dark mode**: ☀️/🌙 button in the header, stored per user; otherwise
   follows the system setting (`prefers-color-scheme`); `?theme=light|dark`

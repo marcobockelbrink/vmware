@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.25.0"
+VERSION = "2.26.0"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2963,6 +2963,8 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   .netbox { margin-top:12px; }
   .netbox:first-child { margin-top:0; }
   .netbox h3 { font-size:13px; color:var(--text); margin-bottom:6px; }
+  .pgbar { display:none; align-items:center; gap:10px; margin-top:10px; font-size:13px; flex-wrap:wrap; }
+  .pgbar select { width:auto; padding:4px 6px; }
   .vlanbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
   .vlanbar input { flex:1; max-width:520px; background:var(--bg); border:1px solid var(--line);
                    color:var(--text); border-radius:8px; padding:9px 12px; font-size:14px; }
@@ -3074,7 +3076,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   </div>
 </div>
 <div class="toolbar">
-  <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="if(VIEW==='log')LOG_PAGE=0;render()">
+  <input class="filterbox" id="filter" type="search" placeholder="Cluster filtern …" oninput="pageReset({kapa:'ktable',app:'atable',log:'ltable'}[VIEW]);render()">
   <button class="btn primary" id="newReqBtn" onclick="openModal()">+ Neue Kapazitätsanfrage</button>
   <button class="btn" id="refreshBtn" onclick="refreshData()">⟳ Jetzt aktualisieren</button>
   <details class="colmenu" id="refreshMenu" style="display:none"><summary>▾</summary>
@@ -3169,6 +3171,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="ktbody"></tbody>
 </table>
 </div>
+<div class="pgbar" id="pager_ktable"></div>
 </div>
 <div id="vlanView" style="display:none">
 <div class="hint" style="color:var(--muted);margin:4px 0 10px">
@@ -3178,7 +3181,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   (z. B. <code>10.2.30</code> oder <code>VLAN205</code>).</div>
 <div class="vlanbar">
   <input id="vlanQ" placeholder="IP-Adresse, Netz oder Portgruppen-Name suchen …"
-         oninput="renderVlan()" autocomplete="off">
+         oninput="pageReset('vtable');renderVlan()" autocomplete="off">
   <span id="vlanCount" style="color:var(--muted);font-size:13px"></span>
   <span id="colctl_vtable" style="margin-left:auto"></span>
 </div>
@@ -3188,12 +3191,13 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="vtbody"></tbody>
 </table>
 </div>
+<div class="pgbar" id="pager_vtable"></div>
 </div>
 <div id="resView" style="display:none">
 <div class="vlanbar" style="margin-bottom:12px">
   <input id="resSearch" class="filterbox" style="max-width:520px" type="search"
          placeholder="Reservierungen durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …"
-         oninput="renderResTable()" autocomplete="off">
+         oninput="pageReset('rtable');renderResTable()" autocomplete="off">
   <span id="resCount" style="color:var(--muted);font-size:13px"></span>
   <span id="colctl_rtable" style="margin-left:auto"></span>
 </div>
@@ -3204,6 +3208,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="rtbody"></tbody>
 </table>
 </div>
+<div class="pgbar" id="pager_rtable"></div>
 </div>
 <div id="appView" style="display:none">
 <div style="display:flex;align-items:center;margin-bottom:8px;font-size:13px">
@@ -3221,6 +3226,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="atbody"></tbody>
 </table>
 </div>
+<div class="pgbar" id="pager_atable"></div>
 </div>
 <div id="archView" style="display:none">
 <div class="hint" style="color:var(--muted);margin:4px 0 10px">
@@ -3230,7 +3236,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 <div class="vlanbar" style="margin-bottom:12px">
   <input id="archSearch" class="filterbox" style="max-width:520px" type="search"
          placeholder="Archiv durchsuchen – Name, Cluster, Change, Anforderer, Team, ID, Status …"
-         oninput="renderArchiveTable()" autocomplete="off">
+         oninput="pageReset('artable');renderArchiveTable()" autocomplete="off">
   <span id="archCount" style="color:var(--muted);font-size:13px"></span>
   <span id="colctl_artable" style="margin-left:auto"></span>
 </div>
@@ -3242,6 +3248,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="arbody"></tbody>
 </table>
 </div>
+<div class="pgbar" id="pager_artable"></div>
 </div>
 <div id="statView" style="display:none">
 <div class="hint" style="color:var(--muted);margin:4px 0 10px">
@@ -3269,7 +3276,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   sind hervorgehoben; das Storage-Team ruft sie per API ab
   (<code>/api/v1/storage-requests</code>, auch als CSV inkl. NAA).</div>
 <div class="toolbar" style="margin-bottom:10px">
-  <input class="filterbox" id="storFilter" type="search" placeholder="Storage filtern – Cluster, LUN, NAA, Typ …" oninput="renderStorage()">
+  <input class="filterbox" id="storFilter" type="search" placeholder="Storage filtern – Cluster, LUN, NAA, Typ …" oninput="pageReset('stortable');renderStorage()">
   <a class="btn" id="storCsvBtn" href="api/v1/storage-requests?format=csv&status=alle" download="storage-anfragen.csv" title="Storage-Anfragen als CSV (inkl. NAA)">Anfragen als CSV</a>
   <span id="storCount" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
   <span id="colctl_stortable"></span>
@@ -3283,6 +3290,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="storbody"></tbody>
 </table>
 </div>
+<div class="pgbar" id="pager_stortable"></div>
 </div>
 
 <div id="admView" style="display:none">
@@ -3706,11 +3714,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tbody id="ltbody"></tbody>
 </table>
 </div>
-<div id="logPager" style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:13px">
-  <button class="btn" id="logPrev" onclick="logPage(-1)">← Neuer</button>
-  <span id="logPageInfo" style="color:var(--muted)"></span>
-  <button class="btn" id="logNext" onclick="logPage(1)">Älter →</button>
-</div>
+<div class="pgbar" id="pager_ltable"></div>
 </div>
 <div class="hovercard" id="hovercard"></div>
 <div class="foot">VMware Kapazitätsplanung · Version __VERSION____CONTACT_FOOT__</div>
@@ -4708,15 +4712,58 @@ function loadLog() {
 // Sprache: DE tt.mm.jjjj, EN mm/dd/yyyy). showPicker gibt es in modernen
 // Browsern; sonst bleibt das native Kalender-Icon.
 function openPicker(el) { try { if (el.showPicker) el.showPicker(); } catch (e) {} }
-const LOG_PER_PAGE = 100;
-let LOG_PAGE = 0;
+// ---- Generischer Seiten-Blätterer: EIN Mechanismus für alle großen Listen ----
+// paginate(id, liste) liefert den Ausschnitt der aktuellen Seite und
+// aktualisiert die Blätter-Leiste #pager_<id> (Zurück/Weiter + „pro Seite").
+// Angebunden an: Kapazität, VLAN, Storage, Reservierungen, Genehmigungen,
+// Archiv und Log – überall derselbe Code.
+const PAGE_SIZES = [100, 200, 300];
+const PAGE_STATE = {};            // tableId -> { page, size }
+function pageState(id) {
+  return PAGE_STATE[id] || (PAGE_STATE[id] = { page: 0, size: PAGE_SIZES[0] });
+}
+function pageReset(id) { if (id) pageState(id).page = 0; }   // z. B. nach neuer Suche
+function pageGo(id, dir) { pageState(id).page += dir; (PAGE_RENDER[id] || function(){})(); }
+function pageSize(id, n) {
+  const st = pageState(id);
+  st.size = parseInt(n) || PAGE_SIZES[0]; st.page = 0;
+  (PAGE_RENDER[id] || function(){})();
+}
+function paginate(id, list) {
+  const st = pageState(id);
+  const pages = Math.max(1, Math.ceil(list.length / st.size));
+  if (st.page > pages - 1) st.page = pages - 1;   // nach Filterwechsel in Reichweite halten
+  if (st.page < 0) st.page = 0;
+  const start = st.page * st.size;
+  const slice = list.slice(start, start + st.size);
+  renderPager(id, list.length, start, slice.length, pages, st);
+  return slice;
+}
+function renderPager(id, total, start, shown, pages, st) {
+  const bar = document.getElementById("pager_" + id);
+  if (!bar) return;
+  // Leiste erst zeigen, sobald mehr als die kleinste Seitengröße zusammenkommt
+  if (total <= PAGE_SIZES[0]) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+  bar.style.display = "flex";
+  const opts = PAGE_SIZES.map(n => `<option value="${n}"${n===st.size?" selected":""}>${n}</option>`).join("");
+  bar.innerHTML =
+    `<button class="btn" ${st.page<=0?"disabled":""} onclick="pageGo('${id}',-1)">← Zurück</button>
+     <span style="color:var(--muted)">Einträge ${start+1}–${start+shown} · Seite ${st.page+1} von ${pages}</span>
+     <button class="btn" ${st.page>=pages-1?"disabled":""} onclick="pageGo('${id}',1)">Weiter →</button>
+     <label style="color:var(--muted);margin-left:auto">Pro Seite <select class="filterbox" onchange="pageSize('${id}',this.value)">${opts}</select></label>`;
+}
+// Zuordnung Tabelle -> Render-Funktion (Funktionsdeklarationen sind gehoistet).
+const PAGE_RENDER = {
+  ktable: render, vtable: renderVlan, stortable: renderStorage,
+  rtable: renderResTable, atable: renderAppTable, artable: renderArchiveTable,
+  ltable: renderLogTable,
+};
 function logClearDates() {
   document.getElementById("logFrom").value = "";
   document.getElementById("logTo").value = "";
-  LOG_PAGE = 0; renderLogTable();
+  pageReset("ltable"); renderLogTable();
 }
-function logDatePage() { LOG_PAGE = 0; renderLogTable(); }   // Filter ändern -> Seite 1
-function logPage(dir) { LOG_PAGE += dir; renderLogTable(); }
+function logDatePage() { pageReset("ltable"); renderLogTable(); }   // Filter ändern -> Seite 1
 function renderLogTable() {
   const q = (document.getElementById("filter").value || "").trim().toLowerCase();
   const from = (document.getElementById("logFrom") || {}).value || "";
@@ -4730,12 +4777,8 @@ function renderLogTable() {
     if (to && day > to) return false;
     return true;
   });
-  // Paginierung: 100 je Seite, LOGS ist neueste-zuerst
-  const pages = Math.max(1, Math.ceil(list.length / LOG_PER_PAGE));
-  if (LOG_PAGE < 0) LOG_PAGE = 0;
-  if (LOG_PAGE > pages - 1) LOG_PAGE = pages - 1;
-  const start = LOG_PAGE * LOG_PER_PAGE;
-  const slice = list.slice(start, start + LOG_PER_PAGE);
+  // Paginierung über den generischen Blätterer (LOGS ist neueste-zuerst)
+  const slice = paginate("ltable", list);
   document.getElementById("ltbody").innerHTML = slice.map(e =>
     `<tr><td style="white-space:nowrap">${esc((e.ts || "").replace("T", " "))}</td>
      <td>${esc(e.user || "–")}</td><td>${esc(e.action || "")}</td>
@@ -4744,12 +4787,6 @@ function renderLogTable() {
   const info = document.getElementById("logInfo");
   if (info) info.textContent = list.length + (list.length === 1 ? " Eintrag" : " Einträge")
     + (list.length !== LOGS.length ? " (gefiltert von " + LOGS.length + ")" : "");
-  const pi = document.getElementById("logPageInfo");
-  if (pi) pi.textContent = list.length ? ("Einträge " + (start + 1) + "–" + (start + slice.length)
-    + " · Seite " + (LOG_PAGE + 1) + " von " + pages) : "";
-  document.getElementById("logPrev").disabled = LOG_PAGE <= 0;
-  document.getElementById("logNext").disabled = LOG_PAGE >= pages - 1;
-  document.getElementById("logPager").style.display = list.length > LOG_PER_PAGE ? "flex" : "none";
   reSort("ltable"); renderColMenu("ltable"); applyCols("ltable");
 }
 
@@ -5667,7 +5704,7 @@ function renderResTable() {
   if (cnt) cnt.textContent = q.trim() ? list.length + " von " + own.length + " Anfragen" : own.length + " Anfragen";
   const showDec = VIS.decided_by;
   const nCols = showDec ? 15 : 14;
-  const rows = list.map(r =>
+  const rows = paginate("rtable", list).map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
      <td>${esc(r.name)}</td>${clusterTd(r.cluster)}<td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
@@ -5690,7 +5727,7 @@ function renderArchiveTable() {
   const list = filterRes(arch, q);
   const cnt = document.getElementById("archCount");
   if (cnt) cnt.textContent = q.trim() ? list.length + " von " + arch.length + " Einträgen" : arch.length + " Einträge";
-  const rows = list.map(r => {
+  const rows = paginate("artable", list).map(r => {
     const done = r.cancelled ? r.cancelled_on : r.rejected_on;
     const by = r.cancelled ? r.cancelled_by : r.rejected_by;
     return `<tr><td class="rid">${esc(r.id || "–")}</td>
@@ -5728,7 +5765,7 @@ function renderAppTable() {
            title="${ok ? "Antrag passt" : "Antrag überschreitet die freie Kapazität"}">${fmt(v)}${ok ? "" : " ⚠"}</td>`;
     return cell(f.cpu, cpuOk) + cell(f.ram, ramOk);
   };
-  const rows = list.map(r =>
+  const rows = paginate("atable", list).map(r =>
     `<tr><td class="rid" title="Eindeutige ID der Anfrage">${esc(r.id || "–")}</td>
      <td>${esc(r.name)}</td>${clusterTd(r.cluster)}<td>${esc(r.change || "–")}</td>
      <td class="num">${fmt(r.vcpu || 0)}</td><td class="num">${fmt(r.ram_gb || 0)}</td><td class="num">${fmt(r.storage_gb || 0)}</td>
@@ -5800,7 +5837,7 @@ function renderStorage() {
   openReqs.forEach(r => { if (r.kind === "expand") pend[r.cluster + "|" + r.lun_name] = r.target_gb; });
   const luns = allLuns().filter(l => !q ||
     (l.cluster + " " + l.name + " " + l.naa + " " + l.type).toLowerCase().includes(q));
-  document.getElementById("storbody").innerHTML = luns.map(l => {
+  document.getElementById("storbody").innerHTML = paginate("stortable", luns).map(l => {
     const tgt = pend[l.cluster + "|" + l.name];
     const free = Math.round((l.cap - l.used) * 10) / 10;
     return `<tr${tgt?' style="background:rgba(245,158,11,.10)"':''}>
@@ -5900,7 +5937,7 @@ function renderVlan() {
   const all = vlanIndex();
   const hits = q ? all.filter(r =>
     r.pg.toLowerCase().includes(q) || String(r.vlan).toLowerCase().includes(q)) : all;
-  document.getElementById("vtbody").innerHTML = hits.map(r =>
+  document.getElementById("vtbody").innerHTML = paginate("vtable", hits).map(r =>
     `<tr><td>${esc(r.pg)}</td><td class="num">${esc(r.vlan || "–")}</td>
      <td class="cl" title="Cluster-Details anzeigen" onclick="toggleCard(${r.cidx}, this)">${esc(r.cluster)}${srcBadge(clusterSource(r.cluster))}</td></tr>`).join("")
     || `<tr><td colspan="3" style="color:var(--muted)">${all.length
@@ -5948,7 +5985,7 @@ function render() {
   TOTAL.ramFree = Math.round((TOTAL.ramCap - TOTAL.ramUsed)*10)/10;
   TOTAL.storageFree = Math.round((TOTAL.storageCap - TOTAL.storageUsed)*10)/10;
   document.getElementById("ktbody").innerHTML =
-    (idxs.length ? idxs.map(i => row(CLUSTERS[i], i, false)).join("")
+    (idxs.length ? paginate("ktable", idxs).map(i => row(CLUSTERS[i], i, false)).join("")
                  : '<tr><td colspan="10" style="color:var(--muted)">Kein Cluster entspricht dem Filter.</td></tr>');
   reSort("ktable"); renderColMenu("ktable"); applyCols("ktable");
   if (hoverIdx !== null && hc.style.display === "block")
@@ -6550,6 +6587,7 @@ const I18N = {
 "letzter Kommentar": "last comment", "ausführende Person": "acting person",
 "Zeitpunkt der Mail": "time of the email",
 "aktuell zuständiges Team (bei „Team ist dran“)": "team currently up (for \"team's turn\")",
+"← Zurück": "← Back", "Weiter →": "Next →", "Pro Seite": "Per page",
 "vROps-Quelle": "vROps source", "vROps-Quellen": "vROps sources",
 "nichts angehakt = alle Quellen": "nothing ticked = all sources",
 "alle Quellen": "all sources", "vCPU-Anzahl": "vCPU count",
@@ -6809,7 +6847,8 @@ const I18N_SUB = [
   [/Quelle: /g, "Source: "], [/ nutzbare Cores/g, " usable cores"],
   [/\(davon (\d+) aus\)/g, "($1 powered off)"], [/(\d+) genehmigt/g, "$1 approved"],
   [/(\d+) beantragt/g, "$1 requested"], [/(\d+) abgelehnt/g, "$1 rejected"],
-  [/größter Host als Reserve/g, "largest host held as spare"]
+  [/größter Host als Reserve/g, "largest host held as spare"],
+  [/Einträge (\d+)–(\d+)/g, "Entries $1–$2"], [/Seite (\d+) von (\d+)/g, "page $1 of $2"]
 ];
 // Teil-Ersetzungen für Status-Tooltips ("genehmigt von X am Y · Kommentar: Z")
 const I18N_TIP = [
