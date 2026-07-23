@@ -306,7 +306,20 @@ try:
     dts = req("GET", "/api/v1/data")[1]["clusters"][0]
     check("Daten nach Teil-Refresh vollständig",
           dts["vmCount"] > 0 and dts["datastores"] and dts["portgroups"])
-    req("PUT", "/api/refreshcfg", {"vms": 0, "network": 0, "storage": 0})
+    # Anzeige-Zeitzone (frei konfigurierbar auf derselben Seite)
+    st, tzr, _ = req("PUT", "/api/refreshcfg",
+                     {"vms": 0, "network": 0, "storage": 0, "tz": "America/Los_Angeles"})
+    hh = int((tzr.get("now") or "00.00.0000 99:99")[-5:-3])
+    check("Zeitzone gesetzt + Server-Zeit verschoben (LA ≠ UTC/MEZ)",
+          st == 200 and tzr.get("tz") == "America/Los_Angeles"
+          and 0 <= hh <= 23)
+    check("Zeitzone persistiert (GET)",
+          req("GET", "/api/refreshcfg")[1].get("tz") == "America/Los_Angeles")
+    st, tzbad, _ = req("PUT", "/api/refreshcfg",
+                       {"vms": 0, "network": 0, "storage": 0, "tz": "Quatsch/Unfug"})
+    check("Unbekannte Zeitzone -> 400 mit Hinweis",
+          st == 400 and "Zeitzone" in (tzbad.get("error") or ""))
+    req("PUT", "/api/refreshcfg", {"vms": 0, "network": 0, "storage": 0, "tz": ""})
 
     print("== Statistik-Historie ==")
     st, hist, _ = req("GET", "/api/history?days=730")

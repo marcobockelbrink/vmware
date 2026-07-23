@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.26. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.27. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -233,6 +233,11 @@ hash). Cross-cutting engines live at the end of the script:
 - **Statistics**: trend charts as **self-drawn SVGs** (no CDN) from the
   daily history — avg RAM/vCPU/disk per VM, VM count, utilizations, size-class
   comparison; visibility via the matrix feature "statistik".
+- **Display time zone**: all time output uses `datetime.now()`/
+  `fromtimestamp()`, i.e. the process time zone. Configurable in the admin UI
+  ("data refresh") — a single `time.tzset()` with the chosen IANA zone applies
+  process-wide to **all** output (last update, log, sync, mails); the scheduler
+  counts in `time.time()` seconds and is unaffected.
 
 ## Data storage
 

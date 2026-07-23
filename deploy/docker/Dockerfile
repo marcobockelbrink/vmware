@@ -13,7 +13,12 @@ LABEL org.opencontainers.image.title="VMware Kapazitätsplanung" \
       org.opencontainers.image.source="https://github.com/marcobockelbrink/vmware" \
       org.opencontainers.image.description="Aria Operations Kapazitäts-Dashboard (stdlib-only)"
 
-RUN microdnf install -y python3 shadow-utils \
+# tzdata bringt die Zonendateien mit, damit die in der Verwaltung einstellbare
+# Anzeige-Zeitzone (z. B. Europe/Berlin) im Container aufgelöst werden kann;
+# UBI-minimal enthält sie sonst nicht.
+# tzdata ships the zone files so the display time zone configurable in the admin
+# UI (e.g. Europe/Berlin) resolves inside the container; UBI-minimal lacks it.
+RUN microdnf install -y python3 shadow-utils tzdata \
     && microdnf clean all \
     && useradd -r -u 1001 -d /opt/kapa -s /sbin/nologin kapa
 

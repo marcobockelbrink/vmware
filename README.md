@@ -138,6 +138,11 @@ Cluster und Kommentare bleiben wie erfasst).
   übersprungene Bereiche übernehmen den Stand des letzten Laufs. Der ⟳-Knopf
   bietet Admins zusätzlich **„Alles / nur Kapazität / nur Netzwerk / nur
   Storage" sofort aktualisieren** (Stand je Bereich sichtbar)
+- **Anzeige-Zeitzone frei einstellbar** (gleiche Seite): alle angezeigten Zeiten
+  (Stand, Log, Abgleich-Uhrzeiten, Mail-Zeitstempel) erscheinen in der gewählten
+  IANA-Zone (z. B. `Europe/Berlin`, inkl. automatischer Sommer-/Winterzeit);
+  leer = Server-Zeitzone. Der Abruf-Takt selbst rechnet in Sekunden und bleibt
+  unberührt
 - **SFTP-Backup** mit Rotation, **Audit-Log** (JSONL, rotierend), **`/healthz`**
   fürs Monitoring (ohne Anmeldung: Status, Datenalter, Cluster-Anzahl)
 - **Eine INI** für alle nicht-geheimen Einstellungen, Geheimnisse als `.pass`-Dateien; optionaler **Aria-Proxy**

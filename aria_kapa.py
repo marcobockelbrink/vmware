@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.26.1"
+VERSION = "2.27.0"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3683,9 +3683,25 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <tr><td>Storage (Datastores)</td>
       <td class="num"><input type="number" id="rcStorage" min="0" max="10080" class="aanum" style="width:90px"> min</td></tr>
 </table>
-<button class="btn approve" onclick="saveRefreshCfg()">✓ Intervalle speichern</button>
+<div class="sechead" style="margin-top:6px">Zeitzone der Anzeige</div>
+<div class="hint" style="color:var(--muted);margin-bottom:8px">
+  Alle <b>angezeigten</b> Zeiten (Stand, Log, die Abgleich-Uhrzeiten im
+  ⟳-Menü, Mail-Zeitstempel) erscheinen in dieser Zeitzone. Der Abruf-Takt
+  selbst ist davon unberührt (er rechnet in Sekunden). Leer = Zeitzone des
+  Servers. IANA-Name, z. B. <code>Europe/Berlin</code> – die Sommer-/Winterzeit
+  wird damit automatisch berücksichtigt.</div>
+<input id="rcTz" class="filterbox" style="max-width:260px" list="tzList"
+       placeholder="z. B. Europe/Berlin" autocomplete="off">
+<datalist id="tzList">
+  <option value="Europe/Berlin"></option><option value="Europe/Vienna"></option>
+  <option value="Europe/Zurich"></option><option value="UTC"></option>
+</datalist>
+<span id="rcNow" style="color:var(--muted);font-size:12px;margin-left:8px"></span>
+<div style="margin-top:12px">
+<button class="btn approve" onclick="saveRefreshCfg()">✓ Intervalle &amp; Zeitzone speichern</button>
 <span id="rcSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 <span id="rcDefault" style="color:var(--muted);font-size:12px;margin-left:8px"></span>
+</div>
 
 <div id="backupSection" style="display:none">
   <div class="sechead">Backup</div>
@@ -5195,19 +5211,28 @@ function loadRefreshCfg() {
     });
     const df = document.getElementById("rcDefault");
     if (df) df.textContent = "(leer = Standard: " + d.default_min + " min)";
+    const tz = document.getElementById("rcTz");
+    if (tz && document.activeElement !== tz) tz.value = d.tz || "";
+    showServerNow(d.now, d.tz);
   }).catch(() => {});
+}
+function showServerNow(now, tz) {
+  const el = document.getElementById("rcNow");
+  if (el) el.textContent = now
+    ? ("aktuell am Server: " + now + (tz ? " (" + tz + ")" : "")) : "";
 }
 function saveRefreshCfg() {
   const val = id => parseInt((document.getElementById(id) || {}).value) || 0;
+  const tz = ((document.getElementById("rcTz") || {}).value || "").trim();
   fetch("api/refreshcfg", { method: "PUT", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ vms: val("rcVms"), network: val("rcNetwork"),
-                             storage: val("rcStorage") }) })
-    .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
-    .then(() => { const ok = document.getElementById("rcSaved");
+                             storage: val("rcStorage"), tz: tz }) })
+    .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+    .then(d => { const ok = document.getElementById("rcSaved");
       if (ok) { ok.textContent = "✓ gespeichert";
-                setTimeout(() => { ok.textContent = ""; }, 2500); } })
-    .catch(e => notify("Speichern fehlgeschlagen" +
-                       (e && e.message ? " (" + e.message + ")" : "") + "."));
+                setTimeout(() => { ok.textContent = ""; }, 2500); }
+      showServerNow(d.now, d.tz); })
+    .catch(e => notify((e && e.error) ? e.error : "Speichern fehlgeschlagen."));
 }
 
 // ---- Statistik: Trends aus der Tages-Historie (selbst gezeichnete SVGs) ----
@@ -6294,6 +6319,10 @@ const I18N = {
   "Netzwerk (Portgruppen)": "Network (port groups)",
   "Storage (Datastores)": "Storage (datastores)",
   "✓ Intervalle speichern": "✓ Save intervals",
+  "✓ Intervalle & Zeitzone speichern": "✓ Save intervals & time zone",
+  "Zeitzone der Anzeige": "Display time zone",
+  "z. B. Europe/Berlin": "e.g. Europe/Berlin",
+  "Alle angezeigten Zeiten (Stand, Log, die Abgleich-Uhrzeiten im ⟳-Menü, Mail-Zeitstempel) erscheinen in dieser Zeitzone. Der Abruf-Takt selbst ist davon unberührt (er rechnet in Sekunden). Leer = Zeitzone des Servers. IANA-Name, z. B. Europe/Berlin – die Sommer-/Winterzeit wird damit automatisch berücksichtigt.": "All displayed times (last update, log, the sync times in the ⟳ menu, mail timestamps) appear in this time zone. The refresh schedule itself is unaffected (it counts in seconds). Empty = the server's time zone. IANA name, e.g. Europe/Berlin – daylight saving is then handled automatically.",
   "Alles aktualisieren": "Refresh everything",
   "Nur Kapazität (VMs)": "Capacity only (VMs)",
   "Nur Netzwerk": "Network only",
@@ -6778,6 +6807,7 @@ const I18N = {
 // Muster mit variablen Teilen (ganzer Text)
 const I18N_RX = [
   [/^Auto-Update in (\d+:\d\d) min$/, "Auto-update in $1 min"],
+  [/^aktuell am Server: /, "server time now: "],
   [/^in Prüfung \((\d+)\/(\d+)\)$/, "in review ($1/$2)"],
   [/^Summe genehmigt \((\d+) von (\d+)\)$/, "Total approved ($1 of $2)"],
   [/^(\d+) Anfragen$/, "$1 requests"], [/^(\d+) Anfrage$/, "$1 request"],
@@ -8682,6 +8712,35 @@ def serve(args, password):
     TIERS = ("vms", "network", "storage")
     refresh_lock = threading.Lock()
 
+    # Anzeige-Zeitzone (frei konfigurierbar in der Verwaltung -> „Datenabruf").
+    # Ein einziges time.tzset() wirkt prozessweit auf ALLE Zeitausgaben
+    # (Stand, Log, Abgleich-Uhrzeiten, Mails) – der Abruf-Takt selbst rechnet
+    # in Sekunden und bleibt davon unberührt. Leer = Zeitzone des Servers.
+    _orig_tz = os.environ.get("TZ")
+    _TZ_RX = re.compile(r"^[A-Za-z0-9_+/.\-]{1,60}$")
+
+    def clean_tz(raw):
+        s = " ".join(str(raw or "").split())
+        return s if _TZ_RX.match(s) else ""
+
+    def tz_available(tz):
+        # leer und UTC gelten immer; sonst muss die Zonendatei existieren
+        # (tzdata; auf RHEL vorhanden, im Docker-Image mitinstalliert).
+        if not tz or tz.upper() == "UTC":
+            return True
+        return os.path.exists("/usr/share/zoneinfo/" + tz)
+
+    def apply_tz(tz):
+        if not hasattr(time, "tzset"):   # nur Unix; Windows ohne tzset
+            return
+        if tz:
+            os.environ["TZ"] = tz
+        elif _orig_tz is not None:
+            os.environ["TZ"] = _orig_tz  # zurück auf den Systemstand
+        else:
+            os.environ.pop("TZ", None)
+        time.tzset()
+
     def _clean_refreshcfg(raw):
         raw = raw if isinstance(raw, dict) else {}
         out = {}
@@ -8690,9 +8749,12 @@ def serve(args, password):
                 out[t] = max(0, min(int(float(raw.get(t) or 0)), 10080))
             except (TypeError, ValueError):
                 out[t] = 0
+        out["tz"] = clean_tz(raw.get("tz"))
         return out
 
     refresh_cfg = _clean_refreshcfg(store.load("refreshcfg", None))
+    if refresh_cfg.get("tz") and tz_available(refresh_cfg["tz"]):
+        apply_tz(refresh_cfg["tz"])     # gespeicherte Anzeige-Zeitzone aktivieren
     tier_last = {t: 0.0 for t in TIERS}    # Epoche des letzten erfolgreichen Laufs
     raw_cache = {}                          # {quelle: rohdaten je Cluster}
 
@@ -9351,7 +9413,9 @@ def serve(args, password):
                     return
                 with refresh_lock:
                     self._json({"tiers": dict(refresh_cfg),
-                                "default_min": max(1, interval // 60)})
+                                "default_min": max(1, interval // 60),
+                                "tz": refresh_cfg.get("tz", ""),
+                                "now": datetime.now().strftime("%d.%m.%Y %H:%M")})
             elif route == "/api/history":
                 # Statistik-Historie (Trends). Sichtbarkeit per Matrix-Feature
                 # „statistik" (Admin/Betrieb ohne Anmeldung sehen immer alles).
@@ -10319,16 +10383,26 @@ def serve(args, password):
                 if not s:
                     return
                 clean = _clean_refreshcfg(self._body() or {})
+                if clean.get("tz") and not tz_available(clean["tz"]):
+                    self._json({"error": "Unbekannte Zeitzone „%s“. Bitte einen "
+                                "IANA-Namen wie „Europe/Berlin“ verwenden "
+                                "(oder leer für die Server-Zeitzone)."
+                                % clean["tz"]}, 400)
+                    return
                 with refresh_lock:
                     refresh_cfg.clear()
                     refresh_cfg.update(clean)
                     store.save("refreshcfg", refresh_cfg)
+                apply_tz(clean.get("tz"))    # Anzeige-Zeitzone sofort übernehmen
                 audit(s["user"], "Abruf-Intervalle geändert",
                       " · ".join(f"{t}: " + (f"{clean[t]} min" if clean[t]
                                              else "Standard")
-                                 for t in TIERS))
+                                 for t in TIERS)
+                      + " · Zeitzone: " + (clean.get("tz") or "Server-Standard"))
                 self._json({"tiers": dict(clean),
-                            "default_min": max(1, interval // 60)})
+                            "default_min": max(1, interval // 60),
+                            "tz": clean.get("tz", ""),
+                            "now": datetime.now().strftime("%d.%m.%Y %H:%M")})
             elif self.path.startswith("/api/storage-request/"):
                 # erledigt/offen umschalten (Admin im UI)
                 s = self._require("admin")

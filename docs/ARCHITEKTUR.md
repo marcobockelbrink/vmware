@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.26. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.27. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -236,6 +236,11 @@ Skript-Ende:
 - **Statistik**: Trend-Charts als **selbst gezeichnete SVGs** (kein CDN) aus
   der Tages-Historie — Ø RAM/vCPU/Disk je VM, VM-Anzahl, Auslastungen,
   Größenklassen-Vergleich; Sichtbarkeit über das Matrix-Feature „statistik".
+- **Anzeige-Zeitzone**: alle Zeitausgaben nutzen `datetime.now()`/
+  `fromtimestamp()` und damit die Prozess-Zeitzone. In der Verwaltung
+  („Datenabruf") frei einstellbar — ein `time.tzset()` mit der gewählten
+  IANA-Zone wirkt prozessweit auf **alle** Ausgaben (Stand, Log, Abgleich,
+  Mails); der Scheduler rechnet in `time.time()`-Sekunden und bleibt unberührt.
 
 ## Datenhaltung
 

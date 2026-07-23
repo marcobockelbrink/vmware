@@ -137,6 +137,10 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   the state of the last run. The ⟳ button additionally offers admins **"refresh
   everything / capacity only / network only / storage only" right now** (per-area
   timestamps shown)
+- **Configurable display time zone** (same page): all displayed times (last
+  update, log, sync times, mail timestamps) appear in the chosen IANA zone
+  (e.g. `Europe/Berlin`, incl. automatic daylight saving); empty = server time
+  zone. The refresh schedule itself counts in seconds and is unaffected
 - **SFTP backup** with rotation, **audit log** (JSONL, rotating), **`/healthz`**
   for monitoring (no sign-in: status, data age, cluster count)
 - **One INI** for all non-secret settings, secrets as `.pass` files; optional **Aria proxy**
