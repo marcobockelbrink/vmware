@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.25. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.26. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -224,6 +224,12 @@ hash). Cross-cutting engines live at the end of the script:
   everything, hence `prefsBody()` always builds the full state.
 - **Deep links**: `#cluster=Name` opens the detail card, the hash is set on
   opening.
+- **Lists**: sortable tables, show/hide columns (prefs) and a **shared
+  paginator** for all large lists (capacity, VLAN, storage, reservations,
+  approvals, archive, log): one core `paginate(id, list)` returns the current
+  page slice and builds the `#pager_<id>` bar (100/200/300 per page);
+  `PAGE_RENDER` binds each table to its render function. Totals compute over
+  the full set, only the display is paged.
 - **Statistics**: trend charts as **self-drawn SVGs** (no CDN) from the
   daily history — avg RAM/vCPU/disk per VM, VM count, utilizations, size-class
   comparison; visibility via the matrix feature "statistik".

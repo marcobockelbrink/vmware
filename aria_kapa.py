@@ -2728,11 +2728,15 @@ def reviewer_doc_html(lang="de", version="", role_label="Reviewer"):
          L("Deine Arbeitsfläche ist der Tab <b>„Genehmigungen“</b>. Dort siehst du "
            "je Antrag den Ziel-Cluster, die angefragten Ressourcen (vCPU, RAM, "
            "Storage), den Fortschritt und – wenn dein Team dran ist – die Knöpfe "
-           "<b>Freigeben</b> und <b>Ablehnen</b>.",
+           "<b>Freigeben</b> und <b>Ablehnen</b>. Über der Tabelle kannst du "
+           "<b>suchen</b>; bei vielen Anträgen <b>blätterst</b> du unten seitenweise "
+           "(100, 200 oder 300 je Seite) – dasselbe gilt für alle großen Listen.",
            "Your workspace is the <b>“Approvals”</b> tab. For each request you see "
            "the target cluster, the requested resources (vCPU, RAM, storage), the "
            "progress and – when your team is up – the <b>Approve</b> and "
-           "<b>Reject</b> buttons.")),
+           "<b>Reject</b> buttons. You can <b>search</b> above the table; with many "
+           "requests you <b>page</b> through them at the bottom (100, 200 or 300 per "
+           "page) – the same applies to all large lists.")),
         (L("Der mehrstufige Prüfprozess", "The multi-stage review process"),
          L("Sind mehrere Teams konfiguriert, durchläuft ein Antrag sie "
            "<b>nacheinander</b>. Der Status wandert von <i>beantragt</i> → "

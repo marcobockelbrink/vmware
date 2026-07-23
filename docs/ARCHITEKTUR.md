@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.25. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.26. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -226,6 +226,13 @@ Skript-Ende:
   darum baut `prefsBody()` immer den Vollzustand.
 - **Deep-Links**: `#cluster=Name` öffnet die Detailkarte, Hash wird beim
   Öffnen gesetzt.
+- **Listen**: sortierbare Tabellen, Spalten ein-/ausblendbar (Prefs) und ein
+  **gemeinsamer Seiten-Blätterer** für alle großen Listen (Kapazität, VLAN,
+  Storage, Reservierungen, Genehmigungen, Archiv, Log): ein Kern
+  `paginate(id, liste)` liefert den Seiten-Ausschnitt und baut die Leiste
+  `#pager_<id>` (100/200/300 je Seite); `PAGE_RENDER` bindet jede Tabelle an
+  ihre Render-Funktion. Summen/Gesamtwerte rechnen über die volle Menge, nur
+  die Anzeige wird geblättert.
 - **Statistik**: Trend-Charts als **selbst gezeichnete SVGs** (kein CDN) aus
   der Tages-Historie — Ø RAM/vCPU/Disk je VM, VM-Anzahl, Auslastungen,
   Größenklassen-Vergleich; Sichtbarkeit über das Matrix-Feature „statistik".
