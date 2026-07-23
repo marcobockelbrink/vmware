@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.26.0"
+VERSION = "2.26.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -2992,6 +2992,10 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   .tab.active { background:var(--card); color:var(--text); }
   .subtabs { margin-bottom:18px; }
   .colmenu { position:relative; display:inline-block; font-size:12px; }
+  /* In der Toolbar sitzt das ▾-Dropdown neben Buttons (.btn hat margin-top:6px);
+     dieselbe Margin gibt beiden im Flex-Layout die gleiche vertikale Ausrichtung,
+     damit das Dropdown nicht tiefer sitzt als der Knopf daneben. */
+  .toolbar .colmenu { margin-top:6px; }
   .colmenu > summary { cursor:pointer; color:var(--muted); list-style:none; user-select:none;
                        border:1px solid var(--line); border-radius:8px; padding:5px 10px; background:var(--field); }
   .colmenu > summary::-webkit-details-marker { display:none; }
