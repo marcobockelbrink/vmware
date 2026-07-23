@@ -1,0 +1,23 @@
+# Aktiviert für JEDEN Dependabot-Pull-Request die native Auto-Merge-Funktion
+# (Squash). Gemergt wird aber ERST, wenn die als Pflicht gesetzten CI-Checks
+# grün sind — dafür sorgt das Ruleset „main: CI-Pflichtchecks (Auto-Merge-Tor)"
+# (Bandit, CodeQL, Semgrep, Trivy). Schlägt ein Scan fehl, bleibt der PR offen
+# und wartet auf eine Person. Läuft nur für den Bot; eigene PRs sind unberührt.
+name: Dependabot Auto-Merge
+
+on: pull_request
+
+permissions:
+  contents: write        # zum Mergen
+  pull-requests: write   # zum Aktivieren von Auto-Merge
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    # Nur für von Dependabot erstellte PRs.
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    steps:
+      - name: Auto-Merge (Squash) aktivieren – merged erst bei grüner CI
+        run: gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
