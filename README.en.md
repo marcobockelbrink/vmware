@@ -7,6 +7,10 @@
 [![Security-Scan](https://github.com/marcobockelbrink/vmware/actions/workflows/security.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/security.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/marcobockelbrink/vmware/badge)](https://securityscorecards.dev/viewer/?uri=github.com/marcobockelbrink/vmware)
 [![Docker-Image (GHCR)](https://github.com/marcobockelbrink/vmware/actions/workflows/docker.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/docker.yml)
+[![Dependency-Review](https://github.com/marcobockelbrink/vmware/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/marcobockelbrink/vmware/actions/workflows/dependency-review.yml)
+![standard library only](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-success)
+
+**▶ [View the live demo](https://marcobockelbrink.github.io/vmware/)** — static snapshot with sample data, no sign-in.
 
 Per-cluster capacity reporting from VMware Aria Operations with a browser-based
 dashboard and a reservation workflow for upcoming capacity requests.

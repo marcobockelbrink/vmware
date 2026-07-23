@@ -18,6 +18,8 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write        # für die Provenance-Signatur (Sigstore, keyless)
+  attestations: write    # Attestation im Repo hinterlegen
 
 jobs:
   build-push:
@@ -44,7 +46,8 @@ jobs:
             type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=raw,value=latest
 
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/docker/Dockerfile
@@ -52,3 +55,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Kryptografischer Herkunftsnachweis (SLSA-Provenance): belegt überprüfbar,
+      # dass das Image aus genau diesem Commit + Workflow gebaut wurde. Landet
+      # signiert (Sigstore, keyless) an der Image-Registry.
+      - name: Build-Provenance attestieren
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/kapa-dashboard
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
