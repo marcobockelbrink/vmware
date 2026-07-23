@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.27.0"
+VERSION = "2.27.1"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -6070,6 +6070,11 @@ function hideCard() {
 document.addEventListener("click", e => {
   if (hc.style.display === "block" && !hc.contains(e.target) && !e.target.closest(".cl"))
     hideCard();
+  // Offene ▾-Dropdowns (Refresh-Menü, Spaltenmenüs) bei Klick außerhalb schließen —
+  // native <details> bleiben sonst offen, bis man erneut auf den Knopf klickt.
+  document.querySelectorAll("details.colmenu[open]").forEach(d => {
+    if (!d.contains(e.target)) d.open = false;
+  });
 }, true);
 
 // ---- Detailkarte per Titel (⠿) frei verschieben ----
