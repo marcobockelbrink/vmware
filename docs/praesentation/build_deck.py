@@ -83,6 +83,24 @@ def picture(s, path, box_x, box_y, box_w, box_h, border=LINE):
     return pic
 
 
+DEMO_URL = "https://marcobockelbrink.github.io/vmware/"
+
+
+def linkline(s, x, y, w, h, segs, align=PP_ALIGN.LEFT):
+    """segs: Liste von (text, size, color, bold, url|None) – url macht den Run
+    zu einem echten, anklickbaren Hyperlink."""
+    tb = s.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = tb.text_frame; tf.word_wrap = True
+    tf.margin_left = 0; tf.margin_right = 0; tf.margin_top = 0; tf.margin_bottom = 0
+    p = tf.paragraphs[0]; p.alignment = align
+    for (t, sz, c, b, url) in segs:
+        r = p.add_run(); r.text = t
+        r.font.size = Pt(sz); r.font.bold = b; r.font.color.rgb = c; r.font.name = FONT
+        if url:
+            r.hyperlink.address = url
+    return tb
+
+
 def footer(s, n):
     rect(s, 0, 7.36, 13.333, 0.14, fill=ACCENT)
     text(s, 11.5, 7.02, 1.7, 0.3,
@@ -126,11 +144,14 @@ text(s, 0.9, 1.5, 11.5, 0.5, [[("KAPAZITÄTS-DASHBOARD FÜR VMWARE ARIA OPERATIO
 text(s, 0.86, 2.15, 11.6, 2.2,
      [[("Kapazität sehen.", 52, WHITE, True)],
       [("Planen. Freigeben.", 52, WHITE, True)]], line_spacing=1.0)
-text(s, 0.9, 4.55, 10.8, 1.0,
+text(s, 0.9, 4.3, 10.8, 1.0,
      [[("Die gesamte virtuelle Landschaft auf einen Blick — in einem einzigen, "
         "abhängigkeitsfreien Werkzeug.", 19, MUTED, False)]], line_spacing=1.15)
-rect(s, 0.92, 5.75, 6.4, 0.02, fill=LINE)
-text(s, 0.9, 5.95, 11.8, 0.8,
+linkline(s, 0.9, 5.2, 11.5, 0.4,
+         [("▶ Live-Demo zum Anklicken:  ", 15, GREEN, True, None),
+          ("marcobockelbrink.github.io/vmware", 15, GREEN, True, DEMO_URL)])
+rect(s, 0.92, 5.78, 6.4, 0.02, fill=LINE)
+text(s, 0.9, 5.98, 11.8, 0.8,
      [[("Von einer KI (Claude · Anthropic) geschrieben", 13.5, ACCENT, True),
        ("  ·  eine Python-Datei ohne Fremd-Abhängigkeiten · zweisprachig DE/EN "
         "· läuft auf jedem RHEL-Host", 13.5, MUTED, False)]],
@@ -254,9 +275,10 @@ for (title, items), (x, y) in zip(cols, positions):
     text(s, x + 0.32, y + 0.22, 5.3, 0.4, [[(title, 16, ACCENT, True)]])
     text(s, x + 0.32, y + 0.72, 5.25, 1.1, bullets(items),
          space_after=7, line_spacing=1.03)
-text(s, 0.6, 6.72, 12, 0.5,
-     [[("Wenig Angriffsfläche. Kein Vendor-Lock-in. Sofort einsatzbereit.",
-        16, GREEN, True)]])
+linkline(s, 0.6, 6.72, 12.1, 0.5,
+         [("▶ Jetzt live ausprobieren:  ", 16, GREEN, True, None),
+          ("marcobockelbrink.github.io/vmware", 16, GREEN, True, DEMO_URL),
+          ("   ·  sofort einsatzbereit.", 16, MUTED, False, None)])
 footer(s, 9)
 
 # ---------------- Folie 10: Feature-Highlights (Sammlung) ----------------
