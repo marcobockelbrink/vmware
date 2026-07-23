@@ -25,6 +25,7 @@ GREEN  = RGBColor(0x34, 0xD3, 0x99)
 FONT   = "Segoe UI"
 
 EMU_IN = 914400
+TOTAL = 10           # Gesamtzahl der Folien (für die Fußzeile)
 prs = Presentation()
 prs.slide_width  = Inches(13.333)
 prs.slide_height = Inches(7.5)
@@ -84,10 +85,15 @@ def picture(s, path, box_x, box_y, box_w, box_h, border=LINE):
 
 def footer(s, n):
     rect(s, 0, 7.36, 13.333, 0.14, fill=ACCENT)
-    text(s, 11.7, 7.02, 1.5, 0.3,
-         [[("%d / 7" % n, 10, MUTED, False)]], align=PP_ALIGN.RIGHT)
+    text(s, 11.5, 7.02, 1.7, 0.3,
+         [[("%d / %d" % (n, TOTAL), 10, MUTED, False)]], align=PP_ALIGN.RIGHT)
     text(s, 0.55, 7.02, 8, 0.3,
          [[("VMware Kapazitätsplanung", 10, MUTED, False)]])
+
+
+def head(s, kicker, title):
+    text(s, 0.6, 0.7, 12, 0.4, [[(kicker, 13, ACCENT, True)]])
+    text(s, 0.6, 1.12, 12.1, 0.9, [[(title, 33, WHITE, True)]])
 
 
 def bullets(items):
@@ -171,11 +177,61 @@ highlight(6, "HIGHLIGHT 5 · REICHWEITE",
            "Storage-Brücke: LUN-Erweiterungen direkt ans Storage-Team (API/CSV)"],
           "06_storage.png", 6)
 
-# ---------------- Folie 7: Abschluss / Nutzenargumente ----------------
+# ---------------- Folie 7: Montage weiterer Funktionen ----------------
 s = slide()
-text(s, 0.6, 0.7, 12, 0.4, [[("FAZIT", 13, ACCENT, True)]])
-text(s, 0.6, 1.12, 12, 1.0, [[("Warum das überzeugt", 34, WHITE, True)]])
+head(s, "MEHR FUNKTIONEN", "Und da steckt noch mehr drin")
+montage = [
+    ("07_vlan.png",       "VLAN-/Netzwerk-Suche",
+     "Portgruppen & VLANs clusterübergreifend finden"),
+    ("08_verwaltung.png", "Rollen, AD-Gruppen & Sichtbarkeit",
+     "feingranular steuerbar, quellenbezogen filterbar"),
+    ("09_apidocs.png",    "Eingebaute REST-API",
+     "für Grafana, CMDB & Automatisierung"),
+]
+cx = 0.6
+for img, cap_t, cap_s in montage:
+    rect(s, cx, 1.75, 3.8, 3.45, fill=CARD, line=LINE, line_w=1.0,
+         shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    picture(s, os.path.join(SHOTS, img), cx + 0.12, 1.87, 3.56, 3.21)
+    text(s, cx + 0.05, 5.34, 3.75, 0.4, [[(cap_t, 14, WHITE, True)]])
+    text(s, cx + 0.05, 5.72, 3.75, 0.7, [[(cap_s, 11.5, MUTED, False)]],
+         line_spacing=1.02)
+    cx += 4.16
+text(s, 0.6, 6.72, 12.1, 0.5,
+     [[("Außerdem: ", 12.5, ACCENT, True),
+       ("Hell-/Dunkel-Modus · SFTP-Backup · Mail-Benachrichtigungen & "
+        "Erinnerungen · CSV-Import/Export · Auto-Freigabe · Reviewer-Handbuch · "
+        "Ankündigungen · konfigurierbare Zeitzone · seitenweises Blättern",
+        12.5, MUTED, False)]], line_spacing=1.05)
+footer(s, 7)
 
+# ---------------- Folie 8: Das Projekt in Zahlen ----------------
+s = slide()
+head(s, "ENTWICKLUNG", "Das Projekt in Zahlen")
+text(s, 0.6, 1.9, 12, 0.5,
+     [[("Von der ersten Zeile bis heute — in rund zwei Wochen aktiver "
+        "Entwicklung.", 14.5, MUTED, False)]])
+stats = [
+    ("105", "Releases"), ("167", "Commits"),
+    ("11.114", "Zeilen Code · 1 Datei"), ("0", "Fremd-Abhängigkeiten"),
+    ("94", "automatisierte Smoke-Checks"), ("5", "Security-Scanner in der CI"),
+    ("620+", "Übersetzungen · DE ↔ EN"), ("11", "Verwaltungs-Bereiche"),
+]
+tw, th, gx = 2.8, 1.9, 0.31
+xs = [0.6 + i * (tw + gx) for i in range(4)]
+for idx, (num, lbl) in enumerate(stats):
+    x = xs[idx % 4]; y = 2.6 if idx < 4 else 4.65
+    rect(s, x, y, tw, th, fill=CARD, line=LINE, line_w=1.0,
+         shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    text(s, x, y + 0.28, tw, 0.95, [[(num, 40, ACCENT, True)]],
+         align=PP_ALIGN.CENTER)
+    text(s, x + 0.15, y + 1.24, tw - 0.3, 0.6, [[(lbl, 12, MUTED, False)]],
+         align=PP_ALIGN.CENTER, line_spacing=1.0)
+footer(s, 8)
+
+# ---------------- Folie 9: Fazit / Nutzenargumente ----------------
+s = slide()
+head(s, "FAZIT", "Warum das überzeugt")
 cols = [
     ("Betrieb & Kosten", [
         "Eine einzige Python-Datei — kein Build, keine Datenbank, keine Fremd-Pakete",
@@ -197,11 +253,57 @@ for (title, items), (x, y) in zip(cols, positions):
     text(s, x + 0.32, y + 0.22, 5.3, 0.4, [[(title, 16, ACCENT, True)]])
     text(s, x + 0.32, y + 0.72, 5.25, 1.1, bullets(items),
          space_after=7, line_spacing=1.03)
-
 text(s, 0.6, 6.72, 12, 0.5,
      [[("Wenig Angriffsfläche. Kein Vendor-Lock-in. Sofort einsatzbereit.",
         16, GREEN, True)]])
-footer(s, 7)
+footer(s, 9)
+
+# ---------------- Folie 10: Feature-Highlights (Sammlung) ----------------
+s = slide()
+head(s, "ALLES AUF EINEN BLICK", "Feature-Highlights")
+groups = [
+    ("Kapazität & Planung", [
+        "Freie vCPU / RAM / Storage je Cluster",
+        "N+1-Reserve & vSAN-Faktor eingerechnet",
+        "Tanzu-/K8s-Namespaces zählen mit",
+        "Workload aus vROps · 2-Jahres-Trends"]),
+    ("Governance & Freigaben", [
+        "Mehrstufiger Genehmigungs-Workflow",
+        "Auto-Freigabe nach Schwellen",
+        "Lückenloses Audit-Log",
+        "Mail-Benachrichtigungen & Erinnerungen"]),
+    ("Netzwerk & Storage", [
+        "VLAN-/Portgruppen-Suche",
+        "LUN-Drilldown inkl. NAA & WWPN",
+        "Storage-Brücke ans Team (API/CSV)",
+        "Mindest-LUN- & Namensfilter"]),
+    ("Rollen & Sicherheit", [
+        "AD-Anmeldung & AD-Gruppen",
+        "Sichtbarkeits-Matrix je Rolle",
+        "vROps-Quellen-Filter je Nutzer",
+        "CSP-Härtung · 5 CI-Scanner"]),
+    ("Integration & Betrieb", [
+        "Multi-vROps + Offline-Import",
+        "Lesende v1-API (Bearer-Token)",
+        "SFTP-Backup · JSON oder SQLite",
+        "/healthz · Proxy-fähig"]),
+    ("Bedienung & Doku", [
+        "Zweisprachig DE/EN · Hell-/Dunkel-Modus",
+        "Sortieren, Blättern, Spalten wählen",
+        "Konfigurierbare Zeitzone",
+        "Reviewer-Handbuch & Architektur-Doku"]),
+]
+bw, bh, gxx = 3.84, 2.45, 0.3
+bxs = [0.6, 0.6 + bw + gxx, 0.6 + 2 * (bw + gxx)]
+for idx, (title, items) in enumerate(groups):
+    x = bxs[idx % 3]; y = 1.95 if idx < 3 else 4.55
+    rect(s, x, y, bw, bh, fill=CARD, line=LINE, line_w=1.0,
+         shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    text(s, x + 0.26, y + 0.18, bw - 0.4, 0.4, [[(title, 13.5, ACCENT, True)]])
+    runs = [[("•  ", 10.5, GREEN, True), (it, 10.5, WHITE, False)] for it in items]
+    text(s, x + 0.26, y + 0.64, bw - 0.46, bh - 0.75, runs,
+         space_after=4.5, line_spacing=1.0)
+footer(s, 10)
 
 prs.save(OUT)
 print("gespeichert:", OUT, "-", len(prs.slides._sldIdLst), "Folien")

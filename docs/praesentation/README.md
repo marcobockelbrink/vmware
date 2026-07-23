@@ -1,7 +1,7 @@
 # Management-Präsentation
 
 **[VMware-Kapazitaetsplanung.pptx](VMware-Kapazitaetsplanung.pptx)** — eine kompakte
-7-Folien-Show (16:9) zum Vorzeigen bei Entscheidern.
+10-Folien-Show (16:9) zum Vorzeigen bei Entscheidern.
 
 ## Inhalt
 
@@ -13,7 +13,10 @@
 | 4 | Highlight 3 · **Governance** — mehrstufiger Freigabe-Workflow |
 | 5 | Highlight 4 · **Prognose** — Trends & Wachstum aus der Historie |
 | 6 | Highlight 5 · **Reichweite** — alle vROps-Quellen, auch isolierte |
-| 7 | Fazit — Betrieb, Sicherheit, Reichweite, Reife |
+| 7 | Mehr Funktionen — VLAN-Suche, Rollen/AD, eingebaute REST-API |
+| 8 | Das Projekt in Zahlen — Releases, Commits, Code, Tests |
+| 9 | Fazit — Betrieb, Sicherheit, Reichweite, Reife |
+| 10 | Feature-Highlights — die komplette Sammlung auf einen Blick |
 
 Die Screenshots stammen aus einer `--sample`-Instanz (Demo-Daten, keine echten
 Systeme) und liegen unter [`screenshots/`](screenshots/).
