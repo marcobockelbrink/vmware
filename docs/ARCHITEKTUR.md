@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.23. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.25. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -200,6 +200,7 @@ Cluster mit dem nächsten Abruf. Das Import-Datum steht als Tag am Cluster;
 |---|---|
 | Anmeldung | LDAP Simple Bind (BER-kodiert → keine Filter-Injection), leeres Passwort abgewiesen, Login-Bremse 5/5 min, Passwort-Detektor im Benutzerfeld |
 | Autorisierung | Rollen serverseitig erzwungen (Anforderer: Team-Sicht, kein Workload, kein „entschieden von"); Reviewer nur, wenn ihr Team dran ist |
+| vROps-Quellen-Filter | Je Benutzer/AD-Gruppe auf bestimmte Quellen einschränkbar (leer = alle); serverseitig in `clusters_for`/`visible_res`/Storage-Anfragen erzwungen, greift damit für Cluster, VLAN, Storage, Reservierungen und Anfragen; mehrere Gruppen-Treffer werden vereinigt |
 | Sessions | `secrets.token_urlsafe(32)`, Cookie `HttpOnly; Secure; SameSite=Lax` (CSRF-Schutz), Pruning beim Login |
 | API | Tokens nur als SHA-256-Hash, `hmac.compare_digest`, Schreibrechte je Token einzeln zuschaltbar, alles auditiert |
 | Ausgabe | Strikte CSP, `json_for_html` gegen `</script>`-Ausbruch, Escaping aller Fremddaten, Vorlagen-Vorschau im sandbox-iframe |

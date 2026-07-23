@@ -84,6 +84,7 @@ Cluster und Kommentare bleiben wie erfasst).
 
 **Rollen, AD & Sicherheit**
 - Rollen **Admin / Reviewer / Anforderer / Auditor**, frei benennbar; team-basierte Sichtbarkeit
+- **vROps-Quellen-Filter je Benutzer/AD-Gruppe** (per Anhaken): eine Zuweisung lässt sich auf bestimmte Quellen beschränken (nichts angehakt = alle Quellen). Der Filter zieht durch **alles**, was der Benutzer sieht — Cluster, VLAN-Suche, Storage, Reservierungen, Kapazitätsanfragen. Mehrere Gruppen-Treffer werden **großzügig vereinigt**; auch Admins sind einschränkbar
 - **AD-Anmeldung** (LDAP, nur Stdlib), **AD-Gruppen** als Berechtigungssubjekt, Empfänger-Mail aus wählbarem **AD-Attribut**; **Sitzungen überleben Dienst-Neustarts** (Release-Update ohne Neu-Anmeldung)
 - Härtung: CSP/Security-Header, `Secure`-Cookies, **Login-Bremse**, Stored-XSS-sicheres Rendering
 - **Passwort-Detektor** in der Anmeldemaske: sieht die Eingabe im Benutzerfeld wie ein

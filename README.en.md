@@ -83,6 +83,7 @@ standard actions**, though (entered names, clusters and comments stay as typed).
 
 **Roles, AD & security**
 - Roles **Admin / Reviewer / Requester / Auditor**, freely renamable; team-based visibility
+- **Per-user/AD-group vROps source filter** (via checkboxes): an assignment can be restricted to specific sources (nothing ticked = all sources). The filter carries through **everything** the user sees — clusters, VLAN search, storage, reservations, capacity requests. Multiple group matches are merged **permissively (union)**; admins are restrictable too
 - **AD sign-in** (LDAP, stdlib only), **AD groups** as permission subjects, recipient mail from a selectable **AD attribute**; **sessions survive service restarts** (release updates without re-login)
 - Hardening: CSP/security headers, `Secure` cookies, **login throttle**, stored-XSS-safe rendering
 - **Password detector** in the sign-in form: if the username input looks like a

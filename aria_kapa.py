@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.24.3"
+VERSION = "2.25.0"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -3333,7 +3333,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
 </div>
 <div class="tablewrap">
 <table class="kt" id="mtable">
-  <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Team</th><th class="nosort">Aktion</th></tr></thead>
+  <thead><tr><th>Typ</th><th>Benutzer / AD-Gruppe</th><th>Rolle</th><th>Team</th><th class="srcCol nosort">vROps-Quellen</th><th class="nosort">Aktion</th></tr></thead>
   <tbody id="mtbody"></tbody>
 </table>
 </div>
@@ -3823,6 +3823,8 @@ const IS_REVIEWER = ROLE === "reviewer";
 const CAN_REQUEST = IS_ADMIN || ROLE === "anforderer";
 // Rollen-Bezeichnungen sind frei wählbar (Verwaltung); Schlüssel bleiben fest.
 let ROLE_NAMES = __ROLENAMES__;
+const SOURCES = __SOURCES__;   // konfigurierte vROps-Quellnamen (leer/1 = Feature inert)
+if (SOURCES.length < 2) { const st = document.createElement('style'); st.textContent = '.srcCol{display:none}'; document.head.appendChild(st); }
 const ROLE_ORDER = ["anforderer", "reviewer", "admin", "auditor"];
 let NOTIFY = __NOTIFY__;    // Mail-Regeln je interner Rolle + Team-Adressen
 let MAIL_VARS = [];        // verfügbare {{var}} für die Mail-Vorlage
@@ -4771,7 +4773,7 @@ function addRole() {
   const rl = document.getElementById("admRole").value;
   const ab = document.getElementById("admDept").value.trim();
   if (!u) return;
-  apiRoles("POST", "", { user: u, role: rl, abteilung: ab, kind: kind })
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab, kind: kind, sources: collectSources("admSrc") })
     .then(d => { ROLES = d; render(); })
     .catch(() => notify("Speichern fehlgeschlagen."));
 }
@@ -4820,7 +4822,7 @@ function cancelEditRole() { EDIT_USER = null; render(); }
 function saveEditRole(u) {
   const rl = document.getElementById("editRole").value;
   const ab = document.getElementById("editDept").value.trim();
-  apiRoles("POST", "", { user: u, role: rl, abteilung: ab })
+  apiRoles("POST", "", { user: u, role: rl, abteilung: ab, sources: collectSources("editSrc") })
     .then(d => { ROLES = d; EDIT_USER = null; render(); })
     .catch(() => notify("Speichern fehlgeschlagen."));
 }
@@ -5557,6 +5559,23 @@ function syncRoleField(pfx, u) {
   document.getElementById(pfx === "adm" ? "admFieldCell" : "editFieldCell").innerHTML =
     roleField(pfx === "adm" ? "admDept" : "editDept", roleEl.value, val, pfx === "edit" ? u : null);
 }
+// vROps-Quellen-Freigabe je Zuweisung (nur bei mehreren Quellen sinnvoll)
+function srcCheckboxes(prefix, selected) {
+  if (SOURCES.length < 2) return "";
+  const sel = new Set(selected || []);
+  return `<div id="${prefix}Box" style="display:flex;flex-wrap:wrap;gap:2px 10px;max-width:280px">`
+    + SOURCES.map(n => `<label style="font-size:12px;white-space:nowrap;cursor:pointer"><input type="checkbox" class="srcCb" value="${esc(n)}"${sel.has(n) ? " checked" : ""}> ${esc(n)}</label>`).join("")
+    + `<span style="color:var(--muted);font-size:11px;flex-basis:100%">nichts angehakt = alle Quellen</span></div>`;
+}
+function collectSources(prefix) {
+  const box = document.getElementById(prefix + "Box");
+  return box ? [...box.querySelectorAll(".srcCb:checked")].map(c => c.value) : [];
+}
+function srcDisplay(sel) {
+  if (SOURCES.length < 2) return "";
+  return (sel && sel.length) ? esc(sel.join(", "))
+    : '<span style="color:var(--muted)">alle</span>';
+}
 function renderAdmTable() {
   const q = ((document.getElementById("admUserFilter") || {}).value || "").trim().toLowerCase();
   const users = Object.keys(ROLES).sort().filter(u =>
@@ -5570,6 +5589,7 @@ function renderAdmTable() {
       return `<tr><td>${esc(typ)}</td><td>${esc(u)}</td>
         <td>${roleSelect("editRole", cur.role, "syncRoleField('edit','" + esc(u) + "')")}</td>
         <td id="editFieldCell">${roleField("editDept", cur.role, cur.abteilung || "", u)}</td>
+        <td class="srcCol">${srcCheckboxes("editSrc", cur.sources || [])}</td>
         <td><button class="btn approve" onclick="saveEditRole('${esc(u)}')">✓ Speichern</button>
             <button class="btn" onclick="cancelEditRole()">Abbrechen</button></td></tr>`;
     }
@@ -5584,6 +5604,7 @@ function renderAdmTable() {
       : `<span title="${r.mail ? 'AD-Mail: ' + esc(r.mail) : 'keine AD-Mail aufgelöst (nur mit --ad-mail-attribute)'}">${esc(u)}${r.mail ? ' <span style="color:var(--muted)" title="AD-Mail: ' + esc(r.mail) + '">✉</span>' : ''}</span>`;
     return `<tr><td>${esc(typ)}</td><td>${mailCell}</td><td>${esc(ROLE_NAMES[r.role] || r.role)}</td>
      <td>${esc(r.abteilung || "–")}${warn}</td>
+     <td class="srcCol">${srcDisplay(r.sources || [])}</td>
      <td>${isGroup ? `<button class="edit" title="Mitglieder der AD-Gruppe im AD nachschlagen" onclick="checkGroup('${esc(u)}')">👥 Mitglieder</button> ` : ""}<button class="edit" title="Rolle/Team bearbeiten" onclick="editRole('${esc(u)}')">✎ Bearbeiten</button>
          <button class="del" title="Zuweisung entfernen" onclick="delRole('${esc(u)}')">✕ Löschen</button></td></tr>`;
   }).join("");
@@ -5595,8 +5616,9 @@ function renderAdmTable() {
          placeholder="benutzer@firma.local oder vorname.nachname"></td>
      <td>${roleSelect("admRole", firstRole, "syncRoleField('adm')")}</td>
      <td id="admFieldCell">${roleField("admDept", firstRole, "", null)}</td>
+     <td class="srcCol">${srcCheckboxes("admSrc", [])}</td>
      <td><button class="btn approve" onclick="addRole()">+ Zuweisen</button></td></tr>` +
-    (rows || `<tr><td colspan="5" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
+    (rows || `<tr><td colspan="6" style="color:var(--muted)">Noch keine Rollen zugewiesen.</td></tr>`);
   reSort("mtable"); renderColMenu("mtable"); applyCols("mtable");
 }
 function admKindSync() {
@@ -6528,7 +6550,9 @@ const I18N = {
 "letzter Kommentar": "last comment", "ausführende Person": "acting person",
 "Zeitpunkt der Mail": "time of the email",
 "aktuell zuständiges Team (bei „Team ist dran“)": "team currently up (for \"team's turn\")",
-"vROps-Quelle": "vROps source", "vCPU-Anzahl": "vCPU count",
+"vROps-Quelle": "vROps source", "vROps-Quellen": "vROps sources",
+"nichts angehakt = alle Quellen": "nothing ticked = all sources",
+"alle Quellen": "all sources", "vCPU-Anzahl": "vCPU count",
 "RAM (inkl. „GB“)": "RAM (incl. \"GB\")", "Storage (inkl. „GB“)": "Storage (incl. \"GB\")",
 "SMTP / Versand (aus der Konfiguration)": "SMTP / delivery (from configuration)",
 // --- Verwaltung: Selektor / Tokens / Backup / Konfiguration ---
@@ -6995,7 +7019,7 @@ def _html_escape(s):
 def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31,
                 failover_hosts=1, userinfo=None, teams=None, rolenames=None,
                 contact="", selector=None, backup=False, notify=None, prefs=None,
-                announce=None, tanzu_mhz=2500, vis=None):
+                announce=None, tanzu_mhz=2500, vis=None, sources=None):
     valid_days = res_ttl - 1 if res_ttl > 0 else 30
     resnote = (f"Neue Reservierungen gelten ab dem Anlagetag für {valid_days} Tage, "
                "zählen erst nach Genehmigung gegen die Kapazität und werden "
@@ -7024,6 +7048,7 @@ def render_html(clusters, cpu_factor, serve_mode=False, updated=None, res_ttl=31
             .replace("__SELECTOR__", json_for_html(selector or []))
             .replace("__BACKUP__", "true" if backup else "false")
             .replace("__ROLENAMES__", json_for_html(rolenames or DEFAULT_ROLE_NAMES))
+            .replace("__SOURCES__", json_for_html(sources or []))
             .replace("__NOTIFY__", json_for_html(notify or DEFAULT_NOTIFY))
             .replace("__PREFS__", json_for_html(prefs or {}))
             .replace("__ANNOUNCE__", json_for_html(announce))
@@ -7413,6 +7438,34 @@ def serve(args, password):
             for k in keys:
                 login_fails.pop(k, None)
 
+    def known_sources():
+        """Bekannte vROps-Quellnamen für die Quellen-Freigabe: aus den
+        konfigurierten [quelle:*]-Sektionen UND den tatsächlich in den Daten
+        vorkommenden Quellen (deckt auch Offline-Importe und die Demo ab).
+        Leer bzw. eine einzige Quelle = Feature inert."""
+        names = {str(sc.get("name")).strip()
+                 for sc in (args.sources or [])
+                 if sc.get("name") and str(sc.get("name")).strip()}
+        names |= {c.get("source") for c in state.get("clusters") or []
+                  if c.get("source")}
+        return sorted(names)
+
+    def clean_sources(raw):
+        """Freigegebene Quellnamen einer Zuweisung -> saubere Liste (Strings
+        getrimmt, dedupliziert). Leer = keine Einschränkung / alle Quellen.
+        Bewusst OHNE Namensvalidierung: ein noch unbekannter Name (Cluster
+        gerade nicht im Datenstand) darf nicht verloren gehen; er trifft dann
+        schlicht keinen Cluster."""
+        if not isinstance(raw, (list, tuple)):
+            return []
+        out, seen = [], set()
+        for x in raw:
+            n = " ".join(str(x or "").split())[:120]
+            if n and n.lower() not in seen:
+                seen.add(n.lower())
+                out.append(n)
+        return out[:30]
+
     def load_roles():
         """Rollen: {benutzer: {role, abteilung}}; alte Form {benutzer: rolle}
         wird beim Laden migriert."""
@@ -7428,7 +7481,8 @@ def serve(args, password):
                     key = str(k) if kind == "group" else str(k).lower()
                     out[key] = {"role": v["role"],
                                 "abteilung": str(v.get("abteilung") or ""),
-                                "kind": kind}
+                                "kind": kind,
+                                "sources": clean_sources(v.get("sources"))}
             return out
         return {}
 
@@ -7489,6 +7543,29 @@ def serve(args, password):
         if best:
             return {"role": best["role"], "abteilung": best.get("abteilung", "")}
         return None
+
+    def effective_sources(user, cns):
+        """Vereinigung der freigegebenen Quellen aus dem Direkt-Eintrag und
+        ALLEN passenden Gruppen-Einträgen. Ein Treffer ohne Einschränkung
+        (leere Liste) => alle Quellen. Rückgabe: Liste (leer = alle)."""
+        cnset = {c.strip().lower() for c in (cns or []) if c and c.strip()}
+        matched = []
+        with roles_lock:
+            de = roles.get(user)
+            if de and de.get("kind", "user") != "group":
+                matched.append(de)
+            for key, e in roles.items():
+                if e.get("kind") == "group" and key.strip().lower() in cnset:
+                    matched.append(e)
+        if not matched:
+            return []
+        allow = set()
+        for e in matched:
+            src = e.get("sources") or []
+            if not src:
+                return []          # ein Treffer = alle -> keine Einschränkung
+            allow.update(src)
+        return sorted(allow)
 
     def has_group_entries():
         with roles_lock:
@@ -8469,17 +8546,38 @@ def serve(args, password):
                          "network": "portgroups", "storage": "datastores",
                          "tags": "tags"}
 
-    def clusters_for(role):
-        """Cluster-Daten je Rolle nach der Sichtbarkeits-Matrix — Sperren
-        gelten im Payload, nicht nur im UI (Zählwerte hostCount/vmCount
-        bleiben immer für die Übersicht)."""
+    def clusters_for(s):
+        """Cluster-Daten je Session: nach Sichtbarkeits-Matrix (Feature-Strip)
+        UND nach den für den Benutzer freigegebenen vROps-Quellen. s ist ein
+        Session-Dict, ein Rollen-String oder None (ohne Anmeldung = alles).
+        Zählwerte hostCount/vmCount bleiben je Cluster für die Übersicht."""
+        if isinstance(s, dict):
+            role, allow = s.get("role"), s.get("sources") or []
+        else:
+            role, allow = s, []
         cl = state["clusters"]
+        if allow:
+            aset = set(allow)
+            cl = [c for c in cl if c.get("source") in aset]
         vis = vis_for(role)
         strip = {key for feat, key in _VIS_CLUSTER_KEYS.items()
                  if not vis.get(feat, True)}
         if strip:
             return [{k: v for k, v in c.items() if k not in strip} for c in cl]
         return cl
+
+    def allowed_sources(s):
+        return set(s.get("sources") or []) if isinstance(s, dict) else set()
+
+    def _src_ok(s, cluster_name, cl_src_map):
+        """Darf die Session diesen Cluster (per Name) sehen? True, wenn keine
+        Quellen-Einschränkung, die Quelle erlaubt ist ODER unbekannt (kein
+        Datenverlust bei Clustern, die gerade nicht im Datenstand sind)."""
+        allow = allowed_sources(s)
+        if not allow:
+            return True
+        src = cl_src_map.get(cluster_name)
+        return src is None or src in allow
 
     def _strip_decided(d):
         """„Entschieden von" entfernen: Namen der Entscheider und der
@@ -8496,15 +8594,19 @@ def serve(args, password):
         ALLE Anfragen (Reviewer/Auditor je nach Sichtbarkeits-Matrix ohne die
         Entscheider-Namen). Nur Anforderer sind auf ihr eigenes Team
         beschränkt – fremde genehmigte bleiben anonymisiert enthalten, damit
-        die freie Kapazität stimmt."""
+        die freie Kapazität stimmt. Zusätzlich nach freigegebenen vROps-Quellen
+        gefiltert (leer = alle)."""
+        cmap = {c.get("name"): c.get("source") for c in state["clusters"]}
+        res_src = [r for r in reservations
+                   if _src_ok(s, r.get("cluster"), cmap)]
         if s["role"] in ("admin", "auditor", "reviewer"):
             show_dec = vis_for(s["role"]).get("decided_by", True)
             return [public_res(r) if show_dec else _strip_decided(public_res(r))
-                    for r in reservations]
+                    for r in res_src]
         show_dec = vis_for(s["role"]).get("decided_by", True)
         team = s.get("abteilung") or ""
         out = []
-        for r in reservations:
+        for r in res_src:
             mine = (team and r.get("abteilung") == team) or r.get("von") == s["user"]
             if mine:
                 d = {k: v for k, v in r.items() if k != "von_mail"}
@@ -8946,7 +9048,7 @@ def serve(args, password):
                 userinfo = ({"user": s["user"], "role": s["role"],
                              "abteilung": s.get("abteilung") or ""}
                             if auth_enabled else None)
-                self._send(render_html(clusters_for(userinfo["role"] if userinfo else None),
+                self._send(render_html(clusters_for(userinfo if userinfo else None),
                                        args.cpu_factor,
                                        serve_mode=True,
                                        updated=state["updated"] or
@@ -8961,14 +9063,15 @@ def serve(args, password):
                                        prefs=user_prefs(s["user"]) if s else {},
                                        announce=public_announce(),
                                        tanzu_mhz=args.tanzu_mhz_per_vcpu,
-                                       vis=vis_for(userinfo["role"] if userinfo else None)),
+                                       vis=vis_for(userinfo["role"] if userinfo else None),
+                                       sources=known_sources()),
                            "text/html; charset=utf-8")
             elif route == "/api/data":
                 s = self._require()
                 if not s:
                     return
                 self._json({"updated": state["updated"],
-                            "clusters": clusters_for(s["role"])})
+                            "clusters": clusters_for(s)})
             elif route == "/api/status":
                 if not self._require():
                     return
@@ -9060,7 +9163,7 @@ def serve(args, password):
                 elif route == "/api/v1/data":
                     # Token = externe Anwendung (Workload ok); Session eines
                     # Anforderers bekommt den Workload wie im UI nicht.
-                    cl = state["clusters"] if tok else clusters_for(s["role"])
+                    cl = state["clusters"] if tok else clusters_for(s)
                     if query.get("format", [""])[0] == "csv":
                         self._send(data_csv(cl, self._lang()),
                                    "text/csv; charset=utf-8")
@@ -9133,12 +9236,17 @@ def serve(args, password):
                                 "roles": list(VIS_ROLES)})
             elif route == "/api/storage-requests":
                 # Storage-Übersicht: für jede angemeldete Rolle sichtbar
-                if not self._require():
+                sess = self._require()
+                if not sess:
                     return
+                cmap = {c.get("name"): c.get("source")
+                        for c in state["clusters"]}
                 with storage_lock:
+                    reqs = [r for r in storage_reqs
+                            if _src_ok(sess, r.get("cluster"), cmap)]
                     self._json({"enabled": storage_cfg["enabled"],
                                 "max_lun_gb": storage_cfg.get("max_lun_gb", 0),
-                                "requests": json.loads(json.dumps(storage_reqs))})
+                                "requests": json.loads(json.dumps(reqs))})
             elif route == "/api/storagecfg":
                 if not self._require("admin"):
                     return
@@ -9342,6 +9450,7 @@ def serve(args, password):
                 login_reset(user)
                 # Rolle: 1) direkt zugewiesen (Verwaltung), 2) über AD-Gruppe,
                 # 3) Standard = Anforderer. Ohne Rolle darf man nur beantragen.
+                cns = []
                 explicit = role_entry(user)
                 source = ""
                 if explicit:
@@ -9378,10 +9487,11 @@ def serve(args, password):
                 now = time.time()
                 for k in [k for k, v in sessions.items() if v["exp"] <= now]:
                     sessions.pop(k, None)
+                allowed_src = effective_sources(user, cns)
                 token = secrets.token_urlsafe(32)
                 sessions[_sess_key(token)] = {"user": user, "role": entry["role"],
                                    "abteilung": entry.get("abteilung") or "",
-                                   "mail": mail_addr,
+                                   "mail": mail_addr, "sources": allowed_src,
                                    "exp": time.time() + session_ttl}
                 save_sessions()
                 secure = "" if args.cookie_insecure else " Secure;"
@@ -9711,16 +9821,20 @@ def serve(args, password):
                        else normalize_user(body.get("user")))
                 role = body.get("role")
                 dept = str(body.get("abteilung") or "").strip()
+                srcs = clean_sources(body.get("sources"))
                 if not key or role not in VALID_ROLES:
                     self._json({"error": "Name/Gruppe und gültige Rolle erforderlich"}, 400)
                     return
                 with roles_lock:
-                    roles[key] = {"role": role, "abteilung": dept, "kind": kind}
+                    roles[key] = {"role": role, "abteilung": dept, "kind": kind,
+                                  "sources": srcs}
                     save_roles()
                 self._json(roles_with_mail())
                 audit(self._session()["user"],
                       "AD-Gruppe zugewiesen" if kind == "group" else "Rolle zugewiesen",
-                      f"{key} -> {role}" + (f" ({dept})" if dept else ""))
+                      f"{key} -> {role}" + (f" ({dept})" if dept else "")
+                      + (f" · Quellen: {', '.join(srcs)}" if srcs
+                         else (" · alle Quellen" if known_sources() else "")))
             elif self.path == "/api/import":
                 # Offline-Quelle importieren/ersetzen (PowerCLI-JSON + Quellname)
                 s = self._require("admin")

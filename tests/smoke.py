@@ -542,6 +542,7 @@ try:
     SESS_TOK = "smoke-session-token-123"
     REV_TOK = "smoke-reviewer-token-456"
     ANF_TOK = "smoke-anforderer-token-789"
+    NORD_TOK = "smoke-nord-token-321"   # nur auf vROps-Quelle RZ-Nord beschränkt
     with open(os.path.join(DATA2, "kapa_sessions.json"), "w") as f:
         json.dump({
             _hl.sha256(SESS_TOK.encode()).hexdigest():
@@ -554,6 +555,10 @@ try:
             _hl.sha256(ANF_TOK.encode()).hexdigest():
                 {"user": "anf@firma.local", "role": "anforderer",
                  "abteilung": "Team Netzwerk", "mail": "",
+                 "exp": time.time() + 3600},
+            _hl.sha256(NORD_TOK.encode()).hexdigest():
+                {"user": "nord@firma.local", "role": "admin",
+                 "abteilung": "", "mail": "", "sources": ["RZ-Nord"],
                  "exp": time.time() + 3600}}, f)
     P2 = free_port()
     proc2 = subprocess.Popen(
@@ -654,6 +659,16 @@ try:
         put_vis({})
         check("Matrix: Statistik für Reviewer abschaltbar (200 -> 403)",
               ok_default == 200 and blocked == 403)
+        # vROps-Quellen-Filter: Admin sieht alle, RZ-Nord-Konto nur RZ-Nord.
+        adm_src = {c.get("source") for c in data_for(SESS_TOK)}
+        nord = data_for(NORD_TOK)
+        nord_src = {c.get("source") for c in nord}
+        nord_names = sorted(c["name"] for c in nord)
+        check("Quellen-Filter: Admin ohne Filter sieht alle vROps-Quellen",
+              adm_src == {"RZ-Nord", "RZ-Sued"})
+        check("Quellen-Filter: RZ-Nord-Konto sieht nur RZ-Nord-Cluster",
+              nord_src == {"RZ-Nord"}
+              and nord_names == ["Cluster-01", "Cluster-02"])
     finally:
         proc2.terminate()
         try:

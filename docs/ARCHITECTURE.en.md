@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.23. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.25. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -199,6 +199,7 @@ with the next refresh. The import date is shown as a tag on the cluster;
 |---|---|
 | Sign-in | LDAP simple bind (BER-encoded → no filter injection), empty password rejected, login throttle 5/5 min, password detector in the username field |
 | Authorization | roles enforced server-side (requesters: team visibility, no workload, no "decided by"); reviewers only when their team is up |
+| vROps source filter | per user/AD group restrictable to specific sources (empty = all); enforced server-side in `clusters_for`/`visible_res`/storage requests, so it applies to clusters, VLAN, storage, reservations and requests; multiple group matches are unioned |
 | Sessions | `secrets.token_urlsafe(32)`, cookie `HttpOnly; Secure; SameSite=Lax` (CSRF protection), pruning on login |
 | API | tokens stored as SHA-256 hash only, `hmac.compare_digest`, write permissions per token individually, everything audited |
 | Output | strict CSP, `json_for_html` against `</script>` breakout, escaping of all foreign data, template preview in a sandboxed iframe |
