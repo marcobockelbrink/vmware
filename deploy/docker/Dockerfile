@@ -18,12 +18,17 @@ LABEL org.opencontainers.image.title="VMware Kapazitätsplanung" \
 # UBI-minimal enthält sie sonst nicht.
 # tzdata ships the zone files so the display time zone configurable in the admin
 # UI (e.g. Europe/Berlin) resolves inside the container; UBI-minimal lacks it.
-RUN microdnf install -y python3 shadow-utils tzdata \
+# python3 + tzdata (für die einstellbare Anzeige-Zeitzone). Den kapa-Benutzer
+# legen wir direkt in /etc/passwd an – das spart das shadow-utils-Paket und
+# macht das Image kleiner. tzdata ships the zone files for the configurable
+# display time zone; the user is added straight to /etc/passwd to avoid the
+# shadow-utils package and keep the image smaller.
+RUN microdnf install -y python3 tzdata \
     && microdnf clean all \
-    && useradd -r -u 1001 -d /opt/kapa -s /sbin/nologin kapa
+    && echo "kapa:x:1001:0:kapa service account:/opt/kapa:/sbin/nologin" >> /etc/passwd
 
 WORKDIR /opt/kapa
-COPY aria_kapa.py /opt/kapa/aria_kapa.py
+COPY --chown=1001:0 aria_kapa.py /opt/kapa/aria_kapa.py
 
 # Daten-Volume. Gruppe 0 + g=u macht das Verzeichnis auch dann beschreibbar,
 # wenn die Runtime eine beliebige UID vergibt (OpenShift-kompatibel).
@@ -36,6 +41,12 @@ RUN mkdir -p /opt/kapa/data \
 USER 1001
 EXPOSE 8080
 VOLUME ["/opt/kapa/data"]
+
+# Health-Check ohne Zusatzpaket (kein curl im Minimal-Image): Python fragt
+# /healthz ab. Kubernetes nutzt eigene Probes; das hilft plain Docker/Podman.
+# Health check without extra packages (no curl in the minimal image).
+HEALTHCHECK --interval=30s --timeout=4s --start-period=40s --retries=3 \
+  CMD ["python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).status==200 else 1)"]
 
 # Im Container an alle Interfaces binden (der Port wird vom Host/Proxy gemappt).
 # Zusätzliche Optionen kommen über CMD und lassen sich beim Start überschreiben.

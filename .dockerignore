@@ -1,0 +1,6 @@
+# Das Image braucht ausschließlich aria_kapa.py (stdlib-only). Alles andere aus
+# dem Build-Kontext ausschließen — schnellere Builds, kleinerer Kontext, kein
+# versehentliches Einschleppen von Docs/Screenshots/Präsentationen/.git.
+# The image only needs aria_kapa.py (stdlib-only); exclude everything else.
+*
+!aria_kapa.py

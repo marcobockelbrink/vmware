@@ -26,7 +26,7 @@ spec:
         fsGroup: 0        # Datenverzeichnis gehört Gruppe 0 (g=u, OpenShift-kompatibel)
       containers:
         - name: kapa
-          image: ghcr.io/marcobockelbrink/kapa-dashboard:2.11
+          image: ghcr.io/marcobockelbrink/kapa-dashboard:2.27.2
           imagePullPolicy: IfNotPresent
           # Härtung (empfohlen, von Trivy geprüft): non-root, kein Privileg-
           # Aufstieg, read-only Root-FS (Schreibpfade sind /opt/kapa/data und
@@ -60,6 +60,15 @@ spec:
               mountPath: /etc/kapa/kapa.ini
               subPath: kapa.ini
               readOnly: true
+          # startupProbe deckt den ersten (evtl. langsameren) Aria-Abruf ab –
+          # bis zu ~2,5 min, bevor liveness übernimmt. /healthz antwortet
+          # bereits, sobald der Server lauscht (unabhängig vom Datenstand).
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /healthz
