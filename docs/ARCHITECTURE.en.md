@@ -2,7 +2,7 @@
 
 > 🇩🇪 [Deutsche Fassung: ARCHITEKTUR.md](ARCHITEKTUR.md)
 >
-> As of v2.27. The diagrams are Mermaid — GitHub renders them right in the
+> As of v2.28. The diagrams are Mermaid — GitHub renders them right in the
 > browser.
 
 ## Guiding idea
@@ -159,6 +159,11 @@ Only the **approved** status counts against free capacity — together with the
 automatically read **Tanzu namespace reservations**. Mails fire per event
 according to the matrix in the administration (created/rejected/approved/
 "team's turn"/reminder), rendered through the **editable HTML template**.
+The same events (plus storage requests and offline import) optionally fire
+**outbound webhooks**: an HTTP POST with JSON, **HMAC-SHA256-signed**
+(`X-Kapa-Signature`), delivered in the background and audited — for ITSM,
+automation (AWX/n8n), pipelines or chat. Webhook secrets (like sessions) are
+deliberately **not in the backup**.
 For reviewers the approvals view links a **reviewer handbook** (its own
 bilingual doc page at `/reviewer-handbuch`).
 

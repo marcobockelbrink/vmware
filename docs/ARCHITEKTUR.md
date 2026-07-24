@@ -2,7 +2,7 @@
 
 > 🇬🇧 [English version: ARCHITECTURE.en.md](ARCHITECTURE.en.md)
 >
-> Stand: v2.27. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
+> Stand: v2.28. Die Schaubilder sind Mermaid-Diagramme — GitHub rendert sie
 > direkt im Browser.
 
 ## Leitidee
@@ -159,6 +159,11 @@ Erst der Status **genehmigt** zählt gegen die freie Kapazität — zusammen mit
 den automatisch gelesenen **Tanzu-Namespace-Reservierungen**. Mails gehen je
 Ereignis nach der Matrix in der Verwaltung (Anlage/Ablehnung/Freigabe/„Team
 ist dran"/Erinnerung), gerendert über die **editierbare HTML-Vorlage**.
+Dieselben Ereignisse (plus Storage-Anfragen und Offline-Import) feuern optional
+**ausgehende Webhooks**: ein HTTP-POST mit JSON, **HMAC-SHA256-signiert**
+(`X-Kapa-Signature`), im Hintergrund zugestellt und auditiert — für ITSM,
+Automatisierung (AWX/n8n), Pipelines oder Chat. Webhook-Secrets liegen (wie die
+Sitzungen) bewusst **nicht im Backup**.
 Für Reviewer verlinkt die Genehmigungs-Ansicht ein **Reviewer-Handbuch**
 (eigene zweisprachige Doku-Seite unter `/reviewer-handbuch`).
 

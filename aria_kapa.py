@@ -18,7 +18,7 @@ Aufruf:
 Benötigt nur die Python-Standardbibliothek (Python 3.8+).
 """
 
-VERSION = "2.27.2"
+VERSION = "2.28.0"
 
 # Interne Rollen-Schlüssel (steuern die Rechte, unveränderlich) und ihre
 # Standard-Bezeichnungen. Die Bezeichnungen lassen sich auf der Verwaltungsseite
@@ -41,6 +41,9 @@ NOTIFY_ROLE_EVENTS = {
     "auditor":    ("created", "rejected", "approved", "team_turn"),
     "reviewer":   ("team_turn", "reminder"),
 }
+# Ausgehende Webhooks: welche Ereignisse einen HTTP-POST auslösen können.
+WEBHOOK_EVENTS = ("created", "approved", "rejected", "team_turn", "reminder",
+                  "storage_requested", "storage_done", "imported")
 # Sichtbarkeits-Matrix: WAS eine Rolle sieht (Admin sieht immer alles).
 # Bewusst nur Sichtbarkeit, keine Rechte — der Workflow bleibt hart verdrahtet.
 VIS_FEATURES = ("workload", "hosts", "vms", "network", "storage", "tags",
@@ -3306,6 +3309,7 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab active" id="atabUsers" onclick="setAdmTab('users')">Benutzer &amp; Rollen</span>
   <span class="tab" id="atabSel" onclick="setAdmTab('sel')">Cluster-Selektor</span>
   <span class="tab" id="atabMail" onclick="setAdmTab('mail')">Mail</span>
+  <span class="tab" id="atabHooks" onclick="setAdmTab('hooks')">Webhooks</span>
   <span class="tab" id="atabAnn" onclick="setAdmTab('ann')">Ankündigung</span>
   <span class="tab" id="atabAuto" onclick="setAdmTab('auto')">Freigabe</span>
   <span class="tab" id="atabVis" onclick="setAdmTab('vis')">Sichtbarkeit</span>
@@ -3314,6 +3318,25 @@ try { var _t = new URLSearchParams(location.search).get("theme")
   <span class="tab" id="atabImp" onclick="setAdmTab('imp')">Import</span>
   <span class="tab" id="atabTok" onclick="setAdmTab('tok')">API-Tokens</span>
   <span class="tab" id="atabConf" onclick="setAdmTab('conf')">Backup &amp; Konfiguration</span>
+</div>
+
+<div id="admGrpHooks" style="display:none">
+<div class="sechead">Webhooks (Ereignisse an externe Systeme)</div>
+<div class="hint" style="color:var(--muted);margin-bottom:10px">
+  Bei einem Ereignis schickt das Dashboard einen <b>HTTP-POST mit JSON</b> an die
+  hinterlegten Ziele — für ITSM (ServiceNow/Jira), Automatisierung (Ansible AWX,
+  n8n), Pipelines (GitLab/GitHub) oder Chat (Slack/Teams). Jeder Payload wird mit
+  dem Secret <b>HMAC-SHA256-signiert</b> (Header <code>X-Kapa-Signature</code>),
+  damit der Empfänger die Echtheit prüfen kann. Secrets werden nie zurück
+  angezeigt und liegen bewusst <b>nicht im Backup</b>.</div>
+<table class="kt" id="whtable" style="margin-bottom:10px">
+  <thead><tr><th>Aktiv</th><th>Ziel-URL</th><th>Ereignisse</th>
+    <th>Secret</th><th>Beschreibung</th><th class="nosort"></th></tr></thead>
+  <tbody id="whbody"></tbody>
+</table>
+<button class="btn" onclick="addWebhook()">+ Webhook hinzufügen</button>
+<button class="btn approve" onclick="saveWebhooks()">✓ Webhooks speichern</button>
+<span id="whSaved" style="color:var(--ok);font-size:12px;margin-left:8px"></span>
 </div>
 
 <div id="admGrpAnn" style="display:none">
@@ -4629,7 +4652,7 @@ function setView(v) {
   } catch (e) {}
   if (v === "stor") loadStorage();
   if (v === "stat") loadHistory();
-  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); loadImports(); loadRefreshCfg(); }
+  if (v === "adm") { loadRoles(); loadTokens(); loadTeams(); loadSelector(); loadRoleNames(); loadNotify(); loadWebhooks(); loadConfig(); loadAnnounce(); loadAutoApprove(); loadVisibility(); loadStorageCfg(); loadNetCfg(); loadImports(); loadRefreshCfg(); }
   if (v === "log") loadLog();
   render();
 }
@@ -5348,6 +5371,75 @@ function renderStats() {
   box.innerHTML = cards.join("");
 }
 
+// ---- Webhooks (Verwaltung -> Webhooks) ----
+const WEBHOOK_EVENTS = [
+  ["created","Anfrage angelegt"],["approved","Anfrage genehmigt"],
+  ["rejected","Anfrage abgelehnt"],["team_turn","Team ist dran"],
+  ["reminder","Erinnerung"],["storage_requested","Storage-Anfrage angelegt"],
+  ["storage_done","Storage-Anfrage erledigt"],["imported","Offline-Quelle importiert"]];
+let WEBHOOKS = [];
+function loadWebhooks() {
+  fetch("api/webhooks").then(r => r.ok ? r.json() : null).then(d => {
+    if (d && Array.isArray(d.endpoints)) { WEBHOOKS = d.endpoints; renderWebhooks(); }
+  }).catch(() => {});
+}
+function whEventsCell(selected) {
+  const sel = new Set(selected || []);
+  return `<div style="display:flex;flex-wrap:wrap;gap:2px 10px;max-width:360px">`
+    + WEBHOOK_EVENTS.map(([k,l]) => `<label style="font-size:12px;white-space:nowrap;cursor:pointer"><input type="checkbox" class="whEv" data-ev="${k}"${sel.has(k)?" checked":""}> ${esc(l)}</label>`).join("")
+    + `</div>`;
+}
+function renderWebhooks() {
+  const tb = document.getElementById("whbody"); if (!tb) return;
+  tb.innerHTML = WEBHOOKS.map(w => `<tr data-wid="${esc(w.id||"")}">
+    <td><input type="checkbox" class="whActive"${w.active!==false?" checked":""}></td>
+    <td><input class="filterbox whUrl" style="width:100%;min-width:210px" value="${esc(w.url||"")}" placeholder="https://…"></td>
+    <td>${whEventsCell(w.events)}</td>
+    <td><input class="filterbox whSecret" type="password" autocomplete="new-password" style="width:150px" placeholder="${w.has_secret?"•••• (gesetzt)":"optional"}"></td>
+    <td><input class="filterbox whDesc" style="width:130px" value="${esc(w.desc||"")}" placeholder="z. B. AWX"></td>
+    <td style="white-space:nowrap"><button class="btn" onclick="testWebhook(this)">Test</button> <button class="del" title="Entfernen" onclick="this.closest('tr').remove()">✕</button></td>
+  </tr>`).join("") || `<tr><td colspan="6" style="color:var(--muted)">Noch kein Webhook konfiguriert.</td></tr>`;
+}
+function addWebhook() {
+  WEBHOOKS = collectWebhooks();
+  WEBHOOKS.push({ id:"", url:"", events:[], active:true, desc:"", has_secret:false });
+  renderWebhooks();
+}
+function collectWebhooks() {
+  return [...document.querySelectorAll("#whbody tr[data-wid]")].map(tr => {
+    const url = ((tr.querySelector(".whUrl")||{}).value || "").trim();
+    if (!url) return null;
+    return { id: tr.getAttribute("data-wid") || "", url: url,
+      active: (tr.querySelector(".whActive")||{}).checked !== false,
+      secret: (tr.querySelector(".whSecret")||{}).value || "",
+      desc: (tr.querySelector(".whDesc")||{}).value || "",
+      has_secret: tr.querySelector(".whSecret") && tr.querySelector(".whSecret").placeholder.indexOf("gesetzt") >= 0,
+      events: [...tr.querySelectorAll(".whEv:checked")].map(c => c.getAttribute("data-ev")) };
+  }).filter(Boolean);
+}
+function saveWebhooks() {
+  fetch("api/webhooks", { method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ endpoints: collectWebhooks() }) })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => { if (d.endpoints) { WEBHOOKS = d.endpoints; renderWebhooks(); }
+      const ok = document.getElementById("whSaved");
+      if (ok) { ok.textContent = "✓ gespeichert"; setTimeout(()=>{ok.textContent="";},2500); } })
+    .catch(() => notify("Speichern fehlgeschlagen."));
+}
+function testWebhook(btn) {
+  const tr = btn.closest("tr");
+  const url = ((tr.querySelector(".whUrl")||{}).value || "").trim();
+  if (!url) return notify("Bitte zuerst eine Ziel-URL eintragen.");
+  const secret = (tr.querySelector(".whSecret")||{}).value || "";
+  btn.disabled = true; const old = btn.textContent; btn.textContent = "…";
+  fetch("api/webhooks/test", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ url: url, secret: secret }) })
+    .then(r => r.json())
+    .then(d => notify(d.ok ? ("✓ Test gesendet – Empfänger antwortete mit HTTP " + d.status)
+                            : ("Test fehlgeschlagen: " + (d.error || "unbekannt"))))
+    .catch(() => notify("Test fehlgeschlagen (Netzwerk/Server)."))
+    .then(() => { btn.disabled = false; btn.textContent = old; });
+}
 // ---- Offline-Quellen (Verwaltung -> Import) ----
 let IMPORTS = [];
 function loadImports() {
@@ -5505,10 +5597,10 @@ let ADM_TAB = "users";
 function setAdmTab(t) {
   ADM_TAB = t;
   const tabs = { users: "atabUsers", sel: "atabSel", mail: "atabMail",
-                 ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
+                 hooks: "atabHooks", ann: "atabAnn", auto: "atabAuto", vis: "atabVis",
                  storcfg: "atabStorCfg", net: "atabNet", imp: "atabImp", tok: "atabTok", conf: "atabConf" };
   const grps = { users: "admGrpUsers", sel: "admGrpSel", mail: "admGrpMail",
-                 ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
+                 hooks: "admGrpHooks", ann: "admGrpAnn", auto: "admGrpAuto", vis: "admGrpVis",
                  storcfg: "admGrpStorCfg", net: "admGrpNet", imp: "admGrpImp", tok: "admGrpTok", conf: "admGrpConf" };
   for (const k in tabs) {
     const tb = document.getElementById(tabs[k]); if (tb) tb.classList.toggle("active", k === t);
@@ -6330,6 +6422,18 @@ const I18N = {
   "Storage (Datastores)": "Storage (datastores)",
   "✓ Intervalle speichern": "✓ Save intervals",
   "✓ Intervalle & Zeitzone speichern": "✓ Save intervals & time zone",
+  "Webhooks (Ereignisse an externe Systeme)": "Webhooks (events to external systems)",
+  "Bei einem Ereignis schickt das Dashboard einen HTTP-POST mit JSON an die hinterlegten Ziele — für ITSM (ServiceNow/Jira), Automatisierung (Ansible AWX, n8n), Pipelines (GitLab/GitHub) oder Chat (Slack/Teams). Jeder Payload wird mit dem Secret HMAC-SHA256-signiert (Header X-Kapa-Signature), damit der Empfänger die Echtheit prüfen kann. Secrets werden nie zurück angezeigt und liegen bewusst nicht im Backup.":
+    "On an event the dashboard sends an HTTP POST with JSON to the configured targets — for ITSM (ServiceNow/Jira), automation (Ansible AWX, n8n), pipelines (GitLab/GitHub) or chat (Slack/Teams). Each payload is HMAC-SHA256-signed with the secret (header X-Kapa-Signature) so the receiver can verify authenticity. Secrets are never shown back and are deliberately not in the backup.",
+  "Aktiv": "Active", "Ziel-URL": "Target URL", "Ereignisse": "Events",
+  "+ Webhook hinzufügen": "+ Add webhook", "✓ Webhooks speichern": "✓ Save webhooks",
+  "Anfrage angelegt": "Request created", "Anfrage genehmigt": "Request approved",
+  "Anfrage abgelehnt": "Request rejected",
+  "Storage-Anfrage angelegt": "Storage request created",
+  "Storage-Anfrage erledigt": "Storage request done",
+  "Offline-Quelle importiert": "Offline source imported",
+  "Noch kein Webhook konfiguriert.": "No webhook configured yet.",
+  "z. B. AWX": "e.g. AWX",
   "Zeitzone der Anzeige": "Display time zone",
   "z. B. Europe/Berlin": "e.g. Europe/Berlin",
   "Alle angezeigten Zeiten (Stand, Log, die Abgleich-Uhrzeiten im ⟳-Menü, Mail-Zeitstempel) erscheinen in dieser Zeitzone. Der Abruf-Takt selbst ist davon unberührt (er rechnet in Sekunden). Leer = Zeitzone des Servers. IANA-Name, z. B. Europe/Berlin – die Sommer-/Winterzeit wird damit automatisch berücksichtigt.": "All displayed times (last update, log, the sync times in the ⟳ menu, mail timestamps) appear in this time zone. The refresh schedule itself is unaffected (it counts in seconds). Empty = the server's time zone. IANA name, e.g. Europe/Berlin – daylight saving is then handled automatically.",
@@ -7181,7 +7285,8 @@ def serve(args, password):
     _coll_paths = {"res": args.res_file, "roles": args.roles_file,
                    "teams": args.teams_file, "selector": args.selector_file,
                    "rolenames": args.rolenames_file, "tokens": args.tokens_file,
-                   "notify": args.notify_file, "prefs": args.prefs_file,
+                   "notify": args.notify_file, "webhooks": args.webhooks_file,
+                   "prefs": args.prefs_file,
                    "announce": args.announce_file,
                    "autoapprove": args.autoapprove_file,
                    "sessions": args.sessions_file,
@@ -7197,7 +7302,7 @@ def serve(args, password):
         # Einmal-Migration: vorhandene JSON-Daten in die (leere) DB übernehmen
         _MISS = object()
         for _n in ("roles", "teams", "selector", "rolenames", "tokens", "notify",
-                   "prefs", "announce", "autoapprove", "visibility",
+                   "webhooks", "prefs", "announce", "autoapprove", "visibility",
                    "storagecfg", "storagereq"):
             p = _coll_paths[_n]
             if os.path.exists(p) and store.load(_n, _MISS) is _MISS:
@@ -7417,6 +7522,90 @@ def serve(args, password):
         store.save("notify", notify_cfg)
 
     notify_cfg = load_notify()
+
+    # ---- Ausgehende Webhooks (Ereignisse an externe Systeme/Pipelines) ----
+    # Bei einem Ereignis (Reservierungs-Lebenszyklus, Storage-Anfragen, Import)
+    # schickt das Dashboard einen HTTP-POST mit signiertem JSON an konfigurierte
+    # Ziele. Nur Admins pflegen die Ziele; die Secrets liegen bewusst NICHT im
+    # Backup (wie kapa_sessions.json). Die Signatur (HMAC-SHA256) erlaubt dem
+    # Empfänger, die Echtheit zu prüfen.
+    webhooks_lock = threading.Lock()
+
+    def _clean_webhooks(raw):
+        if isinstance(raw, dict):
+            raw = raw.get("endpoints")
+        if not isinstance(raw, list):
+            return []
+        oneline = lambda v, n: " ".join(str(v or "").split())[:n]
+        out, seen = [], set()
+        for e in raw[:50]:
+            if not isinstance(e, dict):
+                continue
+            url = oneline(e.get("url"), 400)
+            if not re.match(r"^https?://", url, re.I):
+                continue
+            wid = re.sub(r"[^A-Za-z0-9]", "", str(e.get("id") or ""))[:16] \
+                or uuid.uuid4().hex[:8]
+            if wid in seen:
+                wid = uuid.uuid4().hex[:8]
+            seen.add(wid)
+            evs = [x for x in (e.get("events") or []) if x in WEBHOOK_EVENTS]
+            out.append({"id": wid, "url": url,
+                        "secret": str(e.get("secret") or "")[:200],
+                        "events": evs, "active": bool(e.get("active", True)),
+                        "desc": oneline(e.get("desc"), 80)})
+        return out
+
+    webhook_cfg = _clean_webhooks(store.load("webhooks", None))
+
+    def save_webhooks():
+        with webhooks_lock:
+            store.save("webhooks", {"endpoints": webhook_cfg})
+
+    def _deliver_webhook(ep, event, body):
+        headers = {"Content-Type": "application/json; charset=utf-8",
+                   "User-Agent": "kapa-dashboard/" + VERSION,
+                   "X-Kapa-Event": event,
+                   "X-Kapa-Delivery": uuid.uuid4().hex}
+        if ep.get("secret"):
+            sig = hmac.new(ep["secret"].encode("utf-8"), body,
+                           hashlib.sha256).hexdigest()
+            headers["X-Kapa-Signature"] = "sha256=" + sig
+        last = ""
+        for attempt in (1, 2):
+            try:
+                req = urllib.request.Request(ep["url"], data=body,
+                                             method="POST", headers=headers)
+                # nosec B310: Schema in _clean_webhooks auf http/https begrenzt
+                with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310
+                    code = resp.status
+                audit(None, "Webhook gesendet",
+                      f"{event} → {ep['url']} (HTTP {code})")
+                return
+            except Exception as ex:
+                last = str(ex)
+                if attempt == 1:
+                    time.sleep(1)
+        audit(None, "Webhook fehlgeschlagen", f"{event} → {ep['url']}: {last}")
+
+    def fire_webhooks(event, payload):
+        """Ereignis an alle passenden Ziele senden (Hintergrund, nicht blockierend)."""
+        if event not in WEBHOOK_EVENTS:
+            return
+        with webhooks_lock:
+            targets = [dict(e) for e in webhook_cfg
+                       if e.get("active") and event in (e.get("events") or [])]
+        if not targets:
+            return
+        doc = {"event": event,
+               "at": datetime.now().isoformat(timespec="seconds")}
+        doc.update(payload)
+        body = json.dumps(doc, ensure_ascii=False).encode("utf-8")
+
+        def worker():
+            for ep in targets:
+                _deliver_webhook(ep, event, body)
+        threading.Thread(target=worker, daemon=True).start()
 
     # ---- Persönliche UI-Einstellungen je Benutzer (z. B. Tabellenspalten) ----
     prefs_lock = threading.Lock()
@@ -8121,7 +8310,11 @@ def serve(args, password):
         return to
 
     def mail_event(kind, r, team=None, actor="", days=None):
-        """Ereignis-Mail nach den Mail-Regeln im Hintergrund verschicken."""
+        """Ereignis-Mail nach den Mail-Regeln im Hintergrund verschicken.
+        Feuert zuerst die ausgehenden Webhooks – unabhängig von der Mail-
+        Konfiguration."""
+        fire_webhooks(kind, {"actor": actor or "System", "team": team or "",
+                             "reservation": public_res(r)})
         if not args.smtp_server:
             return
         to = mail_recipients(kind, r, team)
@@ -9354,6 +9547,15 @@ def serve(args, password):
                                 "default_template": DEFAULT_MAIL_TEMPLATE,
                                 "default_subject": DEFAULT_MAIL_SUBJECT,
                                 "vars": MAIL_VARS})
+            elif route == "/api/webhooks":
+                if not self._require("admin"):
+                    return
+                # Secret NIE im Klartext an den Browser – nur ob eins gesetzt ist.
+                with webhooks_lock:
+                    eps = [{"id": e["id"], "url": e["url"], "events": e["events"],
+                            "active": e["active"], "desc": e["desc"],
+                            "has_secret": bool(e["secret"])} for e in webhook_cfg]
+                self._json({"endpoints": eps, "events": list(WEBHOOK_EVENTS)})
             elif route == "/api/announce":
                 if not self._require("admin"):
                     return
@@ -9544,7 +9746,46 @@ def serve(args, password):
                 audit(s["user"], "Storage-Erweiterung angefragt",
                       f"{req['cluster']} · {detail}"
                       + (f" (zu {req['res_name']})" if req["res_name"] else ""))
+                fire_webhooks("storage_requested",
+                              {"actor": s["user"] or "", "request": req})
                 self._json({"request": req}, 201)
+            elif self.path == "/api/webhooks/test":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body() or {}
+                url = " ".join(str(body.get("url") or "").split())[:400]
+                if not re.match(r"^https?://", url, re.I):
+                    self._json({"error": "Gültige http(s)-URL nötig"}, 400)
+                    return
+                secret = str(body.get("secret") or "")[:200]
+                if not secret:      # bekanntes Ziel ohne neues Secret -> gespeichertes
+                    with webhooks_lock:
+                        for e in webhook_cfg:
+                            if e["url"] == url and e.get("secret"):
+                                secret = e["secret"]
+                                break
+                payload = {"event": "test",
+                           "at": datetime.now().isoformat(timespec="seconds"),
+                           "message": "Test-Webhook vom Kapa-Dashboard",
+                           "by": s["user"] or ""}
+                bodyb = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                headers = {"Content-Type": "application/json; charset=utf-8",
+                           "User-Agent": "kapa-dashboard/" + VERSION,
+                           "X-Kapa-Event": "test",
+                           "X-Kapa-Delivery": uuid.uuid4().hex}
+                if secret:
+                    headers["X-Kapa-Signature"] = "sha256=" + hmac.new(
+                        secret.encode("utf-8"), bodyb, hashlib.sha256).hexdigest()
+                try:
+                    req = urllib.request.Request(url, data=bodyb, method="POST",
+                                                 headers=headers)
+                    with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310
+                        code = resp.status
+                    audit(s["user"], "Webhook-Test gesendet", f"{url} (HTTP {code})")
+                    self._json({"ok": True, "status": code})
+                except Exception as ex:
+                    self._json({"ok": False, "error": str(ex)[:200]})
             elif self.path == "/api/login":
                 if not auth_enabled:
                     self.send_error(404)
@@ -9768,6 +10009,7 @@ def serve(args, password):
                     result = dict(req)
                 audit(actor, "Storage-Erweiterung erledigt (API)",
                       req.get("lun_name") or f"neue LUN ({req.get('cluster')})")
+                fire_webhooks("storage_done", {"actor": actor, "request": result})
                 self._json({"request": result})
             elif self.path == "/api/reservations":
                 s = self._require("admin", "anforderer")
@@ -10009,6 +10251,10 @@ def serve(args, password):
                       + (" – ersetzt" if replaced else ""))
                 if not state["refreshing"]:
                     threading.Thread(target=do_refresh, daemon=True).start()
+                fire_webhooks("imported",
+                              {"actor": s["user"] or "", "source": src,
+                               "clusters": len(cleaned), "skipped": skipped,
+                               "replaced": replaced})
                 self._json({"ok": True, "source": src,
                             "clusters": len(cleaned), "skipped": skipped}, 201)
             elif self.path == "/api/import/reservations":
@@ -10308,6 +10554,29 @@ def serve(args, password):
                 audit(s["user"], "Rollen-Bezeichnungen geändert",
                       ", ".join(f"{k}={result[k]}" for k in ROLE_KEYS))
                 self._json({"rolenames": result})
+            elif self.path == "/api/webhooks":
+                s = self._require("admin")
+                if not s:
+                    return
+                body = self._body() or {}
+                raw = body.get("endpoints") if isinstance(body, dict) else body
+                cleaned = _clean_webhooks(raw)
+                with webhooks_lock:
+                    # Leeres Secret = unverändert -> gespeichertes Secret behalten.
+                    old = {e["id"]: e.get("secret", "") for e in webhook_cfg}
+                    for e in cleaned:
+                        if not e["secret"] and e["id"] in old:
+                            e["secret"] = old[e["id"]]
+                    webhook_cfg[:] = cleaned
+                save_webhooks()
+                audit(s["user"], "Webhooks geändert",
+                      (f"{len(cleaned)} Ziel(e): "
+                       + ", ".join(e["url"] for e in cleaned)) if cleaned
+                      else "keine Ziele")
+                eps = [{"id": e["id"], "url": e["url"], "events": e["events"],
+                        "active": e["active"], "desc": e["desc"],
+                        "has_secret": bool(e["secret"])} for e in cleaned]
+                self._json({"endpoints": eps})
             elif self.path == "/api/notify":
                 s = self._require("admin")
                 if not s:
@@ -10449,10 +10718,14 @@ def serve(args, password):
                     req["done_by"] = (s["user"] or "") if done else ""
                     req["done_on"] = datetime.now().date().isoformat() if done else ""
                     save_storage_reqs()
+                    reqsnap = dict(req)
                     result = json.loads(json.dumps(storage_reqs))
                 audit(s["user"], "Storage-Erweiterung " +
                       ("erledigt" if done else "wieder offen"),
                       req.get("lun_name") or f"neue LUN ({req.get('cluster')})")
+                if done:
+                    fire_webhooks("storage_done",
+                                  {"actor": s["user"] or "", "request": reqsnap})
                 self._json({"requests": result})
             elif self.path == "/api/autoapprove":
                 s = self._require("admin")
@@ -10940,6 +11213,10 @@ def main():
                     help="Datei mit den Mail-Benachrichtigungsregeln je Rolle "
                          "(Standard: data/kapa_mail.json); Pflege über die "
                          "Verwaltungsseite")
+    ap.add_argument("--webhooks-file", default="kapa_webhooks.json",
+                    help="Datei mit den ausgehenden Webhook-Zielen (Standard: "
+                         "data/kapa_webhooks.json); Pflege über die "
+                         "Verwaltungsseite. Enthält Secrets → NICHT im Backup.")
     ap.add_argument("--prefs-file", default="kapa_prefs.json",
                     help="Datei mit den persönlichen UI-Einstellungen je Benutzer "
                          "(z. B. ein-/ausgeblendete Tabellenspalten; "
@@ -11000,6 +11277,7 @@ def main():
     args.db_file = data_path(args.db_file, base)
     args.rolenames_file = data_path(args.rolenames_file, base)
     args.notify_file = data_path(args.notify_file, base)
+    args.webhooks_file = data_path(args.webhooks_file, base)
     args.prefs_file = data_path(args.prefs_file, base)
     args.announce_file = data_path(args.announce_file, base)
     args.autoapprove_file = data_path(args.autoapprove_file, base)

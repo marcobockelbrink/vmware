@@ -108,6 +108,15 @@ Cluster und Kommentare bleiben wie erfasst).
   `{{platzhaltern}}` (Klick fügt sie an der Cursor-Position ein), **Live-Vorschau** mit
   Beispieldaten in einem sandboxed iframe, „Standard einsetzen"; leer = eingebaute Vorlage
 
+**Ausgehende Webhooks** (Verwaltung → Webhooks)
+- Ereignisse (Anlage/Freigabe/Ablehnung/„Team ist dran"/Erinnerung, Storage-Anfragen,
+  Offline-Import) lösen einen **HTTP-POST mit JSON** an frei konfigurierbare Ziele aus —
+  für **ITSM** (ServiceNow/Jira), **Automatisierung** (Ansible AWX, n8n), **Pipelines**
+  (GitLab/GitHub) oder **Chat** (Slack/Teams)
+- Jeder Payload **HMAC-SHA256-signiert** (`X-Kapa-Signature`) → der Empfänger prüft die
+  Echtheit; **Test-Knopf** je Ziel; nicht blockierend, auditiert; Secrets nie zurück­gezeigt
+  und **nicht im Backup**. Details: [`config/WEBHOOKS.md`](config/WEBHOOKS.md)
+
 **Verwaltung (Admin-UI)**
 - Unter-Reiter **Benutzer & Rollen / Cluster-Selektor / Mail / Ankündigung / Freigabe / Sichtbarkeit / Storage / Netzwerk / Import / API-Tokens / Backup & Konfiguration**
 - **Offline-Quellen (Cluster-Import)**: Bereiche **ohne Netzanbindung** an ein

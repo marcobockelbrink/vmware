@@ -349,6 +349,56 @@ try:
     for s in ("Smoke-Solo", "Smoke-Mix", "Smoke-One"):
         req("DELETE", "/api/import/" + s)
 
+    print("== Ausgehende Webhooks (HMAC-signiert) ==")
+    import http.server as _hs
+    import threading as _th
+    import hmac as _hm
+    import hashlib as _hh
+    WH_RECV = []
+    WH_SECRET = "smoke-wh-secret"
+
+    class _WH(_hs.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            WH_RECV.append({"sig": self.headers.get("X-Kapa-Signature", ""),
+                            "event": self.headers.get("X-Kapa-Event", ""),
+                            "body": self.rfile.read(n)})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+    wh_port = free_port()
+    wh_srv = _hs.ThreadingHTTPServer(("127.0.0.1", wh_port), _WH)
+    _th.Thread(target=wh_srv.serve_forever, daemon=True).start()
+    try:
+        hook = f"http://127.0.0.1:{wh_port}/hook"
+        st, wr, _ = req("PUT", "/api/webhooks", {"endpoints": [{
+            "url": hook, "secret": WH_SECRET, "events": ["created"],
+            "active": True, "desc": "smoke"}]})
+        check("Webhook gespeichert + Secret maskiert (kein Klartext im GET)",
+              st == 200 and wr["endpoints"][0]["has_secret"]
+              and "secret" not in wr["endpoints"][0])
+        st, tp, _ = req("POST", "/api/webhooks/test", {"url": hook, "secret": WH_SECRET})
+        check("Webhook-Test gesendet (Empfänger HTTP 200)",
+              st == 200 and tp.get("ok") and tp.get("status") == 200)
+        req("POST", "/api/reservations",
+            {"name": "WH", "cluster": "Cluster-01", "vcpu": 1, "ram_gb": 1})
+        t0 = time.time()
+        while time.time() - t0 < 6 and not any(r["event"] == "created" for r in WH_RECV):
+            time.sleep(0.2)
+        created = [r for r in WH_RECV if r["event"] == "created"]
+        check("created-Event beim Empfänger angekommen", len(created) >= 1)
+        sig_ok = any(_hm.compare_digest(
+            r["sig"], "sha256=" + _hm.new(WH_SECRET.encode(), r["body"],
+                                          _hh.sha256).hexdigest()) for r in created)
+        check("HMAC-SHA256-Signatur des Payloads gültig", sig_ok)
+    finally:
+        wh_srv.shutdown()
+        req("PUT", "/api/webhooks", {"endpoints": []})
+
     print("== Statistik-Historie ==")
     st, hist, _ = req("GET", "/api/history?days=730")
     hdays = sorted((hist or {}).get("days") or {})

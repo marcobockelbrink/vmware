@@ -107,6 +107,15 @@ standard actions**, though (entered names, clusters and comments stay as typed).
   `{{placeholders}}` (click inserts them at the cursor position), **live preview** with
   sample data in a sandboxed iframe, "insert default"; empty = built-in template
 
+**Outbound webhooks** (Administration → Webhooks)
+- Events (created/approved/rejected/"team's turn"/reminder, storage requests, offline
+  import) trigger an **HTTP POST with JSON** to configurable targets — for **ITSM**
+  (ServiceNow/Jira), **automation** (Ansible AWX, n8n), **pipelines** (GitLab/GitHub) or
+  **chat** (Slack/Teams)
+- Every payload is **HMAC-SHA256-signed** (`X-Kapa-Signature`) so the receiver can verify
+  authenticity; per-target **test button**; non-blocking, audited; secrets never shown back
+  and **not in the backup**. Details: [`config/WEBHOOKS.en.md`](config/WEBHOOKS.en.md)
+
 **Administration (admin UI)**
 - Sub-tabs **Users & roles / Cluster selector / Mail / Announcement / Approval / Visibility / Storage / Network / Import / API tokens / Backup & configuration**
 - **Offline sources (cluster import)**: areas **without network access** to a
